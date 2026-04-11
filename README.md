@@ -45,7 +45,7 @@ All knobs live in environment variables (or `.env`):
 | `TELEGRAM_BOT_TOKEN` | yes | — | from @BotFather |
 | `PYCLAUDIR_OWNER_ID` | yes | — | your numeric Telegram user id |
 | `PYCLAUDIR_ALLOWED_CHATS` | no | empty | comma-separated chat ids; empty = owner DMs only |
-| `PYCLAUDIR_DATA_DIR` | no | `./data` | SQLite + memories live here |
+| `PYCLAUDIR_DATA_DIR` | no | `./data` | SQLite, memories, raw CC logs all live here |
 | `PYCLAUDIR_MODEL` | no | `claude-opus-4-6` | passed to `--model` |
 | `PYCLAUDIR_DEBOUNCE_MS` | no | `1000` | message coalescing window |
 | `PYCLAUDIR_RATE_LIMIT_PER_MIN` | no | `20` | per-chat outbound cap |
@@ -109,10 +109,196 @@ Restart `python -m pyclaudir`. The tool is live.
 
 ## Memory
 
-`data/memories/*.md` are read-only notes the **operator** curates by hand.
-Nodira can list them with `list_memories` and read them with `read_memory`,
-but cannot write to them in this version. If you want her to "know" something
-durable, drop a file in `data/memories/` while she's running.
+`data/memories/*.md` is Nodira's working memory. She has four tools:
+
+- `list_memories` — see what files exist
+- `read_memory` — read a file (truncates at 64 KiB)
+- `write_memory` — create or overwrite a file (max 64 KiB per file)
+- `append_memory` — extend an existing file
+
+Writes are guarded by a **read-before-write rule**: before overwriting or
+appending to a file that already exists, Nodira must first read it in the
+same session. Brand-new files are exempt. The "read paths" set lives in
+the `MemoryStore` instance and resets on every restart, so a fresh process
+must re-read before mutating. This stops her from blindly destroying
+operator-curated notes whose contents she never observed.
+
+There is **no delete tool** by design. If she wants to "forget" something
+she has to overwrite the file. Actually removing files is an operator
+action — `rm data/memories/<file>` from the host.
+
+You can also seed memory yourself by dropping markdown files into
+`data/memories/` while she's running. She'll discover them on the next
+`list_memories` call.
+
+## Monitoring & observability
+
+Pyclaudir gives you **four complementary windows** into what Nodira is doing.
+Pick whichever fits the moment.
+
+### 1. The live tagged log (the running terminal)
+
+When Nodira is running, the foreground terminal prints two streams of
+structured tag lines on top of the usual lifecycle messages:
+
+**Conversation transcript** (`pyclaudir.tx` logger):
+
+| Tag | Meaning |
+|---|---|
+| `[RX]` | inbound message we forwarded to the engine |
+| `[DROP]` | inbound message persisted but dropped (chat not allowed) |
+| `[RX↺]` | inbound edited message |
+| `[TX]` | outbound `send_message` / `reply_to_message` |
+| `[EDIT]` / `[DEL]` / `[REACT]` | outbound edits, deletions, reactions |
+
+**Claude Code subprocess transcript** (`pyclaudir.cc` logger):
+
+| Tag | Meaning |
+|---|---|
+| `[CC.user]` | the XML batch we just shipped to CC's stdin |
+| `[CC.text]` | a text block the assistant emitted (rare; signals dropped-text) |
+| `[CC.tool→]` | the assistant called a tool (with args + tool_use_id) |
+| `[CC.tool✓]` / `[CC.tool✗]` | a tool returned (success / error) |
+| `[CC.done]` | turn finished, parsed `action` + `reason` |
+
+Sample (DM with one message):
+
+```
+21:34:12 INFO  pyclaudir.tx       [RX] DM Rustam[587272213] m42 | how fast are you
+21:34:12 INFO  pyclaudir.engine   starting turn with 1 msgs
+21:34:12 INFO  pyclaudir.cc       [CC.user] <msg id="42" chat="587272213" ...>↵how fast are you↵</msg>
+21:34:13 INFO  pyclaudir.cc       [CC.tool→] mcp__pyclaudir__send_message({"chat_id":587272213,"text":"Honestly?…"}) id=toolu_01
+21:34:14 INFO  pyclaudir.tx       [TX] DM Rustam[587272213] m43 | Honestly? Not blazing fast 😅 …
+21:34:14 INFO  pyclaudir.cc       [CC.tool✓] id=toolu_01 | sent message_id=43
+21:34:14 INFO  pyclaudir.cc       [CC.done]  action=stop reason=Answered the user's question
+```
+
+The `httpx`/`mcp` per-poll noise is silenced by default. To bring it back
+for debugging, comment the relevant lines in `pyclaudir/__main__.py:_setup_logging()`.
+
+### 2. The replayable session viewer (`pyclaudir.scripts.trace`)
+
+Claude Code persists every CC session as a JSONL file at
+`~/.claude/projects/-Users-rustam-z-development-agents-yalla/<session_id>.jsonl`.
+This is the **complete conversation log** — every user envelope, every
+assistant message, every tool_use, every tool_result, every thinking block.
+
+Render it as a human-readable transcript:
+
+```bash
+# List every session in the project dir; Nodira's file is marked
+uv run python -m pyclaudir.scripts.trace --list
+
+# Replay Nodira's session (resolved via data/session_id, NOT
+# "most-recent-file" — important if you also have your own Claude Code
+# session running in the same cwd)
+uv run python -m pyclaudir.scripts.trace
+
+# Replay one specific session
+uv run python -m pyclaudir.scripts.trace --session 87f472fa-5e1a-48d6-bddc-824efca1fea5
+
+# Tail Nodira's running session live (refreshes every 0.5s)
+uv run python -m pyclaudir.scripts.trace --follow
+
+# Truncate huge text blocks
+uv run python -m pyclaudir.scripts.trace --max 200
+
+# Escape hatch: pick the most-recently-modified JSONL regardless of owner
+uv run python -m pyclaudir.scripts.trace --latest --follow
+```
+
+The default picker reads `data/session_id` first, then falls back to
+fingerprinting (a session is "Nodira's" iff its first user event begins
+with the engine's `<msg ...>` XML envelope). This stops the renderer from
+accidentally tailing your own Claude Code session that happens to be the
+most recently modified file in the same project directory.
+
+The renderer is **read-only** and never touches the running pyclaudir
+process — totally safe to run in a second terminal while Nodira is live.
+
+### 3. The raw wire-stream capture (`data/cc_logs/`)
+
+Independent from Claude Code's own session JSONL, pyclaudir also captures
+the raw bytes coming out of the CC subprocess on stdout/stderr to:
+
+```
+data/cc_logs/<session_id>.stream.jsonl   # one event per line, pre-parse
+data/cc_logs/<session_id>.stderr.log     # timestamped stderr lines
+```
+
+This is the **wire log** (what came out of the subprocess) as opposed to
+the *conversation log* (what was in the model's context). The two overlap
+mostly but the wire log also captures `result` events, `ping` frames, and
+any malformed JSON the parser would otherwise drop. Useful when debugging
+parser bugs or weird stream artifacts.
+
+```bash
+# Live wire stream
+tail -f data/cc_logs/*.stream.jsonl | jq -c .
+
+# CC's stderr (rate-limit notices, retries, warnings)
+tail -f data/cc_logs/*.stderr.log
+```
+
+Capture is on by default. Files rotate per session id, append across
+respawns of the same session, and survive crashes.
+
+### 4. SQLite — auditable, queryable history
+
+Everything that touches Telegram or any MCP tool is in `data/pyclaudir.db`.
+Useful one-liners:
+
+```bash
+# Last 10 messages in/out (from any chat)
+sqlite3 data/pyclaudir.db \
+  "SELECT direction, chat_id, user_id, substr(text,1,80) AS text
+   FROM messages ORDER BY timestamp DESC LIMIT 10;"
+
+# Every MCP tool call Nodira has made (newest first)
+sqlite3 data/pyclaudir.db \
+  "SELECT created_at, tool_name, duration_ms, error
+   FROM tool_calls ORDER BY id DESC LIMIT 20;"
+
+# Per-user activity in a specific chat
+sqlite3 data/pyclaudir.db \
+  "SELECT username, first_name, message_count, last_message_date
+   FROM users WHERE chat_id = 587272213 ORDER BY message_count DESC;"
+
+# Find every reply chain involving a specific user
+sqlite3 data/pyclaudir.db \
+  "SELECT message_id, reply_to_id, substr(text,1,100)
+   FROM messages WHERE user_id = 587272213 AND reply_to_id IS NOT NULL;"
+```
+
+`query_db` (the MCP tool) lets Nodira herself run SELECTs against this
+same database — sqlglot-validated, capped at 100 rows.
+
+### 5. Bonus — interactive replay (`claude --resume`)
+
+Drop into Nodira's *exact* conversation state in a real Claude Code
+interactive session:
+
+```bash
+# Stop pyclaudir first, OR use --fork-session to branch safely
+claude --resume $(cat data/session_id)
+```
+
+You're now talking to Claude Code with Nodira's full history loaded. Ask
+"why did you reply that way to message 591?" and you'll get her
+perspective on her own past turns. ⚠️ Don't run this on the same session
+id as a live pyclaudir process unless you pass `--fork-session`.
+
+### Cheatsheet
+
+| You want to know… | Look at |
+|---|---|
+| Who said what to who right now | the foreground terminal (`[RX]`/`[TX]` lines) |
+| Which tools is she calling and why | the foreground terminal (`[CC.tool→]`/`[CC.done]` lines) |
+| The full story of a past conversation | `python -m pyclaudir.scripts.trace --session <sid>` |
+| Whether the parser is missing events | `data/cc_logs/<sid>.stream.jsonl` |
+| Whether CC is hitting rate limits | `data/cc_logs/<sid>.stderr.log` |
+| Aggregate stats / cross-session queries | `sqlite3 data/pyclaudir.db` |
+| What she would say *now* about her own history | `claude --resume $(cat data/session_id) --fork-session` |
 
 ## Security model
 
@@ -120,18 +306,34 @@ Nodira is a *front-facing public agent*. Anyone in an allowed chat can talk
 to her, and they're not always trustworthy. The security model is enforced
 by code, not by hope, and tested in `tests/test_security_invariants.py`.
 
-- **No shell, no edits, no writes, no general reads, no web access.** The
-  CC subprocess is spawned with `--allowedTools mcp__pyclaudir
-  --disallowedTools Bash,Edit,Write,Read,NotebookEdit,WebSearch,WebFetch
+- **No shell, no edits, no writes outside `memories/`, no general reads
+  outside `memories/`.** The CC subprocess is spawned with
+  `--allowedTools mcp__pyclaudir,WebFetch,WebSearch
+  --disallowedTools Bash,Edit,Write,Read,NotebookEdit
   --strict-mcp-config`. The forbidden flag `--dangerously-skip-permissions`
   is *never* passed; both the argv builder and the spawn-time assertion
   refuse it.
+- **Web access (read-only).** `WebFetch` and `WebSearch` are deliberately
+  enabled so Nodira can answer questions that need fresh information.
+  This is a real trade-off — see the next bullet. The system prompt
+  instructs her to refuse private/internal URLs (localhost, RFC1918,
+  link-local, `.local`), but a determined prompt-injection could still
+  get her to fetch one. **Do not deploy Nodira on a host with sensitive
+  internal endpoints reachable from the same network.**
 - **MCP namespace lockdown.** The local MCP server is registered as
-  `pyclaudir`, so every tool Claude sees is named `mcp__pyclaudir__<x>`.
-  Strict mode means Claude ignores all other MCP configs.
-- **Read-only memory.** No `write_memory`/`edit_memory`/`delete_memory` tool
-  exists. Path resolution is hardened against `..`, absolute paths, symlinks
-  (rejected by `MemoryStore.resolve_path` and tested with hostile inputs).
+  `pyclaudir`, so every pyclaudir tool Claude sees is named
+  `mcp__pyclaudir__<x>`. The two web tools are Claude Code built-ins, not
+  MCP tools, so they show up unprefixed (`WebFetch`, `WebSearch`).
+- **Memory writes with safety rails.** `write_memory` and `append_memory`
+  exist, but are guarded by:
+  - **Path traversal hardening** (no `..`, no absolute paths, no symlinks)
+    — applies to writes the same way it applies to reads.
+  - **64 KiB per-file size cap** — both writes and post-append totals.
+  - **Read-before-write** — overwriting or appending to an *existing*
+    file requires `read_memory` to have been called on it first in the
+    same session. New files are exempt. The set of "read paths" resets
+    on every restart so a fresh process must re-read before mutating.
+  - **No deletion tool** — forgetting requires explicit overwriting.
 - **No filesystem reads outside `memory.py`.** AST scan asserts no `open()`
   / `read_text()` / `read_bytes()` lives in any other tool module.
 - **No subprocess calls in tools.** AST scan rejects `subprocess.*`,
@@ -179,39 +381,50 @@ pyclaudir/
 ├── pyproject.toml
 ├── README.md
 ├── prompts/system.md
-├── data/                       # gitignored — pyclaudir.db, session_id, memories/
+├── data/                       # gitignored
+│   ├── pyclaudir.db            # SQLite (messages, users, tool_calls, ...)
+│   ├── session_id              # CC session id for --resume
+│   ├── memories/               # operator-curated read-only notes
+│   └── cc_logs/                # raw CC stdout/stderr capture
 ├── pyclaudir/
-│   ├── __main__.py             # entrypoint
+│   ├── __main__.py             # entrypoint + log setup
 │   ├── config.py
 │   ├── db/{database.py,messages.py,migrations/001_initial.sql}
 │   ├── telegram_io.py
-│   ├── engine.py
-│   ├── cc_worker.py
-│   ├── cc_schema.py
-│   ├── mcp_server.py
-│   ├── memory_store.py
+│   ├── engine.py               # debouncer, queue, inject, control loop
+│   ├── cc_worker.py            # subprocess + raw capture + crash recovery
+│   ├── cc_schema.py            # ControlAction JSON schema
+│   ├── mcp_server.py           # FastMCP host + tool auto-discovery
+│   ├── memory_store.py         # path-hardened read-only file store
 │   ├── rate_limiter.py
+│   ├── transcript.py           # [RX]/[TX]/[CC.*] log helpers
 │   ├── models.py
+│   ├── scripts/
+│   │   └── trace.py            # CC session JSONL replay/follow renderer
 │   └── tools/
-│       ├── base.py            # BaseTool, ToolContext, Heartbeat
+│       ├── base.py             # BaseTool, ToolContext, Heartbeat
 │       ├── now.py
 │       ├── send_message.py
 │       ├── reply_to_message.py
 │       ├── edit_message.py
 │       ├── delete_message.py
 │       ├── add_reaction.py
-│       ├── memory.py          # read_memory + list_memories (read-only)
+│       ├── memory.py           # list/read/write/append memory (read-before-write)
 │       └── query_db.py
-└── tests/
+└── tests/                      # 141 tests
     ├── test_db_schema.py
     ├── test_mcp_server.py
     ├── test_tool_discovery.py
     ├── test_memory_path_safety.py
-    ├── test_security_invariants.py
+    ├── test_security_invariants.py     # 8 invariants (#3 has 3 sub-tests)
+    ├── test_memory_writes.py            # write_memory + append_memory + read-before-write
     ├── test_telegram_persistence.py
     ├── test_cc_worker_argv.py
+    ├── test_cc_raw_capture.py          # raw stdout/stderr capture
     ├── test_engine_debouncer.py
     ├── test_inject_and_dropped_text.py
     ├── test_recovery_and_limits.py
+    ├── test_reply_chain.py             # multi-hop reply expansion
+    ├── test_transcript.py              # tagged log formatting
     └── test_query_db.py
 ```

@@ -45,20 +45,30 @@ log = logging.getLogger(__name__)
 
 
 #: The set of built-in tools we explicitly deny. Belt-and-braces with
-#: ``--allowedTools mcp__pyclaudir`` so even if Claude Code's allowlist
-#: behaviour ever changes, every dangerous tool is still off.
+#: ``--allowedTools`` so even if Claude Code's allowlist behaviour ever
+#: changes, every dangerous tool is still off.
+#:
+#: ``WebFetch`` and ``WebSearch`` are *not* on this list — they were
+#: re-enabled by operator decision so Nodira can answer questions that
+#: need fresh information. The trade is: she can now exfiltrate data via
+#: URL + read SSRF-able internal addresses if a user asks her nicely.
+#: We rely on her system prompt + Telegram-only output channel to keep
+#: that surface bounded.
 DISALLOWED_TOOLS: tuple[str, ...] = (
     "Bash",
     "Edit",
     "Write",
     "Read",
     "NotebookEdit",
-    "WebSearch",
-    "WebFetch",
 )
 
-#: Only the pyclaudir MCP namespace is allowed.
-ALLOWED_TOOLS: tuple[str, ...] = ("mcp__pyclaudir",)
+#: Allowed tools — the pyclaudir MCP namespace plus the two read-only
+#: web tools the operator opted Nodira into.
+ALLOWED_TOOLS: tuple[str, ...] = (
+    "mcp__pyclaudir",
+    "WebFetch",
+    "WebSearch",
+)
 
 #: Forbidden flag — never pass this. ``build_argv`` enforces it at build
 #: time and the worker re-asserts it at spawn time.

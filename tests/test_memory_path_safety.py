@@ -114,9 +114,15 @@ def test_list_skips_dotfiles_and_symlinks(store: MemoryStore, tmp_path: Path) ->
     assert "link.md" not in listed
 
 
-def test_no_write_methods_exist() -> None:
-    """v1 invariant: MemoryStore exposes no write/edit/delete API."""
-    forbidden = {"write", "create", "delete", "edit", "remove", "save", "put", "unlink"}
+def test_memory_store_surface() -> None:
+    """The MemoryStore exposes exactly read, write, append, and helpers.
+
+    Specifically there must be NO ``delete``, ``edit``, ``remove``, ``unlink``
+    methods — forgetting requires explicit overwriting, never deletion.
+    """
+    forbidden = {"delete", "edit", "remove", "unlink", "rm", "drop"}
     public = {n for n in dir(MemoryStore) if not n.startswith("_")}
     overlap = public & forbidden
-    assert not overlap, f"unexpected write-shaped methods: {overlap}"
+    assert not overlap, f"unexpected destructive methods: {overlap}"
+    # Positive surface check
+    assert {"read", "write", "append", "list", "resolve_path"}.issubset(public)

@@ -46,6 +46,12 @@ def fake_spec(tmp_path: Path) -> CcSpawnSpec:
 
 # ---------------------------------------------------------------------------
 # Invariant 1: locked-down argv
+#
+# WebFetch and WebSearch were re-enabled by operator decision so Nodira can
+# answer questions that need fresh information. They are explicitly on the
+# allowlist now. Bash/Edit/Write/Read/NotebookEdit remain hard-denied — those
+# would let her mutate the host or read arbitrary files, and there is no
+# operator scenario where she should be allowed to do that.
 # ---------------------------------------------------------------------------
 
 
@@ -53,13 +59,20 @@ def test_invariant_1_argv_has_allowlist_and_denylist(fake_spec: CcSpawnSpec) -> 
     argv = build_argv(fake_spec)
     assert "--allowedTools" in argv
     allowed_idx = argv.index("--allowedTools") + 1
-    assert argv[allowed_idx] == ",".join(ALLOWED_TOOLS) == "mcp__pyclaudir"
+    allowed_value = argv[allowed_idx]
+    assert "mcp__pyclaudir" in allowed_value
+    assert "WebFetch" in allowed_value
+    assert "WebSearch" in allowed_value
 
     assert "--disallowedTools" in argv
     deny_idx = argv.index("--disallowedTools") + 1
     deny_value = argv[deny_idx]
-    for forbidden in ("Bash", "Edit", "Write", "Read", "NotebookEdit", "WebSearch", "WebFetch"):
+    # The hard-denied tools that no Nodira operator scenario justifies.
+    for forbidden in ("Bash", "Edit", "Write", "Read", "NotebookEdit"):
         assert forbidden in deny_value, f"{forbidden} missing from --disallowedTools"
+    # And re-confirm WebFetch/WebSearch are NOT denied (they were before).
+    assert "WebFetch" not in deny_value
+    assert "WebSearch" not in deny_value
 
 
 def test_invariant_1_argv_never_has_dangerously_skip(fake_spec: CcSpawnSpec) -> None:
@@ -82,15 +95,60 @@ def test_invariant_2_only_pyclaudir_server_name() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Invariant 3: read-only memory — no write tool exists
+# Invariant 3: memory writes exist but enforce safety rails
+#
+# Originally read-only. Operator opted Nodira into write_memory + append_memory
+# so she can keep her own notes. The trade-off is mitigated by:
+#   (a) read-before-write — must read existing files before mutating them
+#   (b) 64 KiB per-file size cap
+#   (c) path-traversal hardening (already in place)
+#   (d) NO delete tool (forgetting requires explicit overwrite)
+#
+# This test pins all four conditions so a future change can't quietly
+# erode them.
 # ---------------------------------------------------------------------------
 
 
-def test_invariant_3_no_memory_write_tools() -> None:
-    forbidden_names = {"write_memory", "delete_memory", "edit_memory", "create_memory"}
-    classes = discover_tool_classes()
-    offending = [c.name for c in classes if c.name in forbidden_names]
-    assert offending == [], f"forbidden memory write tools registered: {offending}"
+def test_invariant_3_memory_write_safety_rails() -> None:
+    """The expected memory tool surface is exactly: list/read/write/append.
+    No delete/edit/create. No path traversal. Read-before-write enforced."""
+    classes = {c.name: c for c in discover_tool_classes()}
+    expected_memory_tools = {"list_memories", "read_memory", "write_memory", "append_memory"}
+    actual_memory_tools = set(classes.keys()) & {
+        "list_memories", "read_memory", "write_memory", "append_memory",
+        "delete_memory", "edit_memory", "create_memory", "remove_memory",
+        "rm_memory",
+    }
+    assert actual_memory_tools == expected_memory_tools, (
+        f"unexpected memory tool surface: {actual_memory_tools}"
+    )
+
+    # No deletion tool exists in any form.
+    forbidden_names = {"delete_memory", "edit_memory", "create_memory", "remove_memory", "rm_memory"}
+    offending = [c.name for c in discover_tool_classes() if c.name in forbidden_names]
+    assert offending == [], f"forbidden memory mutation tools registered: {offending}"
+
+
+def test_invariant_3_read_before_write_enforced(tmp_path: Path) -> None:
+    """The MemoryStore itself rejects overwrites of files it hasn't read."""
+    from pyclaudir.memory_store import MemoryPathError, MemoryStore
+
+    store = MemoryStore(tmp_path / "memories")
+    store.ensure_root()
+    (store.root / "operator_note.md").write_text("CRITICAL")
+    with pytest.raises(MemoryPathError, match="read-before-write"):
+        store.write("operator_note.md", "destroyed")
+    # The original survived
+    assert (store.root / "operator_note.md").read_text() == "CRITICAL"
+
+
+def test_invariant_3_size_cap_enforced(tmp_path: Path) -> None:
+    from pyclaudir.memory_store import MAX_MEMORY_BYTES, MemoryPathError, MemoryStore
+
+    store = MemoryStore(tmp_path / "memories")
+    store.ensure_root()
+    with pytest.raises(MemoryPathError, match="too large"):
+        store.write("huge.md", "x" * (MAX_MEMORY_BYTES + 1))
 
 
 # ---------------------------------------------------------------------------

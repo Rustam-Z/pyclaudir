@@ -43,7 +43,83 @@ PROJECT_DIR = (
 )
 
 
+def _data_dir() -> Path:
+    """Resolve the pyclaudir data dir without importing Config (which would
+    require a Telegram token to validate). Match Config's logic exactly:
+    PYCLAUDIR_DATA_DIR env var, default ``./data``.
+    """
+    raw = os.environ.get("PYCLAUDIR_DATA_DIR", "./data") or "./data"
+    return Path(raw).resolve()
+
+
+def _looks_like_nodira(path: Path) -> bool:
+    """A session is Nodira's iff its first ``user`` event's text content
+    starts with ``<msg `` — the XML envelope the engine wraps every
+    Telegram batch in.
+    """
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            for raw in fh:
+                try:
+                    event = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                if event.get("type") != "user":
+                    continue
+                msg = event.get("message") or {}
+                content = msg.get("content") or []
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        text = block.get("text", "")
+                        return text.lstrip().startswith("<msg ")
+                # First user event was a tool_result, not a text block —
+                # keep scanning until we find an actual user-text event.
+    except OSError:
+        return False
+    return False
+
+
+def find_nodira_session() -> Path | None:
+    """Find the JSONL belonging to Nodira, *not* the Claude Code session
+    that happens to be running in the same project directory.
+
+    Strategy:
+
+    1. If ``data/session_id`` exists and the corresponding JSONL exists,
+       use that. This is the canonical pyclaudir-self-reported session.
+    2. Otherwise scan ``PROJECT_DIR`` for files whose first user event
+       carries Nodira's ``<msg ...>`` XML envelope, and return the most
+       recently modified one.
+    3. Otherwise return ``None``. (Don't fall back to "most-recent-of-any"
+       because that's how we picked up the wrong session in the first
+       place.)
+    """
+    if not PROJECT_DIR.exists():
+        return None
+
+    # 1. Authoritative: data/session_id
+    sid_file = _data_dir() / "session_id"
+    if sid_file.exists():
+        sid = sid_file.read_text().strip()
+        if sid:
+            candidate = PROJECT_DIR / f"{sid}.jsonl"
+            if candidate.exists():
+                return candidate
+
+    # 2. Fingerprint scan
+    candidates = sorted(
+        PROJECT_DIR.glob("*.jsonl"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    for path in candidates:
+        if _looks_like_nodira(path):
+            return path
+    return None
+
+
 def find_latest_session() -> Path | None:
+    """Most recently modified file in the project dir, regardless of owner."""
     if not PROJECT_DIR.exists():
         return None
     candidates = sorted(
@@ -196,10 +272,16 @@ def follow(path: Path, max_chars: int) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Replay or tail Nodira's CC session.")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Replay or tail Nodira's CC session. By default picks Nodira's "
+            "session via data/session_id, NOT the most-recent file (which "
+            "might be your own Claude Code session in the same cwd)."
+        ),
+    )
     parser.add_argument(
         "--session", "-s",
-        help="Session id (default: most-recent file in the project dir)",
+        help="Specific session id (overrides --latest and the Nodira finder)",
     )
     parser.add_argument(
         "--follow", "-f", action="store_true",
@@ -213,12 +295,22 @@ def main() -> int:
         "--list", "-l", action="store_true",
         help="List available session files and exit.",
     )
+    parser.add_argument(
+        "--latest", action="store_true",
+        help=(
+            "Use the most recently modified JSONL regardless of owner. "
+            "Useful when you DO want to follow this CC session itself."
+        ),
+    )
     args = parser.parse_args()
 
     if args.list:
         if not PROJECT_DIR.exists():
             print(f"no session dir at {PROJECT_DIR}")
             return 1
+        # Determine which file is Nodira's so we can mark it
+        nodira_path = find_nodira_session()
+        nodira_stem = nodira_path.stem if nodira_path else None
         files = sorted(
             PROJECT_DIR.glob("*.jsonl"),
             key=lambda p: p.stat().st_mtime,
@@ -227,7 +319,8 @@ def main() -> int:
         for p in files:
             mtime = time.strftime("%Y-%m-%d %H:%M", time.localtime(p.stat().st_mtime))
             size_kb = p.stat().st_size // 1024
-            print(f"{mtime}  {size_kb:>6} KB  {p.stem}")
+            marker = "  ← nodira" if p.stem == nodira_stem else ""
+            print(f"{mtime}  {size_kb:>6} KB  {p.stem}{marker}")
         return 0
 
     if args.session:
@@ -235,10 +328,22 @@ def main() -> int:
         if path is None:
             print(f"no session file for id {args.session} under {PROJECT_DIR}", file=sys.stderr)
             return 1
-    else:
+    elif args.latest:
         path = find_latest_session()
         if path is None:
             print(f"no session files under {PROJECT_DIR}", file=sys.stderr)
+            return 1
+    else:
+        path = find_nodira_session()
+        if path is None:
+            print(
+                "could not identify Nodira's session. Try one of:\n"
+                "  --session <id>          to specify it explicitly\n"
+                "  --list                  to see all available sessions\n"
+                "  --latest                to use the most recent file regardless\n"
+                f"  data/session_id under {_data_dir()} is empty/missing.",
+                file=sys.stderr,
+            )
             return 1
 
     if args.follow:
