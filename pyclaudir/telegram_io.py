@@ -1,0 +1,219 @@
+"""Telegram dispatcher.
+
+The handlers do the absolute minimum: persist the incoming update to SQLite
+and enqueue it on the engine. They never call any LLM directly. Owner-only
+control commands (``/kill``, ``/reset``, ``/restart``) are intercepted before
+the engine sees the message.
+
+In Step 6 the engine is just a placeholder that sends a hardcoded ack so we
+can manually verify the wiring with a real BotFather token.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from datetime import datetime, timezone
+from typing import Any, Awaitable, Callable, Protocol
+
+from telegram import Update
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
+
+from .config import Config
+from .db.database import Database
+from .db.messages import (
+    insert_message,
+    mark_deleted,
+    mark_edited,
+    upsert_user,
+)
+from .models import ChatMessage
+from .transcript import log_inbound, log_inbound_edit
+
+log = logging.getLogger(__name__)
+
+
+class EnginePort(Protocol):
+    """Minimal surface the engine must expose to the dispatcher."""
+
+    async def submit(self, msg: ChatMessage) -> None: ...
+
+
+def _to_chat_message(update: Update, direction: str = "in") -> ChatMessage | None:
+    msg = update.effective_message
+    if msg is None or msg.from_user is None:
+        return None
+    text = msg.text or msg.caption or ""
+    return ChatMessage(
+        chat_id=msg.chat_id,
+        message_id=msg.message_id,
+        user_id=msg.from_user.id,
+        username=msg.from_user.username,
+        first_name=msg.from_user.first_name,
+        direction=direction,
+        timestamp=msg.date or datetime.now(timezone.utc),
+        text=text,
+        reply_to_id=msg.reply_to_message.message_id if msg.reply_to_message else None,
+        reply_to_text=(
+            (msg.reply_to_message.text or msg.reply_to_message.caption or None)
+            if msg.reply_to_message
+            else None
+        ),
+        raw_update_json=json.dumps(update.to_dict(), default=str),
+    )
+
+
+class TelegramDispatcher:
+    def __init__(
+        self,
+        config: Config,
+        db: Database,
+        engine: EnginePort,
+        *,
+        chat_titles: dict[int, str] | None = None,
+    ) -> None:
+        self.config = config
+        self.db = db
+        self.engine = engine
+        #: Shared with ToolContext.chat_titles so outbound logs can render
+        #: the chat's display name. We populate it from every inbound message.
+        self.chat_titles: dict[int, str] = chat_titles if chat_titles is not None else {}
+        self.application: Application = (
+            Application.builder().token(config.telegram_bot_token).build()
+        )
+        self._wire_handlers()
+
+    @property
+    def bot(self):
+        return self.application.bot
+
+    def _wire_handlers(self) -> None:
+        # Owner-only control commands first so they short-circuit the engine.
+        self.application.add_handler(CommandHandler("kill", self._cmd_kill))
+        self.application.add_handler(CommandHandler("reset", self._cmd_reset))
+        self.application.add_handler(CommandHandler("restart", self._cmd_restart))
+
+        # All other text/caption messages
+        self.application.add_handler(
+            MessageHandler(filters.TEXT | filters.CAPTION, self._on_message)
+        )
+        self.application.add_handler(
+            MessageHandler(filters.UpdateType.EDITED_MESSAGE, self._on_edited)
+        )
+
+    # ------------------------------------------------------------------
+    # Owner-only commands
+    # ------------------------------------------------------------------
+
+    def _is_owner(self, update: Update) -> bool:
+        return (
+            update.effective_user is not None
+            and update.effective_user.id == self.config.owner_id
+        )
+
+    async def _cmd_kill(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._is_owner(update):
+            return
+        log.warning("/kill received from owner; shutting down")
+        await self.application.stop_running()
+
+    async def _cmd_reset(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._is_owner(update):
+            return
+        await update.effective_message.reply_text("reset acknowledged (engine wires this in step 8)")
+
+    async def _cmd_restart(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._is_owner(update):
+            return
+        await update.effective_message.reply_text("restart acknowledged (engine wires this in step 8)")
+
+    # ------------------------------------------------------------------
+    # Message ingest
+    # ------------------------------------------------------------------
+
+    def _remember_chat_title(self, update: Update) -> None:
+        chat = update.effective_chat
+        if chat is None:
+            return
+        title = chat.title or chat.full_name or chat.username
+        if title:
+            self.chat_titles[chat.id] = title
+
+    async def _on_message(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        cm = _to_chat_message(update, direction="in")
+        if cm is None:
+            return
+
+        self._remember_chat_title(update)
+
+        # 1. Persist *every* message we receive — even from disallowed chats —
+        #    so we have an audit trail.
+        await insert_message(self.db, cm)
+        await upsert_user(
+            self.db,
+            chat_id=cm.chat_id,
+            user_id=cm.user_id,
+            username=cm.username,
+            first_name=cm.first_name,
+            timestamp=cm.timestamp,
+        )
+
+        allowed = self.config.is_chat_allowed(cm.chat_id, cm.user_id)
+        log_inbound(
+            chat_id=cm.chat_id,
+            chat_type=update.effective_chat.type if update.effective_chat else None,
+            chat_titles=self.chat_titles,
+            user_id=cm.user_id,
+            user_name=cm.first_name or cm.username,
+            message_id=cm.message_id,
+            reply_to_id=cm.reply_to_id,
+            text=cm.text,
+            allowed=allowed,
+        )
+
+        # 2. Forward only allowed chats to the engine.
+        if not allowed:
+            return
+
+        await self.engine.submit(cm)
+
+    async def _on_edited(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        msg = update.edited_message
+        if msg is None:
+            return
+        self._remember_chat_title(update)
+        await mark_edited(self.db, msg.chat_id, msg.message_id, msg.text or "")
+        log_inbound_edit(
+            chat_id=msg.chat_id,
+            chat_titles=self.chat_titles,
+            user_id=msg.from_user.id if msg.from_user else None,
+            user_name=(msg.from_user.first_name or msg.from_user.username) if msg.from_user else None,
+            message_id=msg.message_id,
+            text=msg.text or "",
+        )
+
+    # ------------------------------------------------------------------
+    # Lifecycle (manual — we co-run with other asyncio tasks).
+    # ------------------------------------------------------------------
+
+    async def start(self) -> None:
+        await self.application.initialize()
+        await self.application.start()
+        await self.application.updater.start_polling(
+            allowed_updates=["message", "edited_message", "callback_query"],
+        )
+        log.info("telegram dispatcher polling")
+
+    async def stop(self) -> None:
+        try:
+            await self.application.updater.stop()
+        except Exception:  # pragma: no cover
+            log.exception("updater stop failed")
+        await self.application.stop()
+        await self.application.shutdown()

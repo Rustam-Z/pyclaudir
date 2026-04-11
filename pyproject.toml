@@ -1,0 +1,40 @@
+[project]
+name = "pyclaudir"
+version = "0.1.0"
+description = "Python harness running Nodira, a Telegram agent powered by a Claude Code subprocess and a local MCP server."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "rustam_z" }]
+
+dependencies = [
+    "python-telegram-bot>=21.6,<22",
+    "mcp>=1.2.0",
+    "uvicorn>=0.30",
+    "starlette>=0.37",
+    "aiosqlite>=0.20",
+    "pydantic>=2.7",
+    "python-dotenv>=1.0",
+    "sqlglot>=25.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "anyio>=4.4",
+]
+
+[project.scripts]
+pyclaudir = "pyclaudir.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["pyclaudir"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+
+# Project data (runtime)
+data/
+!data/memories/.gitkeep
+
+# Env
+.env
+.env.local
+
+# Editors
+.vscode/
+.idea/
+.DS_Store

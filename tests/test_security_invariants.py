@@ -1,0 +1,231 @@
+"""The eight security invariants from the build prompt.
+
+These tests are intentionally low-cunning regression guards. They become
+load-bearing as the codebase grows, so do not delete them when refactoring.
+"""
+
+from __future__ import annotations
+
+import ast
+import json
+from pathlib import Path
+
+import pytest
+
+import pyclaudir
+from pyclaudir.cc_worker import (
+    ALLOWED_TOOLS,
+    DISALLOWED_TOOLS,
+    FORBIDDEN_FLAG,
+    CcSpawnSpec,
+    build_argv,
+)
+from pyclaudir.mcp_server import MCP_SERVER_NAME, build_fastmcp, discover_tool_classes
+from pyclaudir.tools.base import ToolContext
+
+PKG_ROOT = Path(pyclaudir.__file__).parent
+TOOLS_DIR = PKG_ROOT / "tools"
+
+
+@pytest.fixture()
+def fake_spec(tmp_path: Path) -> CcSpawnSpec:
+    sp = tmp_path / "system.md"
+    sp.write_text("Pretend system prompt.")
+    mcp = tmp_path / "mcp.json"
+    mcp.write_text(json.dumps({"mcpServers": {"pyclaudir": {"type": "http", "url": "http://x/mcp"}}}))
+    schema = tmp_path / "schema.json"
+    schema.write_text(json.dumps({"type": "object"}))
+    return CcSpawnSpec(
+        binary="claude",
+        model="claude-opus-4-6",
+        system_prompt_path=sp,
+        mcp_config_path=mcp,
+        json_schema_path=schema,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Invariant 1: locked-down argv
+# ---------------------------------------------------------------------------
+
+
+def test_invariant_1_argv_has_allowlist_and_denylist(fake_spec: CcSpawnSpec) -> None:
+    argv = build_argv(fake_spec)
+    assert "--allowedTools" in argv
+    allowed_idx = argv.index("--allowedTools") + 1
+    assert argv[allowed_idx] == ",".join(ALLOWED_TOOLS) == "mcp__pyclaudir"
+
+    assert "--disallowedTools" in argv
+    deny_idx = argv.index("--disallowedTools") + 1
+    deny_value = argv[deny_idx]
+    for forbidden in ("Bash", "Edit", "Write", "Read", "NotebookEdit", "WebSearch", "WebFetch"):
+        assert forbidden in deny_value, f"{forbidden} missing from --disallowedTools"
+
+
+def test_invariant_1_argv_never_has_dangerously_skip(fake_spec: CcSpawnSpec) -> None:
+    argv = build_argv(fake_spec)
+    assert FORBIDDEN_FLAG not in argv
+    assert FORBIDDEN_FLAG not in " ".join(argv)
+
+
+# ---------------------------------------------------------------------------
+# Invariant 2: MCP namespace lockdown
+# ---------------------------------------------------------------------------
+
+
+def test_invariant_2_only_pyclaudir_server_name() -> None:
+    assert MCP_SERVER_NAME == "pyclaudir"
+    # And every discovered tool's name is plain (no other prefixes baked in).
+    for cls in discover_tool_classes():
+        assert "__" not in cls.name, f"tool name {cls.name!r} sneaks a prefix"
+        assert not cls.name.startswith("mcp_"), cls.name
+
+
+# ---------------------------------------------------------------------------
+# Invariant 3: read-only memory — no write tool exists
+# ---------------------------------------------------------------------------
+
+
+def test_invariant_3_no_memory_write_tools() -> None:
+    forbidden_names = {"write_memory", "delete_memory", "edit_memory", "create_memory"}
+    classes = discover_tool_classes()
+    offending = [c.name for c in classes if c.name in forbidden_names]
+    assert offending == [], f"forbidden memory write tools registered: {offending}"
+
+
+# ---------------------------------------------------------------------------
+# Invariant 4: memory path containment (covered fully in test_memory_path_safety,
+# we keep a smoke check here so this file alone proves the boundary exists).
+# ---------------------------------------------------------------------------
+
+
+def test_invariant_4_memory_path_traversal_rejected(tmp_path: Path) -> None:
+    from pyclaudir.memory_store import MemoryPathError, MemoryStore
+
+    store = MemoryStore(tmp_path / "memories")
+    store.ensure_root()
+    for hostile in (
+        "../../../etc/passwd",
+        "/etc/passwd",
+        "data/memories/../../../etc/passwd",
+        "notes/../../etc/passwd",
+    ):
+        with pytest.raises(MemoryPathError):
+            store.resolve_path(hostile)
+
+
+# ---------------------------------------------------------------------------
+# Invariant 5: only memory.py reads files inside pyclaudir/tools/
+# ---------------------------------------------------------------------------
+
+
+_FILE_READ_FUNCS = {"open"}
+_FILE_READ_METHODS = {"read_text", "read_bytes"}
+
+
+def _file_read_offences(tree: ast.AST) -> list[str]:
+    offences: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            f = node.func
+            if isinstance(f, ast.Name) and f.id in _FILE_READ_FUNCS:
+                offences.append(f"open() at line {node.lineno}")
+            if isinstance(f, ast.Attribute) and f.attr in _FILE_READ_METHODS:
+                offences.append(f".{f.attr}() at line {node.lineno}")
+    return offences
+
+
+def test_invariant_5_no_file_reads_outside_memory_module() -> None:
+    for path in TOOLS_DIR.rglob("*.py"):
+        if path.name in {"__init__.py", "base.py", "memory.py"}:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        offences = _file_read_offences(tree)
+        assert offences == [], f"{path}: forbidden filesystem reads {offences}"
+
+
+# ---------------------------------------------------------------------------
+# Invariant 6: no shell execution from tools
+# ---------------------------------------------------------------------------
+
+
+_FORBIDDEN_SHELL_NAMES = {"system", "popen", "spawnl", "spawnv", "spawnvp", "execv", "execvp"}
+_FORBIDDEN_SHELL_MODULES = {"subprocess", "os"}
+
+
+def _shell_offences(tree: ast.AST) -> list[str]:
+    offences: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            f = node.func
+            if isinstance(f, ast.Attribute):
+                if f.attr in {"system", "popen"}:
+                    offences.append(f"os.{f.attr}() line {node.lineno}")
+                if f.attr.startswith("create_subprocess_") or f.attr in {"run", "Popen", "call", "check_call", "check_output"}:
+                    val = f.value
+                    if isinstance(val, ast.Name) and val.id in {"subprocess", "asyncio"}:
+                        offences.append(f"{val.id}.{f.attr}() line {node.lineno}")
+    return offences
+
+
+def test_invariant_6_no_subprocess_in_tools() -> None:
+    for path in TOOLS_DIR.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        offences = _shell_offences(tree)
+        assert offences == [], f"{path}: forbidden shell calls {offences}"
+        # Also ban the imports themselves so no helper module can sneak it in.
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    assert alias.name not in {"subprocess"}, f"{path} imports subprocess"
+            if isinstance(node, ast.ImportFrom):
+                assert node.module not in {"subprocess"}, f"{path} imports from subprocess"
+
+
+# ---------------------------------------------------------------------------
+# Invariant 7: owner-only privileged commands
+# ---------------------------------------------------------------------------
+
+
+def test_invariant_7_owner_check_helper() -> None:
+    """``Config.is_chat_allowed`` is the gate. With an empty allowlist only
+    the owner's user_id may pass."""
+    from pyclaudir.config import Config
+
+    cfg = Config(
+        telegram_bot_token="t",
+        owner_id=42,
+        allowed_chats=(),
+        data_dir=Path("/tmp/pyclaudir-test"),
+        model="claude-opus-4-6",
+        debounce_ms=1000,
+        rate_limit_per_min=20,
+        claude_code_bin="claude",
+    )
+    assert cfg.is_chat_allowed(chat_id=42, user_id=42) is True
+    assert cfg.is_chat_allowed(chat_id=999, user_id=999) is False
+    assert cfg.is_chat_allowed(chat_id=-100123, user_id=999) is False
+
+
+# ---------------------------------------------------------------------------
+# Invariant 8: query_db is SELECT-only (covered in detail when query_db lands
+# in Step 11; we leave a placeholder here that auto-skips until then so the
+# file's coverage stays honest).
+# ---------------------------------------------------------------------------
+
+
+def test_invariant_8_query_db_select_only_when_present() -> None:
+    classes = {c.name: c for c in discover_tool_classes()}
+    if "query_db" not in classes:
+        pytest.skip("query_db not implemented yet (Step 11)")
+    from pyclaudir.tools.query_db import is_safe_select  # type: ignore
+
+    assert is_safe_select("SELECT 1") is True
+    for hostile in (
+        "SELECT 1; DROP TABLE messages;",
+        "INSERT INTO messages(chat_id) VALUES (1)",
+        "PRAGMA journal_mode",
+        "ATTACH DATABASE '/tmp/x' AS x",
+        "WITH bad AS (DELETE FROM messages RETURNING *) SELECT * FROM bad",
+    ):
+        assert is_safe_select(hostile) is False, f"is_safe_select accepted: {hostile!r}"
