@@ -20,10 +20,27 @@ import asyncio
 import logging
 import xml.sax.saxutils as sx
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Awaitable, Callable
 
 from .db.messages import fetch_reply_chain
 from .models import ChatMessage
+
+#: Telegram's typing action expires after ~5s on the server side, so we
+#: refresh slightly faster than that to avoid a visible gap.
+TYPING_REFRESH_SECONDS = 4.0
+
+#: Telegram clients suppress very brief typing displays to avoid flicker —
+#: typing that's "live" for less than ~1 second often never visually
+#: renders in the user's client. We enforce a minimum visible duration
+#: from the moment the first typing call fires, so that even when the
+#: model responds in a fraction of a second the user actually sees the
+#: indicator. Concretely: ``notify_chat_replied`` defers the actual
+#: dismissal until this many seconds have elapsed since typing started.
+MIN_TYPING_VISIBLE_SECONDS = 1.5
+
+#: Async callable shape: ``await typing_action(chat_id)`` should fire one
+#: ``send_chat_action`` to that chat. Engine doesn't import telegram.
+TypingAction = Callable[[int], Awaitable[None]]
 
 if TYPE_CHECKING:  # pragma: no cover
     from .cc_worker import CcWorker, TurnResult
@@ -135,15 +152,33 @@ class Engine:
         *,
         debounce_ms: int = 1000,
         db: "Database | None" = None,
+        typing_action: TypingAction | None = None,
     ) -> None:
         self._worker = worker
         self._debounce = debounce_ms / 1000.0
         self._db = db
+        #: Optional callback that shows the "typing..." indicator in a
+        #: Telegram chat. Wired by ``__main__.py`` to ``bot.send_chat_action``.
+        self._typing_action = typing_action
         self._pending: list[ChatMessage] = []
         self._lock = asyncio.Lock()
         self._is_processing = asyncio.Event()
         self._debounce_task: asyncio.Task | None = None
         self._control_task: asyncio.Task | None = None
+        self._typing_task: asyncio.Task | None = None
+        self._typing_chats: set[int] = set()
+        #: Set whenever something changes the typing set (a chat is added
+        #: or removed). The typing loop ``wait_for``s this with a 4-second
+        #: timeout, so it wakes immediately on a removal instead of sleeping
+        #: out the full refresh interval.
+        self._typing_wake = asyncio.Event()
+        #: ``time.monotonic()`` value at the moment typing was first armed
+        #: for the current turn. Used by :meth:`notify_chat_replied` to
+        #: enforce :data:`MIN_TYPING_VISIBLE_SECONDS`.
+        self._typing_started_at: float = 0.0
+        #: Background task that defers the actual stop when ``notify_chat_replied``
+        #: fires before the minimum visible duration has elapsed.
+        self._typing_deferred_stop: asyncio.Task | None = None
         self._stop = asyncio.Event()
 
     # ------------------------------------------------------------------
@@ -165,6 +200,7 @@ class Engine:
                 await self._control_task
             except (asyncio.CancelledError, Exception):
                 pass
+        await self._stop_typing()
 
     # ------------------------------------------------------------------
     # Inbound
@@ -207,6 +243,8 @@ class Engine:
             self._is_processing.set()
         xml = await format_messages_with_context(batch, self._db)
         log.info("starting turn with %d msgs", len(batch))
+        # Show "typing..." in every chat involved in this batch.
+        await self._start_typing({m.chat_id for m in batch})
         await self._worker.send(xml)
 
     async def _maybe_inject(self) -> None:
@@ -219,6 +257,162 @@ class Engine:
         xml = await format_messages_with_context(batch, self._db)
         await self._worker.inject(xml)
         log.info("injected %d msgs into running turn", len(batch))
+
+        # Re-arm the typing indicator for the injected chats. There are
+        # two cases to handle, and the bug we're fixing was that we only
+        # handled the first one:
+        #
+        # 1. Typing loop is still running (i.e., the model hasn't sent
+        #    anything yet this turn). Just add the new chats to the set
+        #    so the next refresh tick covers them.
+        #
+        # 2. Typing loop has already exited because ``notify_chat_replied``
+        #    fired earlier this turn (the model sent its first reply, we
+        #    stopped typing, and now the user is firing a follow-up while
+        #    CC is still processing the wrap-up of the previous turn —
+        #    StructuredOutput etc.). In this case the loop is gone and we
+        #    must restart it from scratch — same path as a fresh turn.
+        new_chats = {m.chat_id for m in batch}
+        if self._typing_task is not None and not self._typing_task.done():
+            self._typing_chats.update(new_chats)
+        else:
+            await self._start_typing(new_chats)
+
+    # ------------------------------------------------------------------
+    # Typing indicator
+    # ------------------------------------------------------------------
+
+    async def _start_typing(self, chat_ids: set[int]) -> None:
+        """Fire the first typing call synchronously, then spawn the refresh loop."""
+        log.info(
+            "start_typing called: chats=%s action_set=%s task_state=%s",
+            chat_ids,
+            self._typing_action is not None,
+            "None" if self._typing_task is None else (
+                "done" if self._typing_task.done() else "running"
+            ),
+        )
+        if self._typing_action is None or not chat_ids:
+            return
+        import time
+
+        self._typing_chats = set(chat_ids)
+        self._typing_wake.clear()
+        self._typing_started_at = time.monotonic()
+        await self._fire_typing_once()
+        if self._typing_task is None or self._typing_task.done():
+            self._typing_task = asyncio.create_task(
+                self._typing_refresh_loop(), name="pyclaudir-typing"
+            )
+
+    def notify_chat_replied(self, chat_id: int) -> None:
+        """Called by ``send_message`` the moment Telegram confirms delivery.
+
+        Drops the chat from the typing set and wakes the loop so it exits.
+        But — and this is the subtle part — if the typing indicator has
+        been "live" for less than :data:`MIN_TYPING_VISIBLE_SECONDS`, we
+        defer the actual stop. This is because Telegram clients suppress
+        very brief typing displays to avoid flicker, so a fast turn 2
+        (warm CC, ~1s response) was reaching ``notify_chat_replied``
+        before the indicator had a chance to render. The user observed
+        "typing only shows on the first message after start" because the
+        first message was naturally slow (cold cache), and subsequent
+        messages were too fast for typing to render at all.
+
+        This is a sync function (not async) because it's called from
+        inside the ``send_message`` tool's coroutine and we don't want
+        to introduce an extra ``await`` between message delivery and
+        notification.
+        """
+        if chat_id not in self._typing_chats:
+            return
+
+        import time
+
+        elapsed = time.monotonic() - self._typing_started_at
+        remaining = MIN_TYPING_VISIBLE_SECONDS - elapsed
+
+        if remaining <= 0:
+            # Typing has been live long enough; stop immediately.
+            self._typing_chats.discard(chat_id)
+            self._typing_wake.set()
+            return
+
+        # Too fast — defer the discard so the indicator is visible for
+        # at least MIN_TYPING_VISIBLE_SECONDS from when it started.
+        # During the deferral the typing loop keeps refreshing.
+        async def _deferred_discard() -> None:
+            try:
+                await asyncio.sleep(remaining)
+            except asyncio.CancelledError:
+                return
+            self._typing_chats.discard(chat_id)
+            self._typing_wake.set()
+
+        # Schedule it; we don't await — notify_chat_replied returns
+        # immediately so the send_message tool isn't blocked.
+        self._typing_deferred_stop = asyncio.create_task(
+            _deferred_discard(), name="pyclaudir-typing-deferred-stop"
+        )
+
+    async def _stop_typing(self) -> None:
+        self._typing_chats.clear()
+        self._typing_wake.set()
+        # Cancel any pending deferred discard so it doesn't fire after we
+        # already stopped.
+        if self._typing_deferred_stop is not None and not self._typing_deferred_stop.done():
+            self._typing_deferred_stop.cancel()
+            try:
+                await self._typing_deferred_stop
+            except (asyncio.CancelledError, Exception):
+                pass
+        self._typing_deferred_stop = None
+        if self._typing_task is not None and not self._typing_task.done():
+            self._typing_task.cancel()
+            try:
+                await self._typing_task
+            except (asyncio.CancelledError, Exception):
+                pass
+        self._typing_task = None
+
+    async def _fire_typing_once(self) -> None:
+        if self._typing_action is None:
+            return
+        for chat_id in list(self._typing_chats):
+            try:
+                await self._typing_action(chat_id)
+                log.info("typing fired for chat %s", chat_id)
+            except Exception as exc:  # pragma: no cover
+                log.warning("typing action failed for chat %s: %s", chat_id, exc)
+
+    async def _typing_refresh_loop(self) -> None:
+        """Refresh typing every ~4s (the first call already fired in start).
+
+        Telegram's typing action expires server-side after ~5s, so we
+        refresh slightly faster than that to avoid a visible gap. The
+        first call has already been awaited synchronously by
+        :meth:`_start_typing`, so this loop only handles the *subsequent*
+        ticks.
+
+        Between refreshes we ``wait_for`` the wake event with a 4s timeout
+        so :meth:`notify_chat_replied` can short-circuit the sleep and exit
+        the loop immediately when the model successfully sends a message.
+        """
+        try:
+            while self._typing_chats:
+                self._typing_wake.clear()
+                try:
+                    await asyncio.wait_for(
+                        self._typing_wake.wait(),
+                        timeout=TYPING_REFRESH_SECONDS,
+                    )
+                except asyncio.TimeoutError:
+                    pass
+                if not self._typing_chats:
+                    return
+                await self._fire_typing_once()
+        except asyncio.CancelledError:
+            raise
 
     # ------------------------------------------------------------------
     # Control loop
@@ -235,6 +429,7 @@ class Engine:
 
                 result: TurnResult = await self._worker.wait_for_result()
                 self._is_processing.clear()
+                await self._stop_typing()
                 action = result.control.action if result.control else None
                 log.info(
                     "turn done (action=%s, dropped_text=%s, text_blocks=%d)",
@@ -250,6 +445,10 @@ class Engine:
                     )
                     await self._worker.send(error_xml)
                     self._is_processing.set()
+                    # Re-show typing for the same chats — they're still
+                    # waiting for an actual reply.
+                    if self._typing_chats:
+                        await self._start_typing(set(self._typing_chats))
                     continue
 
                 if action == "sleep" and result.control and result.control.sleep_ms:

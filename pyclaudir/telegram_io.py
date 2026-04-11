@@ -74,13 +74,18 @@ class TelegramDispatcher:
         self,
         config: Config,
         db: Database,
-        engine: EnginePort,
+        engine: EnginePort | None = None,
         *,
         chat_titles: dict[int, str] | None = None,
     ) -> None:
         self.config = config
         self.db = db
-        self.engine = engine
+        #: May be ``None`` at construction time so callers can break the
+        #: circular dep between dispatcher (owns the bot) and engine
+        #: (needs the bot for the typing indicator). Must be set before
+        #: :meth:`start` is called, otherwise inbound messages will crash
+        #: when the handler tries to forward them.
+        self.engine: EnginePort | None = engine
         #: Shared with ToolContext.chat_titles so outbound logs can render
         #: the chat's display name. We populate it from every inbound message.
         self.chat_titles: dict[int, str] = chat_titles if chat_titles is not None else {}
@@ -181,6 +186,9 @@ class TelegramDispatcher:
         if not allowed:
             return
 
+        if self.engine is None:
+            log.error("dispatcher received message before engine was attached")
+            return
         await self.engine.submit(cm)
 
     async def _on_edited(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -203,6 +211,11 @@ class TelegramDispatcher:
     # ------------------------------------------------------------------
 
     async def start(self) -> None:
+        if self.engine is None:
+            raise RuntimeError(
+                "TelegramDispatcher.start() called with no engine attached. "
+                "Set dispatcher.engine before starting."
+            )
         await self.application.initialize()
         await self.application.start()
         await self.application.updater.start_polling(

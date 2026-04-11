@@ -112,11 +112,40 @@ async def _async_main() -> None:
     await worker.start()
     await worker.supervise()
 
-    engine = Engine(worker, debounce_ms=config.debounce_ms, db=db)
-    await engine.start()
+    # The dispatcher owns the bot, so we build it first, then hand a
+    # closure into the engine for the typing indicator.
+    dispatcher = TelegramDispatcher(config, db, engine=None, chat_titles=chat_titles)  # type: ignore[arg-type]
 
-    dispatcher = TelegramDispatcher(config, db, engine, chat_titles=chat_titles)
+    async def _typing(chat_id: int) -> None:
+        import time as _t
+
+        t0 = _t.monotonic()
+        try:
+            ok = await dispatcher.bot.send_chat_action(chat_id=chat_id, action="typing")
+            elapsed_ms = int((_t.monotonic() - t0) * 1000)
+            # Temporarily INFO so we can confirm PTB is actually accepting
+            # the call on turn 2 and beyond. Drop back to DEBUG once the
+            # typing visibility issue is conclusively diagnosed.
+            log.info(
+                "send_chat_action chat=%s returned=%r elapsed=%dms",
+                chat_id, ok, elapsed_ms,
+            )
+        except Exception as exc:
+            log.warning("send_chat_action failed for chat %s: %s", chat_id, exc)
+
+    engine = Engine(
+        worker,
+        debounce_ms=config.debounce_ms,
+        db=db,
+        typing_action=_typing,
+    )
+    await engine.start()
+    dispatcher.engine = engine
     ctx.bot = dispatcher.bot
+    # Wire send_message → engine notification so the typing indicator
+    # stops the moment the user has the message in their hand, not when
+    # the entire CC turn officially ends.
+    ctx.on_chat_replied = engine.notify_chat_replied
     await dispatcher.start()
     log.info("nodira is live")
 

@@ -45,6 +45,16 @@ class SendMessageTool(BaseTool):
             parse_mode=args.parse_mode,
         )
 
+        # Notify the engine immediately so the "typing..." indicator can
+        # stop refreshing. We do this *before* persistence + transcript
+        # because those are local-only and the user is staring at their
+        # phone right now.
+        if self.ctx.on_chat_replied is not None:
+            try:
+                self.ctx.on_chat_replied(args.chat_id)
+            except Exception:  # pragma: no cover
+                pass
+
         log_outbound(
             chat_id=args.chat_id,
             chat_titles=self.ctx.chat_titles,

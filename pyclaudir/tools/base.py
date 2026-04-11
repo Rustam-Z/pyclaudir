@@ -61,6 +61,12 @@ class ToolContext:
     #: chat_id → display name. Populated by the dispatcher on every inbound
     #: message so outbound transcript lines can show the chat's title.
     chat_titles: dict[int, str] = field(default_factory=dict)
+    #: Sync callback the ``send_message`` tool fires the moment Telegram
+    #: confirms delivery. The engine wires it to drop the chat from the
+    #: typing-indicator set so "typing..." vanishes as soon as the user has
+    #: the message in their hand — not when the entire CC turn officially
+    #: ends, which can be 5-10 seconds later.
+    on_chat_replied: Any = None  # Callable[[int], None] | None — kept untyped to avoid an import
 
 
 @dataclass
