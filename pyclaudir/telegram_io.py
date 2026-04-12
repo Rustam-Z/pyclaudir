@@ -25,6 +25,7 @@ from telegram.ext import (
     filters,
 )
 
+from .access import AccessConfig, gate, load_access, save_access
 from .config import Config
 from .db.database import Database
 from .db.messages import (
@@ -103,6 +104,11 @@ class TelegramDispatcher:
         self.application.add_handler(CommandHandler("kill", self._cmd_kill))
         self.application.add_handler(CommandHandler("reset", self._cmd_reset))
         self.application.add_handler(CommandHandler("restart", self._cmd_restart))
+        # Owner-only access management commands.
+        self.application.add_handler(CommandHandler("allow", self._cmd_allow))
+        self.application.add_handler(CommandHandler("deny", self._cmd_deny))
+        self.application.add_handler(CommandHandler("dmpolicy", self._cmd_dmpolicy))
+        self.application.add_handler(CommandHandler("access", self._cmd_access))
 
         # All other text/caption messages
         self.application.add_handler(
@@ -139,6 +145,76 @@ class TelegramDispatcher:
         await update.effective_message.reply_text("restart acknowledged (engine wires this in step 8)")
 
     # ------------------------------------------------------------------
+    # Access management commands (owner-only)
+    # ------------------------------------------------------------------
+
+    async def _cmd_allow(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._is_owner(update):
+            return
+        args = ctx.args
+        if not args:
+            await update.effective_message.reply_text("Usage: /allow <user_id>")
+            return
+        try:
+            user_id = int(args[0])
+        except ValueError:
+            await update.effective_message.reply_text("User ID must be a number.")
+            return
+        access = load_access(self.config.access_path)
+        if user_id not in access.allowed_users:
+            access.allowed_users.append(user_id)
+            save_access(self.config.access_path, access)
+        await update.effective_message.reply_text(f"User {user_id} added to DM allowlist.")
+
+    async def _cmd_deny(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._is_owner(update):
+            return
+        args = ctx.args
+        if not args:
+            await update.effective_message.reply_text("Usage: /deny <user_id>")
+            return
+        try:
+            user_id = int(args[0])
+        except ValueError:
+            await update.effective_message.reply_text("User ID must be a number.")
+            return
+        access = load_access(self.config.access_path)
+        if user_id in access.allowed_users:
+            access.allowed_users.remove(user_id)
+            save_access(self.config.access_path, access)
+            await update.effective_message.reply_text(f"User {user_id} removed from DM allowlist.")
+        else:
+            await update.effective_message.reply_text(f"User {user_id} was not in the allowlist.")
+
+    async def _cmd_dmpolicy(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._is_owner(update):
+            return
+        args = ctx.args
+        valid = ("owner_only", "allowlist", "open")
+        if not args or args[0] not in valid:
+            await update.effective_message.reply_text(
+                f"Usage: /dmpolicy <{'|'.join(valid)}>"
+            )
+            return
+        access = load_access(self.config.access_path)
+        access.dm_policy = args[0]  # type: ignore[assignment]
+        save_access(self.config.access_path, access)
+        await update.effective_message.reply_text(f"DM policy set to: {args[0]}")
+
+    async def _cmd_access(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not self._is_owner(update):
+            return
+        access = load_access(self.config.access_path)
+        users = ", ".join(str(u) for u in access.allowed_users) or "(none)"
+        chats = ", ".join(str(c) for c in access.allowed_chats) or "(none)"
+        await update.effective_message.reply_text(
+            f"DM policy: {access.dm_policy}\n"
+            f"Allowed users: {users}\n"
+            f"Allowed chats: {chats}\n"
+            f"Owner: {self.config.owner_id} (always allowed)"
+        )
+
+    # ------------------------------------------------------------------
     # Message ingest
     # ------------------------------------------------------------------
 
@@ -169,7 +245,15 @@ class TelegramDispatcher:
             timestamp=cm.timestamp,
         )
 
-        allowed = self.config.is_chat_allowed(cm.chat_id, cm.user_id)
+        # Hot-reload access config on every message.
+        access = load_access(self.config.access_path)
+        allowed = gate(
+            access=access,
+            owner_id=self.config.owner_id,
+            chat_id=cm.chat_id,
+            user_id=cm.user_id,
+            chat_type=update.effective_chat.type if update.effective_chat else None,
+        )
         log_inbound(
             chat_id=cm.chat_id,
             chat_type=update.effective_chat.type if update.effective_chat else None,

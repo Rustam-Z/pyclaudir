@@ -44,12 +44,15 @@ All knobs live in environment variables (or `.env`):
 |---|---|---|---|
 | `TELEGRAM_BOT_TOKEN` | yes | — | from @BotFather |
 | `PYCLAUDIR_OWNER_ID` | yes | — | your numeric Telegram user id |
-| `PYCLAUDIR_ALLOWED_CHATS` | no | empty | comma-separated chat ids; empty = owner DMs only |
-| `PYCLAUDIR_DATA_DIR` | no | `./data` | SQLite, memories, raw CC logs all live here |
+| `PYCLAUDIR_DATA_DIR` | no | `./data` | SQLite, memories, access config, raw CC logs |
 | `PYCLAUDIR_MODEL` | no | `claude-opus-4-6` | passed to `--model` |
-| `PYCLAUDIR_DEBOUNCE_MS` | no | `1000` | message coalescing window |
+| `PYCLAUDIR_EFFORT` | no | `high` | `--effort` flag: `low`, `medium`, `high`, `max` |
+| `PYCLAUDIR_DEBOUNCE_MS` | no | `0` | message coalescing window (0 = instant) |
 | `PYCLAUDIR_RATE_LIMIT_PER_MIN` | no | `20` | per-chat outbound cap |
 | `CLAUDE_CODE_BIN` | no | `claude` | path to the CC CLI |
+
+Group and DM access is managed via `data/access.json`, not env vars.
+See **Access control** below.
 
 ## How it works
 
@@ -106,6 +109,56 @@ class EchoTool(BaseTool):
 ```
 
 Restart `python -m pyclaudir`. The tool is live.
+
+## Access control
+
+Who can talk to Nodira is governed by `data/access.json`, which is
+**hot-reloaded on every inbound message** — edits take effect immediately
+without a restart.
+
+```json
+{
+  "dm_policy": "owner_only",
+  "allowed_users": [],
+  "allowed_chats": [-1003938080260]
+}
+```
+
+### DM policies
+
+| Policy | Who can DM Nodira |
+|---|---|
+| `owner_only` | Only `PYCLAUDIR_OWNER_ID`. Default. |
+| `allowlist` | Owner + user IDs in `allowed_users`. |
+| `open` | Anyone. |
+
+The owner is **always** implicitly allowed regardless of policy.
+
+### Groups
+
+A group must be in `allowed_chats` for Nodira to respond in it. Messages
+from unlisted groups are still persisted to SQLite (audit trail) but
+dropped before the engine sees them.
+
+### Managing access from Telegram (owner-only commands)
+
+```
+/access                      Show current policy, allowed users, allowed chats
+/allow 123456789             Add a user to the DM allowlist
+/deny 123456789              Remove a user from the DM allowlist
+/dmpolicy allowlist          Change DM policy (owner_only | allowlist | open)
+```
+
+Or edit `data/access.json` directly — changes are picked up on the next
+message.
+
+### First run bootstrap
+
+If `data/access.json` doesn't exist on startup, pyclaudir creates it from
+`PYCLAUDIR_ALLOWED_CHATS` in `.env` (if set) with `dm_policy: "owner_only"`.
+After that, `access.json` is the source of truth and the env var is ignored.
+
+A template is provided at `data/access.json.example`.
 
 ## Memory
 
@@ -383,11 +436,13 @@ pyclaudir/
 ├── prompts/system.md
 ├── data/                       # gitignored
 │   ├── pyclaudir.db            # SQLite (messages, users, tool_calls, ...)
+│   ├── access.json             # DM policy + allowed users/chats (hot-reloaded)
 │   ├── session_id              # CC session id for --resume
-│   ├── memories/               # operator-curated read-only notes
+│   ├── memories/               # Nodira's working memory
 │   └── cc_logs/                # raw CC stdout/stderr capture
 ├── pyclaudir/
 │   ├── __main__.py             # entrypoint + log setup
+│   ├── access.py               # hot-reloadable access.json gate
 │   ├── config.py
 │   ├── db/{database.py,messages.py,migrations/001_initial.sql}
 │   ├── telegram_io.py
@@ -417,6 +472,7 @@ pyclaudir/
     ├── test_tool_discovery.py
     ├── test_memory_path_safety.py
     ├── test_security_invariants.py     # 8 invariants (#3 has 3 sub-tests)
+    ├── test_access.py                   # gate(), hot-reload, atomic writes
     ├── test_memory_writes.py            # write_memory + append_memory + read-before-write
     ├── test_telegram_persistence.py
     ├── test_cc_worker_argv.py

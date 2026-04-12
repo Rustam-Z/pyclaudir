@@ -8,6 +8,7 @@ __pycache__/
 # Project data (runtime)
 data/
 !data/memories/.gitkeep
+!data/access.json.example
 
 # Env
 .env

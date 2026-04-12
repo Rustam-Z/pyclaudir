@@ -104,21 +104,10 @@ async def test_reactions_round_trip(db: Database) -> None:
 
 @pytest.mark.asyncio
 async def test_dispatcher_drops_disallowed_chats() -> None:
-    """The dispatcher persists messages from disallowed chats but does NOT
-    forward them to the engine. We exercise the helper directly because
-    spinning up PTB requires a real token."""
-    from pyclaudir.config import Config
+    """The gate() function blocks disallowed chats. Owner DMs always pass;
+    stranger DMs and unlisted groups are dropped."""
+    from pyclaudir.access import AccessConfig, gate
 
-    cfg = Config(
-        telegram_bot_token="fake",
-        owner_id=42,
-        allowed_chats=(),  # only owner DMs
-        data_dir=Path("/tmp"),
-        model="claude-opus-4-6",
-        effort="high",
-        debounce_ms=1000,
-        rate_limit_per_min=20,
-        claude_code_bin="claude",
-    )
-    assert cfg.is_chat_allowed(chat_id=-100999, user_id=999) is False
-    assert cfg.is_chat_allowed(chat_id=42, user_id=42) is True
+    access = AccessConfig(dm_policy="owner_only", allowed_users=[], allowed_chats=[])
+    assert gate(access=access, owner_id=42, chat_id=-100999, user_id=999, chat_type="supergroup") is False
+    assert gate(access=access, owner_id=42, chat_id=42, user_id=42, chat_type="private") is True

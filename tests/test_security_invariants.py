@@ -247,25 +247,15 @@ def test_invariant_6_no_subprocess_in_tools() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_invariant_7_owner_check_helper() -> None:
-    """``Config.is_chat_allowed`` is the gate. With an empty allowlist only
-    the owner's user_id may pass."""
-    from pyclaudir.config import Config
+def test_invariant_7_owner_check_via_gate() -> None:
+    """The ``gate()`` function is the access decision point. The owner is
+    always allowed; strangers are blocked under ``owner_only`` policy."""
+    from pyclaudir.access import AccessConfig, gate
 
-    cfg = Config(
-        telegram_bot_token="t",
-        owner_id=42,
-        allowed_chats=(),
-        data_dir=Path("/tmp/pyclaudir-test"),
-        model="claude-opus-4-6",
-        effort="high",
-        debounce_ms=1000,
-        rate_limit_per_min=20,
-        claude_code_bin="claude",
-    )
-    assert cfg.is_chat_allowed(chat_id=42, user_id=42) is True
-    assert cfg.is_chat_allowed(chat_id=999, user_id=999) is False
-    assert cfg.is_chat_allowed(chat_id=-100123, user_id=999) is False
+    access = AccessConfig(dm_policy="owner_only", allowed_users=[], allowed_chats=[])
+    assert gate(access=access, owner_id=42, chat_id=42, user_id=42, chat_type="private") is True
+    assert gate(access=access, owner_id=42, chat_id=999, user_id=999, chat_type="private") is False
+    assert gate(access=access, owner_id=42, chat_id=-100123, user_id=999, chat_type="supergroup") is False
 
 
 # ---------------------------------------------------------------------------

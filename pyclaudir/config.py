@@ -67,7 +67,6 @@ class Config:
 
     telegram_bot_token: str
     owner_id: int
-    allowed_chats: tuple[int, ...]
     data_dir: Path
     model: str
     effort: str
@@ -80,22 +79,20 @@ class Config:
     memories_dir: Path = field(init=False)
     session_id_path: Path = field(init=False)
     cc_logs_dir: Path = field(init=False)
+    access_path: Path = field(init=False)
 
     def __post_init__(self) -> None:
-        # ``frozen=True`` blocks attribute assignment, so we go through
-        # ``object.__setattr__`` for the derived paths. They are pure
-        # functions of ``data_dir`` so freezing the rest is still safe.
         object.__setattr__(self, "db_path", self.data_dir / "pyclaudir.db")
         object.__setattr__(self, "memories_dir", self.data_dir / "memories")
         object.__setattr__(self, "session_id_path", self.data_dir / "session_id")
         object.__setattr__(self, "cc_logs_dir", self.data_dir / "cc_logs")
+        object.__setattr__(self, "access_path", self.data_dir / "access.json")
 
     @classmethod
     def from_env(cls) -> "Config":
         return cls(
             telegram_bot_token=_required("TELEGRAM_BOT_TOKEN"),
             owner_id=int(_required("PYCLAUDIR_OWNER_ID")),
-            allowed_chats=tuple(_csv_ints("PYCLAUDIR_ALLOWED_CHATS")),
             data_dir=Path(_env("PYCLAUDIR_DATA_DIR", "./data") or "./data").resolve(),
             model=_env("PYCLAUDIR_MODEL", "claude-opus-4-6") or "claude-opus-4-6",
             effort=_env("PYCLAUDIR_EFFORT", "high") or "high",
@@ -110,7 +107,6 @@ class Config:
         return cls(
             telegram_bot_token="test-token",
             owner_id=0,
-            allowed_chats=(),
             data_dir=data_dir.resolve(),
             model="claude-opus-4-6",
             effort="high",
@@ -123,13 +119,3 @@ class Config:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.memories_dir.mkdir(parents=True, exist_ok=True)
         self.cc_logs_dir.mkdir(parents=True, exist_ok=True)
-
-    def is_chat_allowed(self, chat_id: int, user_id: int) -> bool:
-        """A chat is allowed if it's in the allowlist or it's the owner DMing us.
-
-        When ``allowed_chats`` is empty we restrict to owner DMs only.
-        Note: Telegram private-chat IDs equal the user ID.
-        """
-        if self.allowed_chats:
-            return chat_id in self.allowed_chats or user_id == self.owner_id
-        return user_id == self.owner_id

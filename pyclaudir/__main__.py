@@ -18,6 +18,7 @@ import signal
 import tempfile
 from pathlib import Path
 
+from .access import AccessConfig, load_access, save_access
 from .cc_schema import schema_json
 from .cc_worker import CcSpawnSpec, CcWorker
 from .config import Config
@@ -61,6 +62,28 @@ async def _async_main() -> None:
 
     config = Config.from_env()
     config.ensure_dirs()
+
+    # Bootstrap access.json from env vars on first run.
+    if not config.access_path.exists():
+        import os
+
+        seed_chats = []
+        raw = os.environ.get("PYCLAUDIR_ALLOWED_CHATS", "")
+        if raw:
+            seed_chats = [int(c.strip()) for c in raw.split(",") if c.strip()]
+        seed = AccessConfig(
+            dm_policy="owner_only",
+            allowed_users=[],
+            allowed_chats=seed_chats,
+        )
+        save_access(config.access_path, seed)
+        log.info("created %s (dm_policy=owner_only, chats=%s)", config.access_path, seed_chats)
+    else:
+        access = load_access(config.access_path)
+        log.info(
+            "access: dm_policy=%s, allowed_users=%d, allowed_chats=%d",
+            access.dm_policy, len(access.allowed_users), len(access.allowed_chats),
+        )
 
     db = await Database.open(config.db_path)
     log.info("database ready at %s", config.db_path)
