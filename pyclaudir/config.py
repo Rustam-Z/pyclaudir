@@ -70,6 +70,7 @@ class Config:
     allowed_chats: tuple[int, ...]
     data_dir: Path
     model: str
+    effort: str
     debounce_ms: int
     rate_limit_per_min: int
     claude_code_bin: str
@@ -97,7 +98,8 @@ class Config:
             allowed_chats=tuple(_csv_ints("PYCLAUDIR_ALLOWED_CHATS")),
             data_dir=Path(_env("PYCLAUDIR_DATA_DIR", "./data") or "./data").resolve(),
             model=_env("PYCLAUDIR_MODEL", "claude-opus-4-6") or "claude-opus-4-6",
-            debounce_ms=_int("PYCLAUDIR_DEBOUNCE_MS", 1000),
+            effort=_env("PYCLAUDIR_EFFORT", "high") or "high",
+            debounce_ms=_int("PYCLAUDIR_DEBOUNCE_MS", 0),
             rate_limit_per_min=_int("PYCLAUDIR_RATE_LIMIT_PER_MIN", 20),
             claude_code_bin=_env("CLAUDE_CODE_BIN", "claude") or "claude",
         )
@@ -111,6 +113,7 @@ class Config:
             allowed_chats=(),
             data_dir=data_dir.resolve(),
             model="claude-opus-4-6",
+            effort="high",
             debounce_ms=1000,
             rate_limit_per_min=20,
             claude_code_bin="claude",

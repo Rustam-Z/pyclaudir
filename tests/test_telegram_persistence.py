@@ -115,6 +115,7 @@ async def test_dispatcher_drops_disallowed_chats() -> None:
         allowed_chats=(),  # only owner DMs
         data_dir=Path("/tmp"),
         model="claude-opus-4-6",
+        effort="high",
         debounce_ms=1000,
         rate_limit_per_min=20,
         claude_code_bin="claude",

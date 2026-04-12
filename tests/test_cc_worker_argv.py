@@ -45,6 +45,7 @@ def test_build_argv_includes_required_flags(spec: CcSpawnSpec) -> None:
     assert "--output-format" in argv
     assert "--verbose" in argv
     assert "--model" in argv
+    assert "--effort" in argv
     assert "--system-prompt" in argv
     assert "--mcp-config" in argv
     assert "--strict-mcp-config" in argv
@@ -184,3 +185,118 @@ def test_event_parser_logs_done_with_action(spec: CcSpawnSpec, caplog) -> None:
     })
     msgs = [r.getMessage() for r in caplog.records if r.name == "pyclaudir.cc"]
     assert any("[CC.done]" in m and "action=stop" in m for m in msgs)
+
+
+def test_structured_output_parsed_from_tool_use(spec: CcSpawnSpec) -> None:
+    """Claudir confirmed: StructuredOutput arrives as a tool_use event,
+    NOT in the result event's payload. This test pins the correct parsing
+    path that was broken for the entire v1 release (always action=None).
+    """
+    worker = CcWorker(spec)
+    worker._current_turn = TurnResult()
+
+    # Step 1: the model calls StructuredOutput as a tool_use
+    worker._handle_event({
+        "type": "assistant",
+        "message": {
+            "content": [
+                {
+                    "type": "tool_use",
+                    "name": "StructuredOutput",
+                    "id": "toolu_structured_001",
+                    "input": {
+                        "action": "stop",
+                        "reason": "Greeted the user.",
+                    },
+                }
+            ]
+        },
+    })
+    # Control action should be parsed BEFORE the result event
+    assert worker._current_turn.control is not None
+    assert worker._current_turn.control.action == "stop"
+    assert worker._current_turn.control.reason == "Greeted the user."
+
+    # Step 2: the tool_result comes back
+    worker._handle_event({
+        "type": "user",
+        "message": {
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_structured_001",
+                    "content": [{"type": "text", "text": "Structured output provided successfully"}],
+                    "is_error": False,
+                }
+            ]
+        },
+    })
+
+    # Step 3: the result event finalises the turn
+    worker._handle_event({"type": "result"})
+    queued = worker._result_queue.get_nowait()
+
+    # The turn should have the parsed control, not None
+    assert queued.control is not None
+    assert queued.control.action == "stop"
+    assert queued.control.reason == "Greeted the user."
+    assert queued.dropped_text is False
+
+
+def test_structured_output_sleep_action(spec: CcSpawnSpec) -> None:
+    worker = CcWorker(spec)
+    worker._current_turn = TurnResult()
+    worker._handle_event({
+        "type": "assistant",
+        "message": {
+            "content": [
+                {
+                    "type": "tool_use",
+                    "name": "StructuredOutput",
+                    "id": "toolu_sleep_001",
+                    "input": {
+                        "action": "sleep",
+                        "reason": "Nothing to do for a while.",
+                        "sleep_ms": 30000,
+                    },
+                }
+            ]
+        },
+    })
+    assert worker._current_turn.control is not None
+    assert worker._current_turn.control.action == "sleep"
+    assert worker._current_turn.control.sleep_ms == 30000
+
+
+def test_structured_output_with_text_blocks_is_not_dropped_text(spec: CcSpawnSpec) -> None:
+    """If the model emits text AND calls StructuredOutput, dropped_text
+    should be False because the turn ended cleanly with a control action."""
+    worker = CcWorker(spec)
+    worker._current_turn = TurnResult()
+    # Model emits some thinking text
+    worker._handle_event({
+        "type": "assistant",
+        "message": {"content": [{"type": "text", "text": "Let me think..."}]},
+    })
+    # Then calls StructuredOutput
+    worker._handle_event({
+        "type": "assistant",
+        "message": {
+            "content": [
+                {
+                    "type": "tool_use",
+                    "name": "StructuredOutput",
+                    "id": "toolu_so",
+                    "input": {"action": "stop", "reason": "done"},
+                }
+            ]
+        },
+    })
+    # Result event
+    worker._handle_event({"type": "result"})
+    queued = worker._result_queue.get_nowait()
+    assert queued.control is not None
+    assert queued.control.action == "stop"
+    # Has text blocks BUT also has control → NOT dropped text
+    assert queued.text_blocks == ["Let me think..."]
+    assert queued.dropped_text is False

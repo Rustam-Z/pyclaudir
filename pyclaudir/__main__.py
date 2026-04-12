@@ -105,10 +105,46 @@ async def _async_main() -> None:
         system_prompt_path=Path("prompts/system.md").resolve(),
         mcp_config_path=mcp_config_path,
         json_schema_path=schema_path,
+        effort=config.effort,
         session_id=session_id,
         cc_logs_dir=config.cc_logs_dir,
     )
-    worker = CcWorker(spec, heartbeat=ctx.heartbeat)
+    async def _on_cc_crash(stderr_tail: list[str], attempt: int, backoff: float) -> None:
+        # Notify active chats if the engine has any
+        if engine is not None and engine._active_chats:
+            for chat_id in engine._active_chats:
+                try:
+                    await dispatcher.bot.send_message(
+                        chat_id=chat_id,
+                        text=(
+                            f"⚠️ I ran into a technical issue and need to restart "
+                            f"(attempt {attempt}, retrying in {backoff:.0f}s). "
+                            f"Please resend your last message in a moment."
+                        ),
+                    )
+                except Exception:
+                    pass
+        # Also notify owner if it's a different chat
+        owner_chat = config.owner_id
+        if owner_chat not in (engine._active_chats if engine else set()):
+            try:
+                stderr_summary = "\n".join(stderr_tail[-3:]) if stderr_tail else "(no stderr)"
+                await dispatcher.bot.send_message(
+                    chat_id=owner_chat,
+                    text=(
+                        f"🔧 CC subprocess crashed (attempt {attempt}, "
+                        f"backoff {backoff:.0f}s).\n\n"
+                        f"Last stderr:\n```\n{stderr_summary}\n```"
+                    ),
+                    parse_mode="MarkdownV2" if "`" not in stderr_summary else None,
+                )
+            except Exception:
+                pass
+
+    # Engine is declared here but constructed after dispatcher
+    engine = None  # type: ignore[assignment]
+
+    worker = CcWorker(spec, heartbeat=ctx.heartbeat, on_crash=_on_cc_crash)
     await worker.start()
     await worker.supervise()
 
@@ -133,11 +169,18 @@ async def _async_main() -> None:
         except Exception as exc:
             log.warning("send_chat_action failed for chat %s: %s", chat_id, exc)
 
+    async def _error_notify(chat_id: int, text: str) -> None:
+        try:
+            await dispatcher.bot.send_message(chat_id=chat_id, text=text)
+        except Exception as exc:
+            log.warning("error notify failed for chat %s: %s", chat_id, exc)
+
     engine = Engine(
         worker,
         debounce_ms=config.debounce_ms,
         db=db,
         typing_action=_typing,
+        error_notify=_error_notify,
     )
     await engine.start()
     dispatcher.engine = engine

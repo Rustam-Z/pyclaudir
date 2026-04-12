@@ -82,6 +82,7 @@ class CcSpawnSpec:
     system_prompt_path: Path
     mcp_config_path: Path
     json_schema_path: Path
+    effort: str = "high"
     session_id: str | None = None
     #: If set, raw stdout/stderr from the CC subprocess is appended to
     #: ``<cc_logs_dir>/<session_id>.stream.jsonl`` and ``<session_id>.stderr.log``
@@ -124,6 +125,7 @@ def build_argv(spec: CcSpawnSpec) -> list[str]:
         "--output-format", "stream-json",
         "--verbose",
         "--model", spec.model,
+        "--effort", spec.effort,
         "--system-prompt", system_prompt,
         "--mcp-config", str(spec.mcp_config_path),
         "--strict-mcp-config",
@@ -161,8 +163,13 @@ class CcWorker:
     CRASH_LIMIT = 10
     CRASH_WINDOW_SECONDS = 600.0
 
+    #: Optional callback the supervisor calls when CC crashes.
+    #: Signature: ``async on_crash(stderr_tail: list[str], attempt: int, backoff: float)``
+    OnCrash = Any  # Callable[[list[str], int, float], Awaitable[None]] | None
+
     def __init__(
-        self, spec: CcSpawnSpec, *, heartbeat: Heartbeat | None = None
+        self, spec: CcSpawnSpec, *, heartbeat: Heartbeat | None = None,
+        on_crash: OnCrash = None,
     ) -> None:
         self.spec = spec
         self.heartbeat = heartbeat or Heartbeat()
@@ -177,6 +184,7 @@ class CcWorker:
         self._crash_times: list[float] = []
         self._supervisor_task: asyncio.Task | None = None
         self._stop_supervisor = asyncio.Event()
+        self._on_crash = on_crash
         # Raw-capture state. We open with "pending-<ts>" names if we don't
         # know the session id at start time, then rename to "<sid>.*" once
         # the system/init event tells us.
@@ -402,6 +410,11 @@ class CcWorker:
                 self.CRASH_BACKOFF_BASE * (2 ** (attempt - 1)),
             )
             log.warning("respawning cc in %.1fs (attempt %d)", backoff, attempt)
+            if self._on_crash is not None:
+                try:
+                    await self._on_crash(list(self._stderr_tail), attempt, backoff)
+                except Exception:
+                    log.debug("on_crash callback failed", exc_info=True)
             await asyncio.sleep(backoff)
             await self._terminate_proc()
             await self.start()
@@ -545,11 +558,24 @@ class CcWorker:
                         self._current_turn.text_blocks.append(txt)
                         log_cc_text(txt)
                 elif btype == "tool_use":
+                    tool_name = block.get("name", "?")
+                    tool_input = block.get("input")
                     log_cc_tool_use(
-                        tool_name=block.get("name", "?"),
+                        tool_name=tool_name,
                         tool_use_id=str(block.get("id", "")),
-                        args=block.get("input"),
+                        args=tool_input,
                     )
+                    # StructuredOutput is the definitive turn-end signal.
+                    # Claudir confirmed: the action lives in the tool_use
+                    # event's input field, NOT in the result event payload.
+                    if tool_name == "StructuredOutput" and isinstance(tool_input, dict):
+                        try:
+                            self._current_turn.control = ControlAction.model_validate(tool_input)
+                        except Exception:
+                            log.warning(
+                                "could not parse StructuredOutput input: %r",
+                                tool_input,
+                            )
                 elif btype == "thinking":
                     # Extended-thinking blocks (visible only with the right
                     # model + flag). Treat like text but with its own tag.

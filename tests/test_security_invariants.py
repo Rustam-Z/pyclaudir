@@ -67,12 +67,14 @@ def test_invariant_1_argv_has_allowlist_and_denylist(fake_spec: CcSpawnSpec) -> 
     assert "--disallowedTools" in argv
     deny_idx = argv.index("--disallowedTools") + 1
     deny_value = argv[deny_idx]
-    # The hard-denied tools that no Nodira operator scenario justifies.
     for forbidden in ("Bash", "Edit", "Write", "Read", "NotebookEdit"):
         assert forbidden in deny_value, f"{forbidden} missing from --disallowedTools"
-    # And re-confirm WebFetch/WebSearch are NOT denied (they were before).
     assert "WebFetch" not in deny_value
     assert "WebSearch" not in deny_value
+
+    # Effort flag must be present (Claudir-confirmed: high effort + extended
+    # thinking reduces round-trips and overall latency).
+    assert "--effort" in argv
 
 
 def test_invariant_1_argv_never_has_dangerously_skip(fake_spec: CcSpawnSpec) -> None:
@@ -256,6 +258,7 @@ def test_invariant_7_owner_check_helper() -> None:
         allowed_chats=(),
         data_dir=Path("/tmp/pyclaudir-test"),
         model="claude-opus-4-6",
+        effort="high",
         debounce_ms=1000,
         rate_limit_per_min=20,
         claude_code_bin="claude",

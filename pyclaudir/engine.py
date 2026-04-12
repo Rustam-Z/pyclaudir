@@ -42,6 +42,11 @@ MIN_TYPING_VISIBLE_SECONDS = 1.5
 #: ``send_chat_action`` to that chat. Engine doesn't import telegram.
 TypingAction = Callable[[int], Awaitable[None]]
 
+#: Async callable shape: ``await error_notify(chat_id, text)`` sends an
+#: error message directly via the bot, bypassing the MCP layer (which
+#: is dead when we need this). Engine doesn't import telegram.
+ErrorNotify = Callable[[int, str], Awaitable[None]]
+
 if TYPE_CHECKING:  # pragma: no cover
     from .cc_worker import CcWorker, TurnResult
     from .db.database import Database
@@ -153,6 +158,7 @@ class Engine:
         debounce_ms: int = 1000,
         db: "Database | None" = None,
         typing_action: TypingAction | None = None,
+        error_notify: ErrorNotify | None = None,
     ) -> None:
         self._worker = worker
         self._debounce = debounce_ms / 1000.0
@@ -160,6 +166,12 @@ class Engine:
         #: Optional callback that shows the "typing..." indicator in a
         #: Telegram chat. Wired by ``__main__.py`` to ``bot.send_chat_action``.
         self._typing_action = typing_action
+        #: Optional callback to send error messages directly via the bot
+        #: when CC is down and the MCP path is unavailable.
+        self._error_notify = error_notify
+        #: Chat IDs from the most recent batch. Used by error notification
+        #: so we know which chats were waiting when a failure occurs.
+        self._active_chats: set[int] = set()
         self._pending: list[ChatMessage] = []
         self._lock = asyncio.Lock()
         self._is_processing = asyncio.Event()
@@ -241,10 +253,11 @@ class Engine:
             batch = self._pending
             self._pending = []
             self._is_processing.set()
+        self._active_chats = {m.chat_id for m in batch}
         xml = await format_messages_with_context(batch, self._db)
         log.info("starting turn with %d msgs", len(batch))
         # Show "typing..." in every chat involved in this batch.
-        await self._start_typing({m.chat_id for m in batch})
+        await self._start_typing(set(self._active_chats))
         await self._worker.send(xml)
 
     async def _maybe_inject(self) -> None:
@@ -415,6 +428,24 @@ class Engine:
             raise
 
     # ------------------------------------------------------------------
+    # Error notification
+    # ------------------------------------------------------------------
+
+    async def _notify_error_to_chats(self, text: str) -> None:
+        """Send an error message directly via the bot to every chat that
+        was waiting for a response. Bypasses the MCP layer (which is dead
+        when we need this). Failures are swallowed — this is best-effort.
+        """
+        if self._error_notify is None:
+            return
+        for chat_id in self._active_chats:
+            try:
+                await self._error_notify(chat_id, text)
+                log.info("sent error notification to chat %s", chat_id)
+            except Exception as exc:
+                log.warning("failed to send error notification to %s: %s", chat_id, exc)
+
+    # ------------------------------------------------------------------
     # Control loop
     # ------------------------------------------------------------------
 
@@ -423,11 +454,24 @@ class Engine:
         try:
             while not self._stop.is_set():
                 if not self._is_processing.is_set():
-                    # Idle. Wait for either work to arrive or a stop signal.
                     await asyncio.sleep(0.05)
                     continue
 
-                result: TurnResult = await self._worker.wait_for_result()
+                try:
+                    result: TurnResult = await self._worker.wait_for_result()
+                except Exception as exc:
+                    # CC subprocess died mid-turn. The worker's supervisor
+                    # will handle respawning; our job is to tell the user.
+                    log.error("turn failed: %s", exc)
+                    self._is_processing.clear()
+                    await self._stop_typing()
+                    await self._notify_error_to_chats(
+                        "⚠️ Sorry, I ran into a temporary issue. "
+                        "I'm restarting and will be back in a few seconds."
+                    )
+                    self._active_chats.clear()
+                    continue
+
                 self._is_processing.clear()
                 await self._stop_typing()
                 action = result.control.action if result.control else None
@@ -436,20 +480,28 @@ class Engine:
                     action, result.dropped_text, len(result.text_blocks),
                 )
 
+                # Check for rate-limit signals in stderr
+                for line in result.stderr_tail:
+                    lower = line.lower()
+                    if "rate limit" in lower or "overloaded" in lower:
+                        await self._notify_error_to_chats(
+                            "⚠️ I've been rate-limited by the API. "
+                            "Give me a moment and try again shortly."
+                        )
+                        break
+
                 if result.dropped_text:
-                    # The model produced text but never called send_message.
-                    # Tell it so on the next turn (Step 9 expands this).
                     error_xml = (
                         "<error>You produced text but did not call send_message. "
                         "Use the tool — text content blocks are invisible to the user.</error>"
                     )
                     await self._worker.send(error_xml)
                     self._is_processing.set()
-                    # Re-show typing for the same chats — they're still
-                    # waiting for an actual reply.
                     if self._typing_chats:
                         await self._start_typing(set(self._typing_chats))
                     continue
+
+                self._active_chats.clear()
 
                 if action == "sleep" and result.control and result.control.sleep_ms:
                     await asyncio.sleep(result.control.sleep_ms / 1000)
