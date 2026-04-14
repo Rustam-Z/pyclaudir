@@ -150,16 +150,27 @@ class McpServer:
             raise RuntimeError("MCP server has not started yet")
         return f"http://127.0.0.1:{self.port}/mcp"
 
-    def write_mcp_config(self, path: Path | None = None) -> Path:
-        """Write the JSON file pyclaudir hands to ``claude --mcp-config``."""
-        cfg = {
-            "mcpServers": {
-                MCP_SERVER_NAME: {
-                    "type": "http",
-                    "url": self.url,
-                }
+    def write_mcp_config(
+        self,
+        path: Path | None = None,
+        *,
+        extra_servers: dict | None = None,
+    ) -> Path:
+        """Write the JSON file pyclaudir hands to ``claude --mcp-config``.
+
+        ``extra_servers`` is merged into ``mcpServers`` alongside our local
+        pyclaudir server. Use it to add external MCP servers (e.g.
+        Atlassian) without touching this module's internals.
+        """
+        servers = {
+            MCP_SERVER_NAME: {
+                "type": "http",
+                "url": self.url,
             }
         }
+        if extra_servers:
+            servers.update(extra_servers)
+        cfg = {"mcpServers": servers}
         if path is None:
             tmp = tempfile.NamedTemporaryFile(
                 mode="w", suffix=".json", prefix="pyclaudir-mcp-", delete=False

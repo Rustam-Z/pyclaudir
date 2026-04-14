@@ -61,6 +61,17 @@ def test_invariant_1_argv_has_allowlist_and_denylist(fake_spec: CcSpawnSpec) -> 
     allowed_idx = argv.index("--allowedTools") + 1
     allowed_value = argv[allowed_idx]
     assert "mcp__pyclaudir" in allowed_value
+    # Jira tools explicitly allowed (community mcp-atlassian, jira_ prefix)
+    assert "mcp__mcp-atlassian__jira_create_issue" in allowed_value
+    assert "mcp__mcp-atlassian__jira_search" in allowed_value
+    assert "mcp__mcp-atlassian__jira_get_issue" in allowed_value
+    assert "mcp__mcp-atlassian__jira_transition_issue" in allowed_value
+    # Confluence, Compass, JSM, Bitbucket, ProForma must NOT be allowed
+    for blocked in (
+        "confluence", "Confluence", "Compass", "bitbucket",
+        "service_desk", "proforma",
+    ):
+        assert blocked not in allowed_value, f"{blocked} found in allowedTools"
     assert "WebFetch" in allowed_value
     assert "WebSearch" in allowed_value
 

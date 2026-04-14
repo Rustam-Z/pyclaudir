@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import signal
 import tempfile
 from pathlib import Path
@@ -65,8 +66,6 @@ async def _async_main() -> None:
 
     # Bootstrap access.json from env vars on first run.
     if not config.access_path.exists():
-        import os
-
         seed_chats = []
         raw = os.environ.get("PYCLAUDIR_ALLOWED_CHATS", "")
         if raw:
@@ -113,7 +112,29 @@ async def _async_main() -> None:
     tmpdir = Path(tempfile.mkdtemp(prefix="pyclaudir-"))
     schema_path = tmpdir / "schema.json"
     schema_path.write_text(schema_json())
-    mcp_config_path = mcp.write_mcp_config(tmpdir / "mcp.json")
+    # External MCP servers alongside our local one. The community
+    # mcp-atlassian server (sooperset/mcp-atlassian) runs locally via
+    # stdio and talks directly to the Jira REST API.
+    jira_url = os.environ.get("JIRA_URL", "")
+    jira_username = os.environ.get("JIRA_USERNAME", "")
+    jira_token = os.environ.get("JIRA_API_TOKEN", "")
+    extra_mcp: dict = {}
+    if jira_url and jira_username and jira_token:
+        extra_mcp["mcp-atlassian"] = {
+            "type": "stdio",
+            "command": "uvx",
+            "args": ["mcp-atlassian"],
+            "env": {
+                "JIRA_URL": jira_url,
+                "JIRA_USERNAME": jira_username,
+                "JIRA_API_TOKEN": jira_token,
+            },
+        }
+        log.info("mcp-atlassian configured (jira=%s, user=%s)", jira_url, jira_username)
+    else:
+        log.info("mcp-atlassian skipped (JIRA_URL / JIRA_USERNAME / JIRA_API_TOKEN not set)")
+
+    mcp_config_path = mcp.write_mcp_config(tmpdir / "mcp.json", extra_servers=extra_mcp)
     log.info("mcp config written to %s", mcp_config_path)
 
     # CC worker

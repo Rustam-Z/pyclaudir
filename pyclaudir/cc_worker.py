@@ -62,10 +62,56 @@ DISALLOWED_TOOLS: tuple[str, ...] = (
     "NotebookEdit",
 )
 
-#: Allowed tools — the pyclaudir MCP namespace plus the two read-only
-#: web tools the operator opted Nodira into.
+#: Allowed tools — pyclaudir MCP, community mcp-atlassian Jira tools,
+#: and web tools. Only Jira tools are allowed; Confluence, JSM, and
+#: ProForma tools are deliberately excluded.
 ALLOWED_TOOLS: tuple[str, ...] = (
     "mcp__pyclaudir",
+    # Jira — community mcp-atlassian (sooperset/mcp-atlassian)
+    # The server prefixes all Jira tools with "jira_".
+    "mcp__mcp-atlassian__jira_search",
+    "mcp__mcp-atlassian__jira_get_issue",
+    "mcp__mcp-atlassian__jira_create_issue",
+    "mcp__mcp-atlassian__jira_batch_create_issues",
+    "mcp__mcp-atlassian__jira_update_issue",
+    "mcp__mcp-atlassian__jira_delete_issue",
+    "mcp__mcp-atlassian__jira_transition_issue",
+    "mcp__mcp-atlassian__jira_add_comment",
+    "mcp__mcp-atlassian__jira_edit_comment",
+    "mcp__mcp-atlassian__jira_add_worklog",
+    "mcp__mcp-atlassian__jira_get_worklog",
+    "mcp__mcp-atlassian__jira_get_transitions",
+    "mcp__mcp-atlassian__jira_get_all_projects",
+    "mcp__mcp-atlassian__jira_get_project_issues",
+    "mcp__mcp-atlassian__jira_get_project_versions",
+    "mcp__mcp-atlassian__jira_get_project_components",
+    "mcp__mcp-atlassian__jira_search_fields",
+    "mcp__mcp-atlassian__jira_get_field_options",
+    "mcp__mcp-atlassian__jira_get_user_profile",
+    "mcp__mcp-atlassian__jira_get_issue_watchers",
+    "mcp__mcp-atlassian__jira_add_watcher",
+    "mcp__mcp-atlassian__jira_remove_watcher",
+    "mcp__mcp-atlassian__jira_get_link_types",
+    "mcp__mcp-atlassian__jira_create_issue_link",
+    "mcp__mcp-atlassian__jira_create_remote_issue_link",
+    "mcp__mcp-atlassian__jira_link_to_epic",
+    "mcp__mcp-atlassian__jira_remove_issue_link",
+    "mcp__mcp-atlassian__jira_get_issue_dates",
+    "mcp__mcp-atlassian__jira_batch_get_changelogs",
+    "mcp__mcp-atlassian__jira_download_attachments",
+    "mcp__mcp-atlassian__jira_get_issue_images",
+    # Agile / sprints
+    "mcp__mcp-atlassian__jira_get_agile_boards",
+    "mcp__mcp-atlassian__jira_get_board_issues",
+    "mcp__mcp-atlassian__jira_get_sprints_from_board",
+    "mcp__mcp-atlassian__jira_get_sprint_issues",
+    "mcp__mcp-atlassian__jira_create_sprint",
+    "mcp__mcp-atlassian__jira_update_sprint",
+    "mcp__mcp-atlassian__jira_add_issues_to_sprint",
+    # Versions
+    "mcp__mcp-atlassian__jira_create_version",
+    "mcp__mcp-atlassian__jira_batch_create_versions",
+    # Web
     "WebFetch",
     "WebSearch",
 )
