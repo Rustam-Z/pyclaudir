@@ -1,4 +1,4 @@
-"""``send_message`` — Nodira's primary way to talk to humans."""
+"""``send_message`` — The agent's primary way to talk to humans."""
 
 from __future__ import annotations
 
@@ -74,7 +74,7 @@ class SendMessageTool(BaseTool):
             except Exception:
                 bot_user_id = 0
                 bot_username = None
-                bot_first_name = "nodira"
+                bot_first_name = "bot"
             await insert_message(
                 self.ctx.database,
                 ChatMessage(

@@ -1,4 +1,4 @@
-"""``edit_message`` — edit a message Nodira previously sent."""
+"""``edit_message`` — edit a message the bot previously sent."""
 
 from __future__ import annotations
 

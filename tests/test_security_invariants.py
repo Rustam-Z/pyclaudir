@@ -47,11 +47,11 @@ def fake_spec(tmp_path: Path) -> CcSpawnSpec:
 # ---------------------------------------------------------------------------
 # Invariant 1: locked-down argv
 #
-# WebFetch and WebSearch were re-enabled by operator decision so Nodira can
+# WebFetch and WebSearch were re-enabled by operator decision so the agent can
 # answer questions that need fresh information. They are explicitly on the
 # allowlist now. Bash/Edit/Write/Read/NotebookEdit remain hard-denied — those
-# would let her mutate the host or read arbitrary files, and there is no
-# operator scenario where she should be allowed to do that.
+# would let the agent mutate the host or read arbitrary files, and there is no
+# operator scenario where it should be allowed to do that.
 # ---------------------------------------------------------------------------
 
 
@@ -113,8 +113,8 @@ def test_invariant_2_only_pyclaudir_server_name() -> None:
 # ---------------------------------------------------------------------------
 # Invariant 3: memory writes exist but enforce safety rails
 #
-# Originally read-only. Operator opted Nodira into write_memory + append_memory
-# so she can keep her own notes. The trade-off is mitigated by:
+# Originally read-only. Operator opted the agent into write_memory + append_memory
+# so it can keep its own notes. The trade-off is mitigated by:
 #   (a) read-before-write — must read existing files before mutating them
 #   (b) 64 KiB per-file size cap
 #   (c) path-traversal hardening (already in place)

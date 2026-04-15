@@ -1,6 +1,6 @@
 """Access control for pyclaudir.
 
-Hot-reloadable ``data/access.json`` governs who can talk to Nodira:
+Hot-reloadable ``data/access.json`` governs who can talk to the bot:
 
 - **DM policy**: ``owner_only`` (default), ``allowlist``, or ``open``.
 - **Allowed users**: explicit list of Telegram user IDs that may DM.
@@ -95,7 +95,7 @@ def gate(
     """Decide whether an inbound message should be forwarded to the engine.
 
     Returns ``True`` (deliver) or ``False`` (drop). Every message is
-    persisted to SQLite regardless — this only controls whether Nodira
+    persisted to SQLite regardless — this only controls whether the agent
     sees it.
     """
     # Groups: chat must be in the allowlist.

@@ -80,7 +80,7 @@ async def test_mark_deleted_sets_flag(db: Database) -> None:
 @pytest.mark.asyncio
 async def test_inbound_and_outbound_coexist(db: Database) -> None:
     await insert_message(db, _msg("from user", message_id=1, direction="in"))
-    await insert_message(db, _msg("from nodira", message_id=2, direction="out"))
+    await insert_message(db, _msg("from bot", message_id=2, direction="out"))
     rows = await db.fetch_all("SELECT direction FROM messages ORDER BY message_id")
     dirs = [r["direction"] for r in rows]
     assert dirs == ["in", "out"]

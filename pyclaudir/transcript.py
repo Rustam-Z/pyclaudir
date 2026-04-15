@@ -151,7 +151,7 @@ def log_cc_user(text: str) -> None:
 def log_cc_text(text: str) -> None:
     """A text content block from the assistant — visible 'thinking out loud'.
 
-    Note: in normal pyclaudir operation Nodira should NOT produce these,
+    Note: in normal pyclaudir operation the agent should NOT produce these,
     because text blocks are invisible to the user. Seeing one here usually
     means dropped-text detection is about to fire.
     """

@@ -187,7 +187,7 @@ From the shutdown log:
 
 Claudir injects **scheduled events** as synthetic messages from a virtual user (`user="-1"`, `name="reminder"`, negative `id`). This is a cron-like scheduler that pushes XML envelopes into the engine queue at configured times. The model processes them as if they came from a real user.
 
-In pyclaudir: **not implemented**. Would be a `pyclaudir/scheduler.py` that periodically enqueues `ChatMessage` objects with a sentinel `user_id`.
+In pyclaudir: **implemented** via `pyclaudir/tools/reminder.py` (MCP tools) + `pyclaudir/db/reminders.py` (persistence) + a background `_reminder_loop` in `__main__.py` that polls every 60s and injects due reminders as synthetic `ChatMessage` objects into the engine.
 
 ### Claudir's display format
 
@@ -239,20 +239,20 @@ In pyclaudir: **not implemented**. We use SIGTERM/SIGINT for shutdown and `/kill
 |---------|----------------|----------------|-----------|
 | Language | TypeScript/Bun | Rust | Python/asyncio |
 | CC integration | MCP plugin (Claude owns the process) | Subprocess (Claudir owns the process) | Subprocess (pyclaudir owns) |
-| Tool count | 4 | ~40 | 11 MCP + 2 built-in |
+| Tool count | 4 | ~40 | 14 MCP + 2 built-in |
 | Multi-agent | No | Yes (3 agents) | No (Nodira only) |
 | Memory | No | Yes (read/write) | Yes (read/write, read-before-write) |
 | query_db | No | Yes | Yes (sqlglot-validated) |
 | Web access | No | Unknown | Yes (WebFetch, WebSearch) |
 | Pairing flow | Yes (6-char code) | Unknown | No (owner-only + allowlist) |
 | Permission relay | Yes (experimental) | Unknown | No |
-| Access control | Hot-reloadable JSON | Unknown | Env vars (static) |
+| Access control | Hot-reloadable JSON | Unknown | Hot-reloadable JSON (`access.json`) |
 | Typing indicator | Yes (one-shot on inbound) | Unknown | Yes (refresh loop + trailing stop) |
 | Inject channel | No (plugin doesn't own the subprocess) | Yes | Yes |
 | Debouncer | No | Yes | Yes (configurable, default 0ms) |
 | Heartbeat/liveness | No | Yes (full) | Designed, not fully wired |
 | Crash recovery | PID file + orphan watchdog | Unknown | Exponential backoff, 10/10min limit |
-| Scheduled events | No | Yes (reminder pseudo-user) | No |
+| Scheduled events | No | Yes (reminder pseudo-user) | Yes (reminder tools + background poller) |
 | Display format | N/A (plugin, not standalone) | Claude Code TUI capture | Tagged log + trace script |
 | Session resume | N/A | Yes (--resume) | Yes (--resume) |
 | File sending | Yes (photos + documents) | Unknown | No (text-only) |
@@ -267,7 +267,7 @@ In pyclaudir: **not implemented**. We use SIGTERM/SIGINT for shutdown and `/kill
 1. **File attachments in `reply`** — send photos and documents. Our `send_message` is text-only.
 2. **`download_attachment`** — lazy download of user-sent files so the model can see photos/documents.
 3. **Outbound gate (`assertAllowedChat`)** — prevent the model from messaging arbitrary chat IDs. We rely on the model's system prompt but don't enforce programmatically.
-4. **Hot-reloadable access config** — the plugin re-reads `access.json` on every message. Our config is static (env vars, set at startup).
+4. ~~**Hot-reloadable access config**~~ — now implemented. `access.json` is re-read on every inbound message.
 5. **Permission relay** — let the operator approve/deny tool calls from Telegram.
 6. **Ack reaction on receipt** — configurable emoji reaction when a message is received, before any processing starts. Gives instant feedback.
 7. **Text chunking** — auto-split long messages at Telegram's 4096-char limit.
@@ -275,6 +275,9 @@ In pyclaudir: **not implemented**. We use SIGTERM/SIGINT for shutdown and `/kill
 ### From Claudir (not yet in pyclaudir)
 
 1. **Liveness monitor** — the heartbeat mechanism is in place but the monitor loop that reads `last_activity` and kills wedged subprocesses isn't wired.
-2. **Scheduled events / reminder pseudo-user** — cron-like injection of synthetic messages.
-3. **Kill-marker files** — needed if we ever add a Mirzo-style operator agent.
-4. **Multi-agent split** — separate CC subprocesses with different trust levels and tool sets.
+2. **Kill-marker files** — needed if we ever add a Mirzo-style operator agent.
+3. **Multi-agent split** — separate CC subprocesses with different trust levels and tool sets.
+
+### From Claudir (now implemented in pyclaudir)
+
+1. **Scheduled events / reminders** — `set_reminder`, `list_reminders`, `cancel_reminder` MCP tools backed by a `reminders` SQLite table. A background asyncio task polls every 60s and injects due reminders as synthetic inbound messages. Supports one-shot (ISO8601) and recurring (cron) schedules.

@@ -1,0 +1,21 @@
+# Project-specific configuration
+#
+# Copy this file to prompts/project.md and customize for your deployment.
+# This file is concatenated after system.md to form the full system prompt.
+# Override the path with PYCLAUDIR_PROJECT_PROMPT env var.
+
+## Identity
+
+Your name is **MyBot**. You speak English by default.
+
+## Integrations
+
+# Uncomment and configure as needed:
+
+# ### Jira
+# You have access to **Jira** via the `mcp-atlassian` MCP server.
+# The Jira site is `yoursite.atlassian.net`.
+
+# ### GitLab
+# You have access to **GitLab** via the `mcp-gitlab` MCP server.
+# The GitLab instance is `gitlab.example.com`.

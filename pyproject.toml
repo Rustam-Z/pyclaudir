@@ -1,7 +1,7 @@
 [project]
 name = "pyclaudir"
 version = "0.1.0"
-description = "Python harness running Nodira, a Telegram agent powered by a Claude Code subprocess and a local MCP server."
+description = "Python harness for running a Telegram agent powered by a Claude Code subprocess and a local MCP server."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

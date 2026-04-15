@@ -1,4 +1,4 @@
-"""``query_db`` — read-only SQL access to Nodira's own SQLite.
+"""``query_db`` — read-only SQL access to the agent's own SQLite.
 
 Inputs are parsed with sqlglot and **rejected** unless the entire statement
 list is exactly one ``SELECT`` (or a SELECT with a CTE that contains nothing
@@ -71,7 +71,7 @@ class QueryDbArgs(BaseModel):
 class QueryDbTool(BaseTool):
     name = "query_db"
     description = (
-        "Run a single read-only SELECT against Nodira's local SQLite. "
+        "Run a single read-only SELECT against the agent's local SQLite. "
         "Useful for looking up message history, user activity, prior tool "
         "calls. Returns rows as TSV with a header line."
     )

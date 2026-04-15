@@ -8,8 +8,8 @@ the filesystem (security invariant 5). All four tools route through
 - 64 KiB per-file cap
 - read-before-write for any file that already exists
 
-There is intentionally no ``delete_memory`` tool. If Nodira wants to
-"forget" something she has to overwrite it; actually removing files
+There is intentionally no ``delete_memory`` tool. If the agent wants to
+"forget" something it has to overwrite it; actually removing files
 remains an operator-only action.
 """
 

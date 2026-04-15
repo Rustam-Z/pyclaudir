@@ -1,12 +1,12 @@
-"""Replay or follow Nodira's Claude Code session JSONL.
+"""Replay or follow the bot's Claude Code session JSONL.
 
 Claude Code persists every CC session as a JSONL file in
 ``~/.claude/projects/<project-cwd>/<session_id>.jsonl``. Each line is one
 event: a user envelope, an assistant message (text + tool_use blocks),
 synthetic user messages carrying tool_results, the final result, etc.
 
-This script renders that file as a human-readable transcript of how Nodira
-processed each turn — useful for "what was she actually thinking when she
+This script renders that file as a human-readable transcript of how the bot
+processed each turn — useful for "what was it actually thinking when it
 replied with X?".
 
 Usage::
@@ -52,8 +52,8 @@ def _data_dir() -> Path:
     return Path(raw).resolve()
 
 
-def _looks_like_nodira(path: Path) -> bool:
-    """A session is Nodira's iff its first ``user`` event's text content
+def _looks_like_bot_session(path: Path) -> bool:
+    """A session is the bot's iff its first ``user`` event's text content
     starts with ``<msg `` — the XML envelope the engine wraps every
     Telegram batch in.
     """
@@ -79,8 +79,8 @@ def _looks_like_nodira(path: Path) -> bool:
     return False
 
 
-def find_nodira_session() -> Path | None:
-    """Find the JSONL belonging to Nodira, *not* the Claude Code session
+def find_bot_session() -> Path | None:
+    """Find the JSONL belonging to the bot, *not* the Claude Code session
     that happens to be running in the same project directory.
 
     Strategy:
@@ -88,7 +88,7 @@ def find_nodira_session() -> Path | None:
     1. If ``data/session_id`` exists and the corresponding JSONL exists,
        use that. This is the canonical pyclaudir-self-reported session.
     2. Otherwise scan ``PROJECT_DIR`` for files whose first user event
-       carries Nodira's ``<msg ...>`` XML envelope, and return the most
+       carries the bot's ``<msg ...>`` XML envelope, and return the most
        recently modified one.
     3. Otherwise return ``None``. (Don't fall back to "most-recent-of-any"
        because that's how we picked up the wrong session in the first
@@ -113,7 +113,7 @@ def find_nodira_session() -> Path | None:
         reverse=True,
     )
     for path in candidates:
-        if _looks_like_nodira(path):
+        if _looks_like_bot_session(path):
             return path
     return None
 
@@ -274,14 +274,14 @@ def follow(path: Path, max_chars: int) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Replay or tail Nodira's CC session. By default picks Nodira's "
+            "Replay or tail the bot's CC session. By default picks the bot's "
             "session via data/session_id, NOT the most-recent file (which "
             "might be your own Claude Code session in the same cwd)."
         ),
     )
     parser.add_argument(
         "--session", "-s",
-        help="Specific session id (overrides --latest and the Nodira finder)",
+        help="Specific session id (overrides --latest and the bot session finder)",
     )
     parser.add_argument(
         "--follow", "-f", action="store_true",
@@ -308,9 +308,9 @@ def main() -> int:
         if not PROJECT_DIR.exists():
             print(f"no session dir at {PROJECT_DIR}")
             return 1
-        # Determine which file is Nodira's so we can mark it
-        nodira_path = find_nodira_session()
-        nodira_stem = nodira_path.stem if nodira_path else None
+        # Determine which file is the bot's so we can mark it
+        bot_path = find_bot_session()
+        bot_stem = bot_path.stem if bot_path else None
         files = sorted(
             PROJECT_DIR.glob("*.jsonl"),
             key=lambda p: p.stat().st_mtime,
@@ -319,7 +319,7 @@ def main() -> int:
         for p in files:
             mtime = time.strftime("%Y-%m-%d %H:%M", time.localtime(p.stat().st_mtime))
             size_kb = p.stat().st_size // 1024
-            marker = "  ← nodira" if p.stem == nodira_stem else ""
+            marker = "  ← bot" if p.stem == bot_stem else ""
             print(f"{mtime}  {size_kb:>6} KB  {p.stem}{marker}")
         return 0
 
@@ -334,10 +334,10 @@ def main() -> int:
             print(f"no session files under {PROJECT_DIR}", file=sys.stderr)
             return 1
     else:
-        path = find_nodira_session()
+        path = find_bot_session()
         if path is None:
             print(
-                "could not identify Nodira's session. Try one of:\n"
+                "could not identify the bot's session. Try one of:\n"
                 "  --session <id>          to specify it explicitly\n"
                 "  --list                  to see all available sessions\n"
                 "  --latest                to use the most recent file regardless\n"

@@ -14,6 +14,9 @@ data/
 .env
 .env.local
 
+# Project-specific prompt (not shipped with open-source pyclaudir)
+prompts/project.md
+
 # Editors
 .vscode/
 .idea/

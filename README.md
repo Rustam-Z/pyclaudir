@@ -1,13 +1,13 @@
 # pyclaudir
 
-Python harness running **Nodira**, a Telegram agent powered by a long-running
+Python harness for running a Telegram agent powered by a long-running
 Claude Code subprocess and a local MCP server.
 
 `pyclaudir` is the Python distillation of the Rust *Claudir* architecture:
 the LLM lives inside a `claude --print --input-format stream-json` subprocess
 that talks to the outside world *only* through tools we register with a
 locally-hosted MCP server. There is no shell access, no general filesystem
-access, no web fetch — Nodira can do exactly the things in `pyclaudir/tools/`
+access, no web fetch — the agent can do exactly the things in `pyclaudir/tools/`
 and nothing else.
 
 ## Quickstart
@@ -30,11 +30,11 @@ uv sync --extra dev
 # 4. Run the test suite
 uv run pytest
 
-# 5. Start Nodira
+# 5. Start the bot
 uv run python -m pyclaudir
 ```
 
-DM your bot from Telegram. Nodira should reply.
+DM your bot from Telegram. Your bot should reply.
 
 ## Configuration
 
@@ -49,7 +49,13 @@ All knobs live in environment variables (or `.env`):
 | `PYCLAUDIR_EFFORT` | no | `high` | `--effort` flag: `low`, `medium`, `high`, `max` |
 | `PYCLAUDIR_DEBOUNCE_MS` | no | `0` | message coalescing window (0 = instant) |
 | `PYCLAUDIR_RATE_LIMIT_PER_MIN` | no | `20` | per-chat outbound cap |
+| `PYCLAUDIR_PROJECT_PROMPT` | no | `prompts/project.md` | path to project-specific prompt (concatenated after `system.md`) |
 | `CLAUDE_CODE_BIN` | no | `claude` | path to the CC CLI |
+| `JIRA_URL` | no | — | Jira site URL (enables mcp-atlassian) |
+| `JIRA_USERNAME` | no | — | Jira username |
+| `JIRA_API_TOKEN` | no | — | Jira API token |
+| `GITLAB_URL` | no | — | GitLab instance URL (enables mcp-gitlab) |
+| `GITLAB_TOKEN` | no | — | GitLab personal access token |
 
 Group and DM access is managed via `data/access.json`, not env vars.
 See **Access control** below.
@@ -112,7 +118,7 @@ Restart `python -m pyclaudir`. The tool is live.
 
 ## Access control
 
-Who can talk to Nodira is governed by `data/access.json`, which is
+Who can talk to the bot is governed by `data/access.json`, which is
 **hot-reloaded on every inbound message** — edits take effect immediately
 without a restart.
 
@@ -126,7 +132,7 @@ without a restart.
 
 ### DM policies
 
-| Policy | Who can DM Nodira |
+| Policy | Who can DM the bot |
 |---|---|
 | `owner_only` | Only `PYCLAUDIR_OWNER_ID`. Default. |
 | `allowlist` | Owner + user IDs in `allowed_users`. |
@@ -136,7 +142,7 @@ The owner is **always** implicitly allowed regardless of policy.
 
 ### Groups
 
-A group must be in `allowed_chats` for Nodira to respond in it. Messages
+A group must be in `allowed_chats` for the bot to respond in it. Messages
 from unlisted groups are still persisted to SQLite (audit trail) but
 dropped before the engine sees them.
 
@@ -162,7 +168,7 @@ A template is provided at `data/access.json.example`.
 
 ## Memory
 
-`data/memories/*.md` is Nodira's working memory. She has four tools:
+`data/memories/*.md` is the agent's working memory. It has four tools:
 
 - `list_memories` — see what files exist
 - `read_memory` — read a file (truncates at 64 KiB)
@@ -170,28 +176,69 @@ A template is provided at `data/access.json.example`.
 - `append_memory` — extend an existing file
 
 Writes are guarded by a **read-before-write rule**: before overwriting or
-appending to a file that already exists, Nodira must first read it in the
+appending to a file that already exists, the agent must first read it in the
 same session. Brand-new files are exempt. The "read paths" set lives in
 the `MemoryStore` instance and resets on every restart, so a fresh process
-must re-read before mutating. This stops her from blindly destroying
-operator-curated notes whose contents she never observed.
+must re-read before mutating. This stops the agent from blindly destroying
+operator-curated notes whose contents it never observed.
 
-There is **no delete tool** by design. If she wants to "forget" something
-she has to overwrite the file. Actually removing files is an operator
+There is **no delete tool** by design. If the agent wants to "forget" something
+it has to overwrite the file. Actually removing files is an operator
 action — `rm data/memories/<file>` from the host.
 
 You can also seed memory yourself by dropping markdown files into
-`data/memories/` while she's running. She'll discover them on the next
+`data/memories/` while the agent is running. It'll discover them on the next
 `list_memories` call.
+
+## Reminders
+
+The agent can schedule one-shot and recurring reminders via three tools:
+
+- `set_reminder` — schedule a reminder with a UTC trigger time and optional cron expression
+- `list_reminders` — show pending reminders for a chat
+- `cancel_reminder` — cancel a pending reminder by id
+
+Reminders are stored in the `reminders` SQLite table. A background task polls
+every 60 seconds for due entries and injects them into the engine as synthetic
+inbound messages. The agent then sends the reminder text to the appropriate
+chat. Recurring reminders (cron) automatically advance to the next occurrence.
+
+All times are stored in UTC. The system prompt instructs the agent to ask
+users for their timezone and convert to UTC before setting reminders.
+
+## System prompt
+
+The system prompt is assembled from two files:
+
+1. **`prompts/system.md`** — generic pyclaudir template covering tool
+   discipline, message format, memory, reminders, and prompt-injection
+   resistance. Ships with the repo.
+2. **`prompts/project.md`** — project-specific overlay (identity, integrations,
+   custom instructions). Gitignored. Copy `prompts/project.md.example` to get
+   started. Override the path with `PYCLAUDIR_PROJECT_PROMPT`.
+
+If `project.md` doesn't exist, only the base prompt is used.
+
+## External MCP integrations
+
+pyclaudir can optionally connect to external MCP servers alongside its own:
+
+- **Jira** via [mcp-atlassian](https://github.com/sooperset/mcp-atlassian) —
+  set `JIRA_URL`, `JIRA_USERNAME`, `JIRA_API_TOKEN` in `.env`.
+- **GitLab** via [@zereight/mcp-gitlab](https://www.npmjs.com/package/@zereight/mcp-gitlab) —
+  set `GITLAB_URL`, `GITLAB_TOKEN` in `.env`.
+
+These are stdio-based MCP servers spawned as child processes alongside the
+local pyclaudir MCP server.
 
 ## Monitoring & observability
 
-Pyclaudir gives you **four complementary windows** into what Nodira is doing.
+Pyclaudir gives you **four complementary windows** into what the bot is doing.
 Pick whichever fits the moment.
 
 ### 1. The live tagged log (the running terminal)
 
-When Nodira is running, the foreground terminal prints two streams of
+When the bot is running, the foreground terminal prints two streams of
 structured tag lines on top of the usual lifecycle messages:
 
 **Conversation transcript** (`pyclaudir.tx` logger):
@@ -239,10 +286,10 @@ assistant message, every tool_use, every tool_result, every thinking block.
 Render it as a human-readable transcript:
 
 ```bash
-# List every session in the project dir; Nodira's file is marked
+# List every session in the project dir; the bot's file is marked
 uv run python -m pyclaudir.scripts.trace --list
 
-# Replay Nodira's session (resolved via data/session_id, NOT
+# Replay the bot's session (resolved via data/session_id, NOT
 # "most-recent-file" — important if you also have your own Claude Code
 # session running in the same cwd)
 uv run python -m pyclaudir.scripts.trace
@@ -250,7 +297,7 @@ uv run python -m pyclaudir.scripts.trace
 # Replay one specific session
 uv run python -m pyclaudir.scripts.trace --session 87f472fa-5e1a-48d6-bddc-824efca1fea5
 
-# Tail Nodira's running session live (refreshes every 0.5s)
+# Tail the bot's running session live (refreshes every 0.5s)
 uv run python -m pyclaudir.scripts.trace --follow
 
 # Truncate huge text blocks
@@ -261,13 +308,13 @@ uv run python -m pyclaudir.scripts.trace --latest --follow
 ```
 
 The default picker reads `data/session_id` first, then falls back to
-fingerprinting (a session is "Nodira's" iff its first user event begins
+fingerprinting (a session is "the bot's" iff its first user event begins
 with the engine's `<msg ...>` XML envelope). This stops the renderer from
 accidentally tailing your own Claude Code session that happens to be the
 most recently modified file in the same project directory.
 
 The renderer is **read-only** and never touches the running pyclaudir
-process — totally safe to run in a second terminal while Nodira is live.
+process — totally safe to run in a second terminal while the bot is live.
 
 ### 3. The raw wire-stream capture (`data/cc_logs/`)
 
@@ -307,7 +354,7 @@ sqlite3 data/pyclaudir.db \
   "SELECT direction, chat_id, user_id, substr(text,1,80) AS text
    FROM messages ORDER BY timestamp DESC LIMIT 10;"
 
-# Every MCP tool call Nodira has made (newest first)
+# Every MCP tool call the bot has made (newest first)
 sqlite3 data/pyclaudir.db \
   "SELECT created_at, tool_name, duration_ms, error
    FROM tool_calls ORDER BY id DESC LIMIT 20;"
@@ -323,12 +370,12 @@ sqlite3 data/pyclaudir.db \
    FROM messages WHERE user_id = 587272213 AND reply_to_id IS NOT NULL;"
 ```
 
-`query_db` (the MCP tool) lets Nodira herself run SELECTs against this
+`query_db` (the MCP tool) lets the agent run SELECTs against this
 same database — sqlglot-validated, capped at 100 rows.
 
 ### 5. Bonus — interactive replay (`claude --resume`)
 
-Drop into Nodira's *exact* conversation state in a real Claude Code
+Drop into the bot's *exact* conversation state in a real Claude Code
 interactive session:
 
 ```bash
@@ -336,9 +383,9 @@ interactive session:
 claude --resume $(cat data/session_id)
 ```
 
-You're now talking to Claude Code with Nodira's full history loaded. Ask
-"why did you reply that way to message 591?" and you'll get her
-perspective on her own past turns. ⚠️ Don't run this on the same session
+You're now talking to Claude Code with the bot's full history loaded. Ask
+"why did you reply that way to message 591?" and you'll get its
+perspective on its own past turns. ⚠️ Don't run this on the same session
 id as a live pyclaudir process unless you pass `--fork-session`.
 
 ### Cheatsheet
@@ -346,17 +393,17 @@ id as a live pyclaudir process unless you pass `--fork-session`.
 | You want to know… | Look at |
 |---|---|
 | Who said what to who right now | the foreground terminal (`[RX]`/`[TX]` lines) |
-| Which tools is she calling and why | the foreground terminal (`[CC.tool→]`/`[CC.done]` lines) |
+| Which tools is it calling and why | the foreground terminal (`[CC.tool→]`/`[CC.done]` lines) |
 | The full story of a past conversation | `python -m pyclaudir.scripts.trace --session <sid>` |
 | Whether the parser is missing events | `data/cc_logs/<sid>.stream.jsonl` |
 | Whether CC is hitting rate limits | `data/cc_logs/<sid>.stderr.log` |
 | Aggregate stats / cross-session queries | `sqlite3 data/pyclaudir.db` |
-| What she would say *now* about her own history | `claude --resume $(cat data/session_id) --fork-session` |
+| What it would say *now* about its own history | `claude --resume $(cat data/session_id) --fork-session` |
 
 ## Security model
 
-Nodira is a *front-facing public agent*. Anyone in an allowed chat can talk
-to her, and they're not always trustworthy. The security model is enforced
+The agent is a *front-facing public agent*. Anyone in an allowed chat can talk
+to it, and they're not always trustworthy. The security model is enforced
 by code, not by hope, and tested in `tests/test_security_invariants.py`.
 
 - **No shell, no edits, no writes outside `memories/`, no general reads
@@ -367,11 +414,11 @@ by code, not by hope, and tested in `tests/test_security_invariants.py`.
   is *never* passed; both the argv builder and the spawn-time assertion
   refuse it.
 - **Web access (read-only).** `WebFetch` and `WebSearch` are deliberately
-  enabled so Nodira can answer questions that need fresh information.
+  enabled so the agent can answer questions that need fresh information.
   This is a real trade-off — see the next bullet. The system prompt
-  instructs her to refuse private/internal URLs (localhost, RFC1918,
+  instructs the agent to refuse private/internal URLs (localhost, RFC1918,
   link-local, `.local`), but a determined prompt-injection could still
-  get her to fetch one. **Do not deploy Nodira on a host with sensitive
+  get it to fetch one. **Do not deploy the bot on a host with sensitive
   internal endpoints reachable from the same network.**
 - **MCP namespace lockdown.** The local MCP server is registered as
   `pyclaudir`, so every pyclaudir tool Claude sees is named
@@ -411,19 +458,19 @@ load-bearing — keep them.
 
 Once configured, you should be able to:
 
-1. DM the bot, see Nodira reply via `send_message`.
+1. DM the bot, see the bot reply via `send_message`.
 2. Drop `data/memories/user_preferences.md` containing "Rustam prefers
-   Russian", ask "what do you know about me?", watch her call
+   Russian", ask "what do you know about me?", watch it call
    `list_memories` → `read_memory` and reply in Russian.
 3. Send 5 messages in 2 seconds, see them batched into one turn (debounce).
-4. Send a 6th message *while* she's mid-turn, see it injected.
+4. Send a 6th message *while* it's mid-turn, see it injected.
 5. `sqlite3 data/pyclaudir.db 'SELECT direction, text FROM messages ORDER BY timestamp DESC LIMIT 10;'`
-6. Drop `pyclaudir/tools/echo.py` (above), restart, and watch Nodira gain
+6. Drop `pyclaudir/tools/echo.py` (above), restart, and watch the bot gain
    the new tool with zero other code changes.
 7. `kill -9 $(pgrep -f 'claude --print')`, watch the worker respawn within
    seconds and resume the conversation.
-8. Ask Nodira to run a shell command — she should refuse, because she has
-   no `Bash` tool and her system prompt tells her to.
+8. Ask the bot to run a shell command — it should refuse, because it has
+   no `Bash` tool and its system prompt tells it to.
 9. Run `uv run pytest tests/test_security_invariants.py` and see all 8
    invariants pass.
 
@@ -433,18 +480,21 @@ Once configured, you should be able to:
 pyclaudir/
 ├── pyproject.toml
 ├── README.md
-├── prompts/system.md
+├── prompts/
+│   ├── system.md               # generic pyclaudir system prompt (shipped)
+│   ├── project.md              # project-specific overlay (gitignored)
+│   └── project.md.example      # template for project.md
 ├── data/                       # gitignored
 │   ├── pyclaudir.db            # SQLite (messages, users, tool_calls, ...)
 │   ├── access.json             # DM policy + allowed users/chats (hot-reloaded)
 │   ├── session_id              # CC session id for --resume
-│   ├── memories/               # Nodira's working memory
+│   ├── memories/               # the agent's working memory
 │   └── cc_logs/                # raw CC stdout/stderr capture
 ├── pyclaudir/
 │   ├── __main__.py             # entrypoint + log setup
 │   ├── access.py               # hot-reloadable access.json gate
 │   ├── config.py
-│   ├── db/{database.py,messages.py,migrations/001_initial.sql}
+│   ├── db/{database.py,messages.py,reminders.py,migrations/}
 │   ├── telegram_io.py
 │   ├── engine.py               # debouncer, queue, inject, control loop
 │   ├── cc_worker.py            # subprocess + raw capture + crash recovery
@@ -465,8 +515,9 @@ pyclaudir/
 │       ├── delete_message.py
 │       ├── add_reaction.py
 │       ├── memory.py           # list/read/write/append memory (read-before-write)
-│       └── query_db.py
-└── tests/                      # 141 tests
+│       ├── query_db.py
+│       └── reminder.py         # set/list/cancel reminders
+└── tests/                      # 169 tests
     ├── test_db_schema.py
     ├── test_mcp_server.py
     ├── test_tool_discovery.py

@@ -28,8 +28,8 @@ def _msg(
         chat_id=chat_id,
         message_id=mid,
         user_id=user_id,
-        username="alice" if user_id == 42 else "nodira",
-        first_name="Alice" if user_id == 42 else "Nodira",
+        username="alice" if user_id == 42 else "bot",
+        first_name="Alice" if user_id == 42 else "Bot",
         direction=direction,  # type: ignore[arg-type]
         timestamp=datetime(2026, 4, 11, 10, mid % 60, tzinfo=timezone.utc),
         text=text,
@@ -101,7 +101,7 @@ async def test_fetch_reply_chain_stops_at_missing_parent(db: Database) -> None:
 
 @pytest.mark.asyncio
 async def test_fetch_reply_chain_handles_outbound_parent(db: Database) -> None:
-    """User replies to a Nodira message — outbound rows must be reachable too."""
+    """User replies to a bot message — outbound rows must be reachable too."""
     await insert_message(db, _msg(30, "I think the answer is 42", user_id=99, direction="out"))
     await insert_message(db, _msg(31, "thanks!", reply_to_id=30))
     chain = await fetch_reply_chain(db, chat_id=-1001234567890, reply_to_id=30)
@@ -161,12 +161,12 @@ async def test_format_with_context_falls_back_to_inline(db: Database) -> None:
     new = _msg(
         80, "what about that?",
         reply_to_id=999,
-        reply_to_text="the original message Nodira never observed",
+        reply_to_text="the original message the bot never observed",
     )
     xml = await format_messages_with_context([new], db)
     assert 'reply_to="999"' in xml
     assert 'source="telegram_inline"' in xml
-    assert "Nodira never observed" in xml
+    assert "the bot never observed" in xml
 
 
 @pytest.mark.asyncio

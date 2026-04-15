@@ -49,8 +49,8 @@ log = logging.getLogger(__name__)
 #: changes, every dangerous tool is still off.
 #:
 #: ``WebFetch`` and ``WebSearch`` are *not* on this list — they were
-#: re-enabled by operator decision so Nodira can answer questions that
-#: need fresh information. The trade is: she can now exfiltrate data via
+#: re-enabled by operator decision so the agent can answer questions that
+#: need fresh information. The trade is: it can now exfiltrate data via
 #: URL + read SSRF-able internal addresses if a user asks her nicely.
 #: We rely on her system prompt + Telegram-only output channel to keep
 #: that surface bounded.
@@ -132,6 +132,7 @@ class CcSpawnSpec:
     system_prompt_path: Path
     mcp_config_path: Path
     json_schema_path: Path
+    project_prompt_path: Path | None = None
     effort: str = "high"
     session_id: str | None = None
     #: If set, raw stdout/stderr from the CC subprocess is appended to
@@ -165,6 +166,8 @@ def build_argv(spec: CcSpawnSpec) -> list[str]:
         raise FileNotFoundError(spec.json_schema_path)
 
     system_prompt = spec.system_prompt_path.read_text(encoding="utf-8")
+    if spec.project_prompt_path and spec.project_prompt_path.exists():
+        system_prompt += "\n\n" + spec.project_prompt_path.read_text(encoding="utf-8")
     json_schema = spec.json_schema_path.read_text(encoding="utf-8")
     json.loads(json_schema)  # sanity check
 

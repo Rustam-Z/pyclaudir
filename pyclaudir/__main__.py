@@ -166,6 +166,9 @@ async def _async_main() -> None:
         binary=config.claude_code_bin,
         model=config.model,
         system_prompt_path=Path("prompts/system.md").resolve(),
+        project_prompt_path=Path(
+            os.environ.get("PYCLAUDIR_PROJECT_PROMPT", "prompts/project.md")
+        ).resolve(),
         mcp_config_path=mcp_config_path,
         json_schema_path=schema_path,
         effort=config.effort,
@@ -300,7 +303,7 @@ async def _async_main() -> None:
     # the entire CC turn officially ends.
     ctx.on_chat_replied = engine.notify_chat_replied
     await dispatcher.start()
-    log.info("nodira is live")
+    log.info("pyclaudir is live")
 
     stop_event = asyncio.Event()
 
