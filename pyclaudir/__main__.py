@@ -17,6 +17,7 @@ import logging
 import os
 import signal
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .access import AccessConfig, load_access, save_access
@@ -25,6 +26,7 @@ from .cc_worker import CcSpawnSpec, CcWorker
 from .config import Config
 from .db.database import Database
 from .db.messages import insert_tool_call
+from .db.reminders import fetch_due_reminders, mark_reminder_sent, advance_recurring_reminder
 from .engine import Engine
 from .mcp_server import McpServer
 from .memory_store import MemoryStore
@@ -244,6 +246,53 @@ async def _async_main() -> None:
         error_notify=_error_notify,
     )
     await engine.start()
+
+    # Background reminder scheduler — polls every 60s for due reminders
+    # and injects them into the engine as synthetic inbound messages.
+    async def _reminder_loop() -> None:
+        from .models import ChatMessage
+
+        while True:
+            await asyncio.sleep(60)
+            try:
+                now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+                due = await fetch_due_reminders(db, now_utc)
+                for r in due:
+                    reminder_xml = (
+                        f'<reminder id="{r["id"]}" chat_id="{r["chat_id"]}" '
+                        f'user_id="{r["user_id"]}">{r["text"]}</reminder>'
+                    )
+                    await engine.submit(ChatMessage(
+                        chat_id=r["chat_id"],
+                        message_id=0,
+                        user_id=r["user_id"],
+                        direction="in",
+                        timestamp=datetime.now(timezone.utc),
+                        text=reminder_xml,
+                    ))
+                    if r["cron_expr"]:
+                        try:
+                            from croniter import croniter
+
+                            next_dt = croniter(
+                                r["cron_expr"], datetime.now(timezone.utc)
+                            ).get_next(datetime)
+                            await advance_recurring_reminder(
+                                db, r["id"],
+                                next_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                            )
+                        except ImportError:
+                            log.warning("croniter not installed, marking cron reminder #%d as sent", r["id"])
+                            await mark_reminder_sent(db, r["id"])
+                    else:
+                        await mark_reminder_sent(db, r["id"])
+                if due:
+                    log.info("fired %d reminder(s)", len(due))
+            except Exception:
+                log.exception("reminder loop error")
+
+    reminder_task = asyncio.create_task(_reminder_loop(), name="pyclaudir-reminders")
+
     dispatcher.engine = engine
     ctx.bot = dispatcher.bot
     # Wire send_message → engine notification so the typing indicator
@@ -269,6 +318,7 @@ async def _async_main() -> None:
         # Persist the final session id so a restart can resume.
         if worker.session_id:
             config.session_id_path.write_text(worker.session_id)
+        reminder_task.cancel()
         await dispatcher.stop()
         await engine.stop()
         await worker.stop()
