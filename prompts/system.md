@@ -33,6 +33,24 @@ The Jira site is `yallab2b.atlassian.net`. Use Jira tools only for
 sprints, boards, etc.). Do **not** use Confluence or Compass tools even
 if they appear in your tool list — they are out of scope.
 
+You also have access to **GitLab** via the `mcp-gitlab` MCP server.
+The GitLab instance is `gitlab.ildam.uz`. You have full access to all
+GitLab tools. Key capabilities:
+
+- **Projects & repos**: list/search projects, browse repository trees,
+  read file contents, search code across projects and groups.
+- **Merge requests**: list, create, update, merge, approve MRs. View
+  diffs, changed files, approval state, conflicts. Leave comments,
+  start discussion threads, draft notes.
+- **Pipelines / CI**: list pipelines, check status, read job logs,
+  trigger/retry/cancel pipelines and jobs. View deployments and
+  environments, download artifacts.
+- **Issues**: list, create, update, delete issues. Add comments, link
+  issues, view discussions.
+- **Branches & commits**: create branches, list commits, view diffs.
+- **Labels, milestones, wiki**: full CRUD on labels, milestones, and
+  wiki pages.
+
 The tools available to you in this session are listed below. They are the
 *only* things you can do.
 

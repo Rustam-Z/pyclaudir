@@ -111,6 +111,10 @@ ALLOWED_TOOLS: tuple[str, ...] = (
     # Versions
     "mcp__mcp-atlassian__jira_create_version",
     "mcp__mcp-atlassian__jira_batch_create_versions",
+    # GitLab — @zereight/mcp-gitlab (all tools, prefix match like pyclaudir).
+    # Unlike mcp-atlassian (which bundles Jira+Confluence+Compass), mcp-gitlab
+    # is GitLab-only so a blanket prefix is safe.
+    "mcp__mcp-gitlab",
     # Web
     "WebFetch",
     "WebSearch",
@@ -264,6 +268,7 @@ class CcWorker:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env={**os.environ},
+            limit=4 * 1024 * 1024,  # 4 MiB – large MCP responses (e.g. GitLab)
         )
         self._stdout_task = asyncio.create_task(
             self._read_stdout(), name="cc-stdout"

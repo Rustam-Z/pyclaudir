@@ -134,6 +134,23 @@ async def _async_main() -> None:
     else:
         log.info("mcp-atlassian skipped (JIRA_URL / JIRA_USERNAME / JIRA_API_TOKEN not set)")
 
+    # GitLab via @zereight/mcp-gitlab (read-only + MR comments).
+    gitlab_url = os.environ.get("GITLAB_URL", "")
+    gitlab_token = os.environ.get("GITLAB_TOKEN", "")
+    if gitlab_url and gitlab_token:
+        extra_mcp["mcp-gitlab"] = {
+            "type": "stdio",
+            "command": "npx",
+            "args": ["-y", "@zereight/mcp-gitlab"],
+            "env": {
+                "GITLAB_PERSONAL_ACCESS_TOKEN": gitlab_token,
+                "GITLAB_API_URL": gitlab_url.rstrip("/") + "/api/v4",
+            },
+        }
+        log.info("mcp-gitlab configured (url=%s)", gitlab_url)
+    else:
+        log.info("mcp-gitlab skipped (GITLAB_URL / GITLAB_TOKEN not set)")
+
     mcp_config_path = mcp.write_mcp_config(tmpdir / "mcp.json", extra_servers=extra_mcp)
     log.info("mcp config written to %s", mcp_config_path)
 

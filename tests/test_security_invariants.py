@@ -72,6 +72,9 @@ def test_invariant_1_argv_has_allowlist_and_denylist(fake_spec: CcSpawnSpec) -> 
         "service_desk", "proforma",
     ):
         assert blocked not in allowed_value, f"{blocked} found in allowedTools"
+    # GitLab tools allowed via prefix (@zereight/mcp-gitlab — GitLab-only server,
+    # so a blanket prefix is safe unlike mcp-atlassian which mixes services).
+    assert "mcp__mcp-gitlab" in allowed_value
     assert "WebFetch" in allowed_value
     assert "WebSearch" in allowed_value
 
