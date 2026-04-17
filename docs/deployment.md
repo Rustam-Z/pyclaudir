@@ -113,6 +113,29 @@ GitHub for `git pull` to work. Make sure the server's SSH key
 - Or an **SSH key** on your GitHub account (Settings → SSH keys) —
   grants access to all your repos
 
+## The `data/` directory
+
+The `data/` directory is created automatically on first run. It contains:
+
+- `data/memories/` — bot's persistent memory files (the only part worth
+  migrating between deployments)
+- `data/pyclaudir.db` — SQLite database (messages, users, reminders,
+  tool call logs) — starts fresh on new servers
+- `data/session_id` — Claude Code session ID for conversation continuity
+- `data/cc_logs/` — raw Claude Code subprocess logs
+
+**First deployment:** nothing to do — the bot creates everything.
+
+**Migrating from another server:** only copy memories:
+
+```bash
+scp -r old-server:~/pyclaudir/data root@new-server:~/pyclaudir/data
+```
+
+Don't copy `session_id` or `pyclaudir.db` to a new server — stale
+session IDs cause CC subprocess crashes, and the database will rebuild
+naturally from new messages.
+
 ## Syncing memories and config
 
 Use the included sync script to keep memory files and project config

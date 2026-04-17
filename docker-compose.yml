@@ -10,6 +10,7 @@ services:
       - ./prompts/project.md:/app/prompts/project.md:ro
       # Claude Code auth + session files (pre-authenticate on host first)
       - ~/.claude:/root/.claude
+      - ~/.claude.json:/root/.claude.json
     working_dir: /app
     # Graceful shutdown: give CC subprocess time to save state
     stop_grace_period: 15s

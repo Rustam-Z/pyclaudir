@@ -28,6 +28,9 @@ RUN npm install -g @anthropic-ai/claude-code
 # Install uv (needed for uvx / mcp-atlassian)
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
+# Pre-install mcp-atlassian so uvx doesn't need to download at runtime
+RUN uv tool install mcp-atlassian
+
 # Copy Python venv from builder
 COPY --from=builder /app/.venv /app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
