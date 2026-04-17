@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+
+# Runtime data (mounted as volumes, not baked into image)
+data/
+prompts/project.md
+
+# Env (secrets — passed via env_file)
+.env
+.env.local
+
+# Git
+.git/
+.gitignore
+
+# Editors
+.vscode/
+.idea/
+.DS_Store
+
+# Docs (not needed at runtime, but README.md is required by hatchling build)
+docs/
+
+# Tests (not needed in production image)
+tests/
+
+# Claude Code local state
+.claude/

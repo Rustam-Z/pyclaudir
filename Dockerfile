@@ -1,0 +1,45 @@
+# Stage 1: Build Python dependencies
+FROM python:3.11-slim AS builder
+
+# Install uv for fast dependency resolution
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+WORKDIR /app
+COPY pyproject.toml README.md ./
+COPY pyclaudir/ pyclaudir/
+
+# Create venv and install production dependencies (not dev/test)
+RUN uv venv /app/.venv && \
+    uv pip install --python /app/.venv/bin/python . --no-cache-dir
+
+# Stage 2: Runtime
+FROM python:3.11-slim
+
+# Install Node.js (needed for Claude Code CLI + npx for GitLab MCP)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl ca-certificates && \
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    apt-get install -y --no-install-recommends nodejs && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Install Claude Code CLI
+RUN npm install -g @anthropic-ai/claude-code
+
+# Install uv (needed for uvx / mcp-atlassian)
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+# Copy Python venv from builder
+COPY --from=builder /app/.venv /app/.venv
+ENV PATH="/app/.venv/bin:$PATH"
+
+WORKDIR /app
+
+# Copy application source and prompts
+COPY pyclaudir/ pyclaudir/
+COPY prompts/system.md prompts/system.md
+COPY prompts/project.md.example prompts/project.md.example
+
+# Data directory (mount as volume)
+VOLUME /app/data
+
+CMD ["python", "-m", "pyclaudir"]

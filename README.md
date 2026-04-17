@@ -36,6 +36,19 @@ uv run python -m pyclaudir
 
 DM your bot from Telegram. Your bot should reply.
 
+### Stopping the bot
+
+```bash
+# If running in the foreground — Ctrl+C in the terminal
+
+# If running in the background
+pkill -f 'python -m pyclaudir'
+```
+
+**Important:** Only one instance can poll the same Telegram bot token at a
+time. If you see `Conflict: terminated by other getUpdates request`, another
+instance is already running — kill it first.
+
 ## Configuration
 
 All knobs live in environment variables (or `.env`):
@@ -90,6 +103,26 @@ Telegram dispatcher  →  Engine (debouncer/queue/inject)  →  CC worker  →  
    port on `127.0.0.1`. Auto-discovers every `BaseTool` subclass in
    `pyclaudir/tools/` and registers them. Writes a tiny JSON config file
    pointing CC at the server via `--mcp-config`.
+
+## Known limitations
+
+### Single-turn blocking
+
+The engine processes **one CC turn at a time**. While the Claude subprocess
+is working on a long task (code review, multi-project GitLab search, complex
+Jira queries), the engine blocks on `worker.wait_for_result()`. Messages
+from other chats queue up in the pending buffer and are only dispatched
+after the current turn finishes.
+
+In practice this means a 3-minute code review for Chat A will delay
+responses to Chat B by up to 3 minutes. For single-user or low-traffic
+deployments this is fine. For high-traffic multi-chat setups, consider
+running separate pyclaudir instances per chat group.
+
+The system prompt instructs the agent to send an immediate acknowledgment
+(e.g. "On it, reviewing now...") via `send_message` before starting long
+tasks, so users know their request was received even though the full
+response takes time.
 
 ## Adding a new tool
 
@@ -474,12 +507,92 @@ Once configured, you should be able to:
 9. Run `uv run pytest tests/test_security_invariants.py` and see all 8
    invariants pass.
 
+## Docker deployment
+
+pyclaudir ships with Docker support for deploying to a VPS.
+
+### Prerequisites
+
+1. A VPS with Docker installed (Hetzner, DigitalOcean, Linode, etc.)
+2. Claude Code CLI authenticated on the host (one-time):
+   ```bash
+   npm install -g @anthropic-ai/claude-code
+   claude   # interactive login — creates ~/.claude/
+   ```
+
+### Deploy
+
+```bash
+# Clone and configure
+git clone <repo> ~/pyclaudir && cd ~/pyclaudir
+cp .env.example .env
+vim .env   # set TELEGRAM_BOT_TOKEN, PYCLAUDIR_OWNER_ID, etc.
+cp prompts/project.md.example prompts/project.md
+vim prompts/project.md   # customize identity, integrations, team info
+
+# Build and start
+docker compose up -d
+
+# Monitor
+docker compose ps
+docker compose logs -f
+
+# Go inside container
+docker compose exec pyclaudir bash
+
+# Stop pyclaudir
+docker compose down
+```
+
+### Volumes
+
+| Mount | Container path | What it holds |
+|-------|---------------|---------------|
+| `./data` | `/app/data` | SQLite DB, memories, access.json, session_id, cc_logs |
+| `./prompts/project.md` | `/app/prompts/project.md` | Project-specific prompt |
+| `~/.claude` | `/root/.claude` | CC auth config + session JSONL files |
+
+### Syncing memories
+
+Use the included sync script to keep memory files and project config
+in sync between your local machine and the server:
+
+```bash
+# Pull latest memories from server
+./scripts/sync-memories.sh pull user@server
+
+# Push updated project.md to server
+./scripts/sync-memories.sh push user@server
+
+# Both (pull memories, then push project.md)
+./scripts/sync-memories.sh sync user@server
+```
+
+After pushing `project.md`, restart the container for changes to take
+effect: `ssh user@server 'cd ~/pyclaudir && docker compose restart'`
+
+### Migrating from local
+
+If you've been running pyclaudir locally and want to move to a server:
+
+```bash
+# Copy your existing data and config
+scp -r ./data user@server:~/pyclaudir/data/
+scp ./prompts/project.md user@server:~/pyclaudir/prompts/
+scp .env user@server:~/pyclaudir/.env
+
+# Then on the server
+cd ~/pyclaudir && docker compose up -d
+```
+
 ## Layout
 
 ```
 pyclaudir/
 ├── pyproject.toml
 ├── README.md
+├── Dockerfile
+├── docker-compose.yml
 ├── prompts/
 │   ├── system.md               # generic pyclaudir system prompt (shipped)
 │   ├── project.md              # project-specific overlay (gitignored)
@@ -490,6 +603,8 @@ pyclaudir/
 │   ├── session_id              # CC session id for --resume
 │   ├── memories/               # the agent's working memory
 │   └── cc_logs/                # raw CC stdout/stderr capture
+├── scripts/
+│   └── sync-memories.sh        # rsync helper for server ↔ local sync
 ├── pyclaudir/
 │   ├── __main__.py             # entrypoint + log setup
 │   ├── access.py               # hot-reloadable access.json gate

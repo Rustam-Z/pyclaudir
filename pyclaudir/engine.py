@@ -457,6 +457,11 @@ class Engine:
                     await asyncio.sleep(0.05)
                     continue
 
+                # NOTE: this blocks the engine until the current turn
+                # completes. Messages arriving from other chats during a
+                # long-running turn (e.g. code review) queue in _pending
+                # and are dispatched only after this returns. See README
+                # "Known limitations — Single-turn blocking".
                 try:
                     result: TurnResult = await self._worker.wait_for_result()
                 except Exception as exc:
