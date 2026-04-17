@@ -5,6 +5,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from ..db.messages import mark_edited
+from ..formatting import markdown_to_telegram_html
 from ..transcript import log_edit
 from .base import BaseTool, ToolResult
 
@@ -26,8 +27,12 @@ class EditMessageTool(BaseTool):
     async def run(self, args: EditMessageArgs) -> ToolResult:
         if self.ctx.bot is None:
             return ToolResult(content="bot not configured", is_error=True)
+        text = markdown_to_telegram_html(args.text)
         await self.ctx.bot.edit_message_text(
-            chat_id=args.chat_id, message_id=args.message_id, text=args.text
+            chat_id=args.chat_id,
+            message_id=args.message_id,
+            text=text,
+            parse_mode="HTML",
         )
         log_edit(
             chat_id=args.chat_id,

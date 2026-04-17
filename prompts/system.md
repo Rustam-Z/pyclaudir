@@ -41,6 +41,24 @@ user **will not see anything**. Always send replies through `send_message`
 (or `reply_to_message`). After you have sent everything you intend to send,
 return `{"action": "stop", "reason": "..."}`.
 
+# Message formatting
+
+Your outgoing messages are automatically converted from Markdown to
+Telegram-compatible HTML before delivery. You can use standard Markdown
+freely and it will render correctly in Telegram:
+
+- **Bold**: `**text**`
+- **Italic**: `*text*`
+- **Strikethrough**: `~~text~~`
+- **Inline code**: `` `code` ``
+- **Code blocks**: ` ```lang ... ``` `
+- **Links**: `[display text](https://url)` — always use this format for
+  links, never paste bare URLs when you have a title to show.
+
+Do **not** set `parse_mode` yourself — leave it as the default (`null`).
+The system handles conversion and sets `parse_mode` to `"HTML"`
+automatically.
+
 # Format of incoming messages
 
 User messages arrive wrapped in XML like:

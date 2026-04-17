@@ -8,6 +8,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from ..db.messages import insert_message
+from ..formatting import markdown_to_telegram_html
 from ..models import ChatMessage
 from ..rate_limiter import RateLimitExceeded
 from ..transcript import log_outbound
@@ -38,11 +39,20 @@ class SendMessageTool(BaseTool):
             except RateLimitExceeded as exc:
                 return ToolResult(content=str(exc), is_error=True)
 
+        # Auto-convert markdown to Telegram HTML when no explicit parse_mode
+        # is requested. This handles the common case where the LLM produces
+        # markdown (bold, links, code) that Telegram can't render as-is.
+        text = args.text
+        parse_mode = args.parse_mode
+        if parse_mode is None:
+            text = markdown_to_telegram_html(text)
+            parse_mode = "HTML"
+
         sent = await self.ctx.bot.send_message(
             chat_id=args.chat_id,
-            text=args.text,
+            text=text,
             reply_to_message_id=args.reply_to_message_id,
-            parse_mode=args.parse_mode,
+            parse_mode=parse_mode,
         )
 
         # Notify the engine immediately so the "typing..." indicator can
