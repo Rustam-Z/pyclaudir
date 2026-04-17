@@ -124,8 +124,8 @@ async def _async_main() -> None:
     if jira_url and jira_username and jira_token:
         extra_mcp["mcp-atlassian"] = {
             "type": "stdio",
-            "command": "uvx",
-            "args": ["mcp-atlassian"],
+            "command": "mcp-atlassian",
+            "args": [],
             "env": {
                 "JIRA_URL": jira_url,
                 "JIRA_USERNAME": jira_username,
