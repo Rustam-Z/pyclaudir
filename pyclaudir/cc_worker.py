@@ -165,9 +165,20 @@ def build_argv(spec: CcSpawnSpec) -> list[str]:
     if not spec.json_schema_path.exists():
         raise FileNotFoundError(spec.json_schema_path)
 
+    runtime_block = (
+        "# Runtime\n\n"
+        "You are running with:\n"
+        f"- model: `{spec.model}`\n"
+        f"- effort: `{spec.effort}`\n\n"
+        "If a user asks which model or effort level you are running on, "
+        "answer honestly with these exact values. This is public info — "
+        "the hard boundary against revealing internal config does not apply "
+        "to these two fields.\n"
+    )
     system_prompt = spec.system_prompt_path.read_text(encoding="utf-8")
     if spec.project_prompt_path and spec.project_prompt_path.exists():
         system_prompt += "\n\n" + spec.project_prompt_path.read_text(encoding="utf-8")
+    system_prompt += "\n\n" + runtime_block
     json_schema = spec.json_schema_path.read_text(encoding="utf-8")
     json.loads(json_schema)  # sanity check
 
