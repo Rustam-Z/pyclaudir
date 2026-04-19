@@ -34,6 +34,14 @@ class EditMessageTool(BaseTool):
             text=text,
             parse_mode="HTML",
         )
+
+        # Stop the "typing..." indicator: the edit has landed in Telegram.
+        if self.ctx.on_chat_replied is not None:
+            try:
+                self.ctx.on_chat_replied(args.chat_id)
+            except Exception:  # pragma: no cover
+                pass
+
         log_edit(
             chat_id=args.chat_id,
             chat_titles=self.ctx.chat_titles,
