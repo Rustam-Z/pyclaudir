@@ -29,6 +29,7 @@ from .access import AccessConfig, gate, load_access, save_access
 from .config import Config
 from .db.database import Database
 from .db.messages import (
+    apply_user_reaction,
     insert_message,
     mark_deleted,
     mark_edited,
@@ -116,6 +117,11 @@ class TelegramDispatcher:
         )
         self.application.add_handler(
             MessageHandler(filters.UpdateType.EDITED_MESSAGE, self._on_edited)
+        )
+        # Inbound reaction updates. Bots only receive these in DMs or when
+        # they are an admin in a group/supergroup (Telegram API limitation).
+        self.application.add_handler(
+            MessageHandler(filters.UpdateType.MESSAGE_REACTION, self._on_reaction)
         )
 
     # ------------------------------------------------------------------
@@ -275,6 +281,36 @@ class TelegramDispatcher:
             return
         await self.engine.submit(cm)
 
+    async def _on_reaction(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle ``MessageReactionUpdated``.
+
+        Extract the before/after emoji sets and update the message row's
+        ``reactions`` JSON column. Silently no-ops if the reacting user
+        isn't identifiable (anonymous group admin reactions arrive without
+        a ``user`` field).
+        """
+        evt = update.message_reaction
+        if evt is None or evt.user is None:
+            return
+        self._remember_chat_title(update)
+
+        def _emojis(reactions) -> list[str]:
+            out: list[str] = []
+            for r in reactions or ():
+                emoji = getattr(r, "emoji", None)
+                if emoji:
+                    out.append(emoji)
+            return out
+
+        await apply_user_reaction(
+            self.db,
+            chat_id=evt.chat.id,
+            message_id=evt.message_id,
+            user_id=evt.user.id,
+            old_emoji=_emojis(evt.old_reaction),
+            new_emoji=_emojis(evt.new_reaction),
+        )
+
     async def _on_edited(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
         msg = update.edited_message
         if msg is None:
@@ -303,7 +339,12 @@ class TelegramDispatcher:
         await self.application.initialize()
         await self.application.start()
         await self.application.updater.start_polling(
-            allowed_updates=["message", "edited_message", "callback_query"],
+            allowed_updates=[
+                "message",
+                "edited_message",
+                "callback_query",
+                "message_reaction",
+            ],
         )
         log.info("telegram dispatcher polling")
 

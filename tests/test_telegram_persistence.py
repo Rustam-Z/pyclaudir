@@ -11,7 +11,6 @@ from pyclaudir.config import Config
 from pyclaudir.db.database import Database
 from pyclaudir.db.messages import (
     insert_message,
-    insert_reaction,
     mark_deleted,
     mark_edited,
     upsert_user,
@@ -93,13 +92,6 @@ async def test_upsert_user_increments_count(db: Database) -> None:
     await upsert_user(db, chat_id=-100, user_id=42, username="a", first_name="A", timestamp=ts)
     row = await db.fetch_one("SELECT message_count FROM users")
     assert row["message_count"] == 2
-
-
-@pytest.mark.asyncio
-async def test_reactions_round_trip(db: Database) -> None:
-    await insert_reaction(db, chat_id=-100, message_id=1, user_id=42, emoji="👍")
-    rows = await db.fetch_all("SELECT emoji FROM reactions")
-    assert rows[0]["emoji"] == "👍"
 
 
 @pytest.mark.asyncio

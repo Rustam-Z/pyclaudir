@@ -91,7 +91,7 @@ async def _async_main() -> None:
 
     memory = MemoryStore(config.memories_dir)
     memory.ensure_root()
-    rate_limiter = RateLimiter(limit=config.rate_limit_per_min)
+    rate_limiter = RateLimiter(db=db, limit=config.rate_limit_per_min)
 
     async def db_logger(**kwargs):  # called by every MCP tool wrapper
         await insert_tool_call(db, **kwargs)

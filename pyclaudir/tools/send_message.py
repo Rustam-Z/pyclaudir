@@ -12,7 +12,7 @@ from ..formatting import markdown_to_telegram_html
 from ..models import ChatMessage
 from ..rate_limiter import RateLimitExceeded
 from ..transcript import log_outbound
-from .base import BaseTool, ToolResult
+from .base import BaseTool, ToolResult, handle_rate_limit
 
 
 class SendMessageArgs(BaseModel):
@@ -35,9 +35,9 @@ class SendMessageTool(BaseTool):
             return ToolResult(content="bot not configured", is_error=True)
         if self.ctx.rate_limiter is not None:
             try:
-                self.ctx.rate_limiter.check_and_record(args.chat_id)
+                await self.ctx.rate_limiter.check_and_record(args.chat_id)
             except RateLimitExceeded as exc:
-                return ToolResult(content=str(exc), is_error=True)
+                return await handle_rate_limit(self.ctx, args.chat_id, exc)
 
         # Auto-convert markdown to Telegram HTML when no explicit parse_mode
         # is requested. This handles the common case where the LLM produces

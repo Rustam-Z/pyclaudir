@@ -216,7 +216,7 @@ Reactions:
 
 ### Database
 
-Claudir uses the same composite-PK `(chat_id, message_id)` schema. Our `001_initial.sql` was modeled on it. Tables: messages, reactions, users, tool_calls, cc_sessions, rate_limits.
+Claudir uses the same composite-PK `(chat_id, message_id)` schema. Our `001_initial.sql` was modeled on it. Tables (current after migration 003): messages (with a `reactions` JSON column), users, tool_calls, rate_limits, reminders. The standalone `reactions` and `cc_sessions` tables from the initial schema were dropped as dead weight.
 
 ### Kill protocol
 

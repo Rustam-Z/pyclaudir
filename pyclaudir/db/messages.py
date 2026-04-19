@@ -175,18 +175,80 @@ async def fetch_reply_chain(
     return chain
 
 
-async def insert_reaction(
+async def _load_reactions(
+    db: Database, chat_id: int, message_id: int
+) -> dict[str, list[int]]:
+    row = await db.fetch_one(
+        "SELECT reactions FROM messages WHERE chat_id=? AND message_id=?",
+        (chat_id, message_id),
+    )
+    if row is None or row["reactions"] is None:
+        return {}
+    try:
+        data = json.loads(row["reactions"])
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {k: list(v) for k, v in data.items() if isinstance(v, list)}
+
+
+async def _store_reactions(
+    db: Database, chat_id: int, message_id: int, reactions: dict[str, list[int]]
+) -> None:
+    cleaned = {k: v for k, v in reactions.items() if v}
+    payload = json.dumps(cleaned, ensure_ascii=False) if cleaned else None
+    await db.execute(
+        "UPDATE messages SET reactions=? WHERE chat_id=? AND message_id=?",
+        (payload, chat_id, message_id),
+    )
+
+
+async def apply_user_reaction(
     db: Database,
     *,
     chat_id: int,
     message_id: int,
     user_id: int,
+    old_emoji: Iterable[str],
+    new_emoji: Iterable[str],
+) -> None:
+    """Reflect a Telegram ``MessageReactionUpdated`` event in the messages row.
+
+    Removes ``user_id`` from every emoji in ``old_emoji`` and adds it to
+    every emoji in ``new_emoji``. No-op if the message row doesn't exist.
+    """
+    reactions = await _load_reactions(db, chat_id, message_id)
+    for emoji in old_emoji:
+        users = reactions.get(emoji)
+        if users and user_id in users:
+            users.remove(user_id)
+            if not users:
+                reactions.pop(emoji, None)
+    for emoji in new_emoji:
+        users = reactions.setdefault(emoji, [])
+        if user_id not in users:
+            users.append(user_id)
+    await _store_reactions(db, chat_id, message_id, reactions)
+
+
+async def add_bot_reaction(
+    db: Database,
+    *,
+    chat_id: int,
+    message_id: int,
+    bot_user_id: int,
     emoji: str,
 ) -> None:
-    await db.execute(
-        """
-        INSERT INTO reactions(chat_id, message_id, user_id, emoji, created_at)
-        VALUES (?, ?, ?, ?, ?)
-        """,
-        (chat_id, message_id, user_id, emoji, _iso(datetime.now(timezone.utc))),
-    )
+    """Record a bot-sent reaction on the target message's row.
+
+    Bots can only have one active reaction per message, so this replaces any
+    prior bot reaction on the message (identified by ``bot_user_id``).
+    """
+    reactions = await _load_reactions(db, chat_id, message_id)
+    for users in reactions.values():
+        if bot_user_id in users:
+            users.remove(bot_user_id)
+    reactions = {k: v for k, v in reactions.items() if v}
+    reactions.setdefault(emoji, []).append(bot_user_id)
+    await _store_reactions(db, chat_id, message_id, reactions)

@@ -94,8 +94,10 @@ Beyond `send_message` and `reply_to_message`, you have:
   "take back" a response someone already read.
 - **`query_db`** — read-only SQL access to the message history database.
   Useful for looking up past messages, counting activity, finding who
-  said what. Tables: `messages`, `users`, `reactions`, `reminders`.
-  Max 100 rows per query. Only SELECT is allowed.
+  said what. Tables: `messages`, `users`, `reminders`. Max 100 rows per
+  query. Only SELECT is allowed. Reactions live on `messages.reactions`
+  as JSON — query with `json_extract(reactions, '$."👍"')` to get the
+  user id list for a given emoji.
 - **`edit_message`** — edit a message you previously sent. Edits don't
   trigger push notifications, so use this for progress updates on long
   tasks, not for corrections to already-read messages (delete + resend

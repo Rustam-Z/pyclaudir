@@ -480,7 +480,12 @@ by code, not by hope, and tested in `tests/test_security_invariants.py`.
   PRAGMA, ATTACH, INSERT/UPDATE/DELETE/DROP/CREATE/ALTER all fail. Results
   cap at 100 rows; text columns truncate at 2000 chars.
 - **Per-chat outbound rate limit.** 20 messages / 60s / chat by default,
-  enforced inside `send_message` (and therefore `reply_to_message`).
+  DB-backed (`rate_limits` table, fixed-minute buckets) so it survives
+  restarts. Enforced across every outbound tool: `send_message`,
+  `reply_to_message`, `edit_message`, `delete_message`, `add_reaction`.
+  When a chat exhausts its bucket the user gets a single throttle notice
+  (bypassing the limiter via a one-shot flag), then the bot goes quiet
+  until the bucket rolls over.
 - **Audit log.** Every MCP tool invocation persists to `tool_calls` (name,
   args, result, error, duration).
 
@@ -558,14 +563,11 @@ Use the included sync script to keep memory files and project config
 in sync between your local machine and the server:
 
 ```bash
-# Pull latest memories from server
+# Pull memories, DB, and access.json from server to local
 ./scripts/sync-memories.sh pull user@server
 
-# Push updated project.md to server
+# Push project.md, memories, and access.json from local to server
 ./scripts/sync-memories.sh push user@server
-
-# Both (pull memories, then push project.md)
-./scripts/sync-memories.sh sync user@server
 ```
 
 After pushing `project.md`, restart the container for changes to take
@@ -632,7 +634,7 @@ pyclaudir/
 │       ├── memory.py           # list/read/write/append memory (read-before-write)
 │       ├── query_db.py
 │       └── reminder.py         # set/list/cancel reminders
-└── tests/                      # 169 tests
+└── tests/                      # 193 tests
     ├── test_db_schema.py
     ├── test_mcp_server.py
     ├── test_tool_discovery.py
@@ -646,6 +648,7 @@ pyclaudir/
     ├── test_engine_debouncer.py
     ├── test_inject_and_dropped_text.py
     ├── test_recovery_and_limits.py
+    ├── test_reactions_update.py       # inbound + bot reactions fold into messages
     ├── test_reply_chain.py             # multi-hop reply expansion
     ├── test_transcript.py              # tagged log formatting
     └── test_query_db.py

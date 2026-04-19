@@ -12,13 +12,14 @@ from pyclaudir.db.database import Database
 
 EXPECTED_TABLES = {
     "messages",
-    "reactions",
     "users",
     "tool_calls",
-    "cc_sessions",
     "rate_limits",
+    "reminders",
     "schema_migrations",
 }
+
+DROPPED_TABLES = {"reactions", "cc_sessions"}
 
 
 async def _open(tmp_path: Path) -> Database:
@@ -28,7 +29,7 @@ async def _open(tmp_path: Path) -> Database:
 
 
 @pytest.mark.asyncio
-async def test_migration_creates_all_tables(tmp_path: Path) -> None:
+async def test_migration_creates_expected_tables(tmp_path: Path) -> None:
     db = await _open(tmp_path)
     try:
         rows = await db.fetch_all(
@@ -36,6 +37,8 @@ async def test_migration_creates_all_tables(tmp_path: Path) -> None:
         )
         names = {row["name"] for row in rows}
         assert EXPECTED_TABLES.issubset(names), f"missing tables: {EXPECTED_TABLES - names}"
+        leftover = DROPPED_TABLES & names
+        assert not leftover, f"dead tables still present: {leftover}"
     finally:
         await db.close()
 
@@ -47,6 +50,30 @@ async def test_messages_pk_is_chat_and_message(tmp_path: Path) -> None:
         rows = await db.fetch_all("PRAGMA table_info(messages)")
         pk_cols = sorted(r["name"] for r in rows if r["pk"])
         assert pk_cols == ["chat_id", "message_id"]
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_messages_has_reactions_column(tmp_path: Path) -> None:
+    db = await _open(tmp_path)
+    try:
+        rows = await db.fetch_all("PRAGMA table_info(messages)")
+        cols = {r["name"] for r in rows}
+        assert "reactions" in cols
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_rate_limits_schema(tmp_path: Path) -> None:
+    db = await _open(tmp_path)
+    try:
+        rows = await db.fetch_all("PRAGMA table_info(rate_limits)")
+        cols = {r["name"] for r in rows}
+        assert cols == {"chat_id", "bucket_start", "count", "notice_sent"}
+        pk_cols = sorted(r["name"] for r in rows if r["pk"])
+        assert pk_cols == ["bucket_start", "chat_id"]
     finally:
         await db.close()
 
@@ -83,6 +110,7 @@ async def test_migration_is_idempotent(tmp_path: Path) -> None:
         versions = [r["version"] for r in rows]
         assert versions == sorted(set(versions)), "duplicate migration rows"
         assert 1 in versions
+        assert 3 in versions
     finally:
         await db.close()
 
