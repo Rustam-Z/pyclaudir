@@ -4,8 +4,8 @@
 #
 # Usage:
 #   ./scripts/sync-memories.sh pull user@server   # Server → local (memories + DB)
-#   ./scripts/sync-memories.sh push user@server   # Local → server (project.md)
-#   ./scripts/sync-memories.sh sync user@server   # Pull memories, then push project.md
+#   ./scripts/sync-memories.sh push user@server   # Local → server (project.md + memories)
+#   ./scripts/sync-memories.sh sync user@server   # Pull first, then push
 #
 # The remote path defaults to ~/pyclaudir. Override with REMOTE_DIR:
 #   REMOTE_DIR=/opt/pyclaudir ./scripts/sync-memories.sh pull user@server
@@ -20,7 +20,7 @@ usage() {
     echo ""
     echo "Commands:"
     echo "  pull   Pull memories, DB, and access.json from server to local"
-    echo "  push   Push project.md and access.json from local to server"
+    echo "  push   Push project.md, memories, and access.json from local to server"
     echo "  sync   Pull first, then push (bidirectional)"
     echo ""
     echo "Environment:"
@@ -61,6 +61,11 @@ push() {
     rsync -avz \
         "$LOCAL_DIR/prompts/project.md" \
         "$SERVER:$REMOTE_DIR/prompts/project.md"
+
+    echo "  memories..."
+    rsync -avz \
+        "$LOCAL_DIR/data/memories/" \
+        "$SERVER:$REMOTE_DIR/data/memories/"
 
     echo "  access.json..."
     rsync -avz \
