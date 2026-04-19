@@ -22,6 +22,7 @@ from telegram.ext import (
     CommandHandler,
     ContextTypes,
     MessageHandler,
+    MessageReactionHandler,
     filters,
 )
 
@@ -120,9 +121,7 @@ class TelegramDispatcher:
         )
         # Inbound reaction updates. Bots only receive these in DMs or when
         # they are an admin in a group/supergroup (Telegram API limitation).
-        self.application.add_handler(
-            MessageHandler(filters.UpdateType.MESSAGE_REACTION, self._on_reaction)
-        )
+        self.application.add_handler(MessageReactionHandler(self._on_reaction))
 
     # ------------------------------------------------------------------
     # Owner-only commands
