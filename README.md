@@ -61,7 +61,7 @@ All knobs live in environment variables (or `.env`):
 | `PYCLAUDIR_MODEL` | no | `claude-opus-4-6` | passed to `--model` |
 | `PYCLAUDIR_EFFORT` | no | `high` | `--effort` flag: `low`, `medium`, `high`, `max` |
 | `PYCLAUDIR_DEBOUNCE_MS` | no | `0` | message coalescing window (0 = instant) |
-| `PYCLAUDIR_RATE_LIMIT_PER_MIN` | no | `20` | per-chat outbound cap |
+| `PYCLAUDIR_RATE_LIMIT_PER_MIN` | no | `20` | per-user inbound DM cap (owner exempt; groups not limited) |
 | `PYCLAUDIR_PROJECT_PROMPT` | no | `prompts/project.md` | path to project-specific prompt (concatenated after `system.md`) |
 | `CLAUDE_CODE_BIN` | no | `claude` | path to the CC CLI |
 | `JIRA_URL` | no | — | Jira site URL (enables mcp-atlassian) |
@@ -479,13 +479,15 @@ by code, not by hope, and tested in `tests/test_security_invariants.py`.
   unless they're a single SELECT. CTEs are walked recursively; semicolons,
   PRAGMA, ATTACH, INSERT/UPDATE/DELETE/DROP/CREATE/ALTER all fail. Results
   cap at 100 rows; text columns truncate at 2000 chars.
-- **Per-chat outbound rate limit.** 20 messages / 60s / chat by default,
+- **Per-user inbound DM rate limit.** 20 messages / 60s / user by default,
   DB-backed (`rate_limits` table, fixed-minute buckets) so it survives
-  restarts. Enforced across every outbound tool: `send_message`,
-  `reply_to_message`, `edit_message`, `delete_message`, `add_reaction`.
-  When a chat exhausts its bucket the user gets a single throttle notice
-  (bypassing the limiter via a one-shot flag), then the bot goes quiet
-  until the bucket rolls over.
+  restarts. Enforced at `telegram_io._on_message` before `engine.submit()`:
+  over-limit DMs are still persisted (audit trail) but never reach the CC
+  subprocess. **Groups are not rate-limited** — noisy users in groups are
+  the group's problem. **The owner (`PYCLAUDIR_OWNER_ID`) is fully exempt**
+  — the counter never ticks for the owner. When a user exhausts their
+  bucket they get one Telegram notice ("you're sending too fast…") then
+  the bot goes quiet until the bucket rolls over.
 - **Audit log.** Every MCP tool invocation persists to `tool_calls` (name,
   args, result, error, duration).
 
@@ -634,7 +636,7 @@ pyclaudir/
 │       ├── memory.py           # list/read/write/append memory (read-before-write)
 │       ├── query_db.py
 │       └── reminder.py         # set/list/cancel reminders
-└── tests/                      # 193 tests
+└── tests/
     ├── test_db_schema.py
     ├── test_mcp_server.py
     ├── test_tool_discovery.py
@@ -649,6 +651,7 @@ pyclaudir/
     ├── test_inject_and_dropped_text.py
     ├── test_recovery_and_limits.py
     ├── test_reactions_update.py       # inbound + bot reactions fold into messages
+    ├── test_rate_limits_dm_only.py    # DM-only, owner-exempt dispatcher-level limiter
     ├── test_reply_chain.py             # multi-hop reply expansion
     ├── test_transcript.py              # tagged log formatting
     └── test_query_db.py

@@ -10,9 +10,8 @@ from pydantic import BaseModel, Field
 from ..db.messages import insert_message
 from ..formatting import markdown_to_telegram_html
 from ..models import ChatMessage
-from ..rate_limiter import RateLimitExceeded
 from ..transcript import log_outbound
-from .base import BaseTool, ToolResult, handle_rate_limit
+from .base import BaseTool, ToolResult
 
 
 class SendMessageArgs(BaseModel):
@@ -24,20 +23,12 @@ class SendMessageArgs(BaseModel):
 
 class SendMessageTool(BaseTool):
     name = "send_message"
-    description = (
-        "Send a text message to a Telegram chat. Returns the new message_id. "
-        "Rate-limited to 20 messages per minute per chat."
-    )
+    description = "Send a text message to a Telegram chat. Returns the new message_id."
     args_model = SendMessageArgs
 
     async def run(self, args: SendMessageArgs) -> ToolResult:
         if self.ctx.bot is None:
             return ToolResult(content="bot not configured", is_error=True)
-        if self.ctx.rate_limiter is not None:
-            try:
-                await self.ctx.rate_limiter.check_and_record(args.chat_id)
-            except RateLimitExceeded as exc:
-                return await handle_rate_limit(self.ctx, args.chat_id, exc)
 
         # Auto-convert markdown to Telegram HTML when no explicit parse_mode
         # is requested. This handles the common case where the LLM produces

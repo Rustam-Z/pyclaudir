@@ -216,7 +216,37 @@ Reactions:
 
 ### Database
 
-Claudir uses the same composite-PK `(chat_id, message_id)` schema. Our `001_initial.sql` was modeled on it. Tables (current after migration 003): messages (with a `reactions` JSON column), users, tool_calls, rate_limits, reminders. The standalone `reactions` and `cc_sessions` tables from the initial schema were dropped as dead weight.
+Claudir uses the same composite-PK `(chat_id, message_id)` schema. Our `001_initial.sql` was modeled on it.
+
+Current tables (after migrations 001–004):
+
+| Table | PK | Purpose |
+|---|---|---|
+| `messages` | `(chat_id, message_id)` | every inbound/outbound message; `reactions` JSON column holds both inbound user reactions and outbound bot reactions |
+| `users` | `(chat_id, user_id)` | per-user activity (`message_count`, `last_message_date`) |
+| `tool_calls` | `id` | write-only audit log of every MCP tool invocation |
+| `rate_limits` | `(user_id, bucket_start)` | per-user inbound DM rate counter (see "Rate limiting" below) |
+| `reminders` | `id` (autoinc) | scheduled one-shot or cron-recurring events |
+| `schema_migrations` | `version` | migration runner bookkeeping |
+
+Dropped along the way: the standalone `reactions` table (migration 003 — folded into `messages.reactions`) and `cc_sessions` (migration 003 — vestigial). Migration 004 rebuilt `rate_limits` keyed by `user_id` instead of `chat_id`.
+
+### Rate limiting
+
+**Per-user inbound DM cap.** Enforced in `telegram_io._on_message` after the access gate + persistence, before `engine.submit()`. Over-limit messages are still persisted (audit trail) but never reach the CC subprocess.
+
+| Property | Value / Behavior |
+|---|---|
+| Scope | **DM only.** `chat_type == "private"`. Group messages bypass the limiter entirely. |
+| Keyed by | `user_id` — one budget per person, not shared across group members. |
+| Default cap | `PYCLAUDIR_RATE_LIMIT_PER_MIN=20` (messages per 60s). |
+| Bucket scheme | Fixed-minute: `bucket_start = floor(now / window) * window`. Allows up to ~2× burst at boundary; acceptable for 20/min. |
+| Persistence | SQLite `rate_limits(user_id, bucket_start, count, notice_sent)` — survives restart. |
+| Owner bypass | `PYCLAUDIR_OWNER_ID` never ticks the counter; no row created for owner. Wired via `RateLimiter(owner_id=...)`. |
+| Exceed UX | Raises `RateLimitExceeded(user_id, limit, retry_after_s, notify)`. `notify` is True only for the first exceed in a bucket — dispatcher sends a one-shot "you're sending too fast, retry in ~Ns" Telegram message. Subsequent exceeds in the same bucket stay silent. |
+| Cleanup | Opportunistic `DELETE FROM rate_limits WHERE bucket_start < now - 2 * window` on every exceed path. |
+
+**Design note:** there is no per-chat outbound cap or global outbound cap. If the bot itself malfunctions (e.g. prompt injection) and spams, this design has nothing to catch it — we accepted that trade-off for a single source of truth. If you ever reintroduce an outbound limiter, make it orthogonal (different table, different exception class) to avoid the confusion of the pre-migration-004 era.
 
 ### Kill protocol
 

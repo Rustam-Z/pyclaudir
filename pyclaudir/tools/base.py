@@ -22,7 +22,6 @@ from pydantic import BaseModel
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..db.database import Database
     from ..memory_store import MemoryStore
-    from ..rate_limiter import RateLimiter
 
 
 class Heartbeat:
@@ -56,7 +55,6 @@ class ToolContext:
     bot: Any = None  # telegram.Bot — left untyped to keep this module import-light
     database: "Database | None" = None
     memory_store: "MemoryStore | None" = None
-    rate_limiter: "RateLimiter | None" = None
     heartbeat: Heartbeat = field(default_factory=Heartbeat)
     #: chat_id → display name. Populated by the dispatcher on every inbound
     #: message so outbound transcript lines can show the chat's title.
@@ -103,27 +101,3 @@ class BaseTool(ABC):
     @abstractmethod
     async def run(self, args: BaseModel) -> ToolResult:  # pragma: no cover - abstract
         ...
-
-
-async def handle_rate_limit(ctx: ToolContext, chat_id: int, exc: Any) -> ToolResult:
-    """Uniform handling for RateLimitExceeded across every outbound tool.
-
-    When ``exc.notify`` is True (the first over-limit call in this bucket
-    for this chat), send a single throttle notice to the user via the raw
-    bot client, bypassing the limiter so we can reach the user despite
-    being out of budget. Subsequent over-limit calls in the same bucket
-    have ``notify=False`` and stay silent, preventing notice spam.
-    """
-    if exc.notify and ctx.bot is not None:
-        try:
-            await ctx.bot.send_message(
-                chat_id=chat_id,
-                text=(
-                    f"⏳ I'm a bit rate-limited ({exc.limit}/min). "
-                    f"Try again in ~{exc.retry_after_s}s."
-                ),
-            )
-        except Exception:
-            # Never let the notice path itself break the tool call.
-            pass
-    return ToolResult(content=str(exc), is_error=True)

@@ -91,7 +91,11 @@ async def _async_main() -> None:
 
     memory = MemoryStore(config.memories_dir)
     memory.ensure_root()
-    rate_limiter = RateLimiter(db=db, limit=config.rate_limit_per_min)
+    rate_limiter = RateLimiter(
+        db=db,
+        limit=config.rate_limit_per_min,
+        owner_id=config.owner_id,
+    )
 
     async def db_logger(**kwargs):  # called by every MCP tool wrapper
         await insert_tool_call(db, **kwargs)
@@ -102,7 +106,6 @@ async def _async_main() -> None:
         bot=None,  # filled in below once dispatcher exists
         database=db,
         memory_store=memory,
-        rate_limiter=rate_limiter,
         chat_titles=chat_titles,
     )
 
@@ -216,7 +219,13 @@ async def _async_main() -> None:
 
     # The dispatcher owns the bot, so we build it first, then hand a
     # closure into the engine for the typing indicator.
-    dispatcher = TelegramDispatcher(config, db, engine=None, chat_titles=chat_titles)  # type: ignore[arg-type]
+    dispatcher = TelegramDispatcher(  # type: ignore[arg-type]
+        config,
+        db,
+        engine=None,
+        chat_titles=chat_titles,
+        rate_limiter=rate_limiter,
+    )
 
     async def _typing(chat_id: int) -> None:
         import time as _t

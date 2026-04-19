@@ -5,9 +5,8 @@ from __future__ import annotations
 from pydantic import BaseModel
 
 from ..db.messages import mark_deleted
-from ..rate_limiter import RateLimitExceeded
 from ..transcript import log_delete
-from .base import BaseTool, ToolResult, handle_rate_limit
+from .base import BaseTool, ToolResult
 
 
 class DeleteMessageArgs(BaseModel):
@@ -23,11 +22,6 @@ class DeleteMessageTool(BaseTool):
     async def run(self, args: DeleteMessageArgs) -> ToolResult:
         if self.ctx.bot is None:
             return ToolResult(content="bot not configured", is_error=True)
-        if self.ctx.rate_limiter is not None:
-            try:
-                await self.ctx.rate_limiter.check_and_record(args.chat_id)
-            except RateLimitExceeded as exc:
-                return await handle_rate_limit(self.ctx, args.chat_id, exc)
         await self.ctx.bot.delete_message(chat_id=args.chat_id, message_id=args.message_id)
         log_delete(
             chat_id=args.chat_id,

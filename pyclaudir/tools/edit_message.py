@@ -6,9 +6,8 @@ from pydantic import BaseModel, Field
 
 from ..db.messages import mark_edited
 from ..formatting import markdown_to_telegram_html
-from ..rate_limiter import RateLimitExceeded
 from ..transcript import log_edit
-from .base import BaseTool, ToolResult, handle_rate_limit
+from .base import BaseTool, ToolResult
 
 
 class EditMessageArgs(BaseModel):
@@ -28,11 +27,6 @@ class EditMessageTool(BaseTool):
     async def run(self, args: EditMessageArgs) -> ToolResult:
         if self.ctx.bot is None:
             return ToolResult(content="bot not configured", is_error=True)
-        if self.ctx.rate_limiter is not None:
-            try:
-                await self.ctx.rate_limiter.check_and_record(args.chat_id)
-            except RateLimitExceeded as exc:
-                return await handle_rate_limit(self.ctx, args.chat_id, exc)
         text = markdown_to_telegram_html(args.text)
         await self.ctx.bot.edit_message_text(
             chat_id=args.chat_id,

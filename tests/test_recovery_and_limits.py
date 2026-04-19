@@ -43,19 +43,38 @@ async def test_rate_limiter_blocks_over_cap(tmp_path: Path) -> None:
             await rl.check_and_record(7)
         assert excinfo.value.notify is True
         assert excinfo.value.retry_after_s >= 1
+        assert excinfo.value.user_id == 7
     finally:
         await db.close()
 
 
 @pytest.mark.asyncio
-async def test_rate_limiter_per_chat_independent(tmp_path: Path) -> None:
+async def test_rate_limiter_per_user_independent(tmp_path: Path) -> None:
     db = await _open(tmp_path)
     try:
         rl = RateLimiter(db=db, limit=1, window_seconds=60)
         await rl.check_and_record(1)
-        await rl.check_and_record(2)  # different chat — must succeed
+        await rl.check_and_record(2)  # different user — must succeed
         with pytest.raises(RateLimitExceeded):
             await rl.check_and_record(1)
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_rate_limiter_owner_is_exempt(tmp_path: Path) -> None:
+    """The owner never ticks the counter and never gets rate-limited."""
+    db = await _open(tmp_path)
+    try:
+        rl = RateLimiter(db=db, limit=1, window_seconds=60, owner_id=42)
+        # Far more calls than the cap; none should raise.
+        for _ in range(100):
+            await rl.check_and_record(42)
+        # No rate_limits row should exist for the owner.
+        row = await db.fetch_one(
+            "SELECT count FROM rate_limits WHERE user_id=?", (42,)
+        )
+        assert row is None
     finally:
         await db.close()
 
@@ -65,15 +84,15 @@ async def test_rate_limiter_notice_fires_once_per_bucket(tmp_path: Path) -> None
     db = await _open(tmp_path)
     try:
         rl = RateLimiter(db=db, limit=1, window_seconds=60)
-        await rl.check_and_record(42)
+        await rl.check_and_record(99)
         with pytest.raises(RateLimitExceeded) as first:
-            await rl.check_and_record(42)
+            await rl.check_and_record(99)
         assert first.value.notify is True
         with pytest.raises(RateLimitExceeded) as second:
-            await rl.check_and_record(42)
+            await rl.check_and_record(99)
         assert second.value.notify is False
         with pytest.raises(RateLimitExceeded) as third:
-            await rl.check_and_record(42)
+            await rl.check_and_record(99)
         assert third.value.notify is False
     finally:
         await db.close()

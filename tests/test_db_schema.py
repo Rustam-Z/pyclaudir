@@ -71,9 +71,9 @@ async def test_rate_limits_schema(tmp_path: Path) -> None:
     try:
         rows = await db.fetch_all("PRAGMA table_info(rate_limits)")
         cols = {r["name"] for r in rows}
-        assert cols == {"chat_id", "bucket_start", "count", "notice_sent"}
+        assert cols == {"user_id", "bucket_start", "count", "notice_sent"}
         pk_cols = sorted(r["name"] for r in rows if r["pk"])
-        assert pk_cols == ["bucket_start", "chat_id"]
+        assert pk_cols == ["bucket_start", "user_id"]
     finally:
         await db.close()
 
@@ -111,6 +111,7 @@ async def test_migration_is_idempotent(tmp_path: Path) -> None:
         assert versions == sorted(set(versions)), "duplicate migration rows"
         assert 1 in versions
         assert 3 in versions
+        assert 4 in versions
     finally:
         await db.close()
 

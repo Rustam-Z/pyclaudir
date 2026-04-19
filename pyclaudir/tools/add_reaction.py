@@ -5,9 +5,8 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from ..db.messages import add_bot_reaction
-from ..rate_limiter import RateLimitExceeded
 from ..transcript import log_reaction
-from .base import BaseTool, ToolResult, handle_rate_limit
+from .base import BaseTool, ToolResult
 
 
 class AddReactionArgs(BaseModel):
@@ -24,11 +23,6 @@ class AddReactionTool(BaseTool):
     async def run(self, args: AddReactionArgs) -> ToolResult:
         if self.ctx.bot is None:
             return ToolResult(content="bot not configured", is_error=True)
-        if self.ctx.rate_limiter is not None:
-            try:
-                await self.ctx.rate_limiter.check_and_record(args.chat_id)
-            except RateLimitExceeded as exc:
-                return await handle_rate_limit(self.ctx, args.chat_id, exc)
         from telegram import ReactionTypeEmoji
 
         await self.ctx.bot.set_message_reaction(

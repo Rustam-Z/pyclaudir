@@ -37,6 +37,7 @@ from .db.messages import (
     upsert_user,
 )
 from .models import ChatMessage
+from .rate_limiter import RateLimitExceeded, RateLimiter
 from .transcript import log_inbound, log_inbound_edit
 
 log = logging.getLogger(__name__)
@@ -80,9 +81,11 @@ class TelegramDispatcher:
         engine: EnginePort | None = None,
         *,
         chat_titles: dict[int, str] | None = None,
+        rate_limiter: RateLimiter | None = None,
     ) -> None:
         self.config = config
         self.db = db
+        self.rate_limiter = rate_limiter
         #: May be ``None`` at construction time so callers can break the
         #: circular dep between dispatcher (owns the bot) and engine
         #: (needs the bot for the typing indicator). Must be set before
@@ -274,6 +277,27 @@ class TelegramDispatcher:
         # 2. Forward only allowed chats to the engine.
         if not allowed:
             return
+
+        # 3. Per-user DM rate limit. Owner is exempt (enforced inside the
+        #    limiter). Group messages skip the check — noisy group users
+        #    are the group's problem, not ours.
+        chat_type = update.effective_chat.type if update.effective_chat else None
+        if self.rate_limiter is not None and chat_type == "private":
+            try:
+                await self.rate_limiter.check_and_record(cm.user_id)
+            except RateLimitExceeded as exc:
+                if exc.notify:
+                    try:
+                        await self.bot.send_message(
+                            chat_id=cm.chat_id,
+                            text=(
+                                f"⏳ You're sending messages too fast ({exc.limit}/min). "
+                                f"Try again in ~{exc.retry_after_s}s."
+                            ),
+                        )
+                    except Exception:
+                        log.warning("rate-limit notice send failed for user %s", cm.user_id)
+                return
 
         if self.engine is None:
             log.error("dispatcher received message before engine was attached")
