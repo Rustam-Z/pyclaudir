@@ -8,6 +8,11 @@
 #
 # The remote path defaults to ~/pyclaudir. Override with REMOTE_DIR:
 #   REMOTE_DIR=/opt/pyclaudir ./scripts/sync-memories.sh pull user@server
+#
+# Authentication: the script uses SSH connection multiplexing, so you get
+# ONE password prompt per invocation regardless of how many rsync calls
+# run. For zero prompts, set up key-based auth once:
+#   ssh-copy-id user@server
 
 set -euo pipefail
 
@@ -30,6 +35,21 @@ usage() {
 
 CMD="$1"
 SERVER="$2"
+
+# SSH connection multiplexing: the first ssh/rsync opens a master socket,
+# subsequent calls reuse it. Without this you'd get a password prompt
+# per rsync call (two per invocation). Socket lives in a private temp
+# dir and is cleanly closed on exit.
+SSH_CONTROL_DIR="$(mktemp -d -t pyclaudir-sync.XXXXXX)"
+SSH_CONTROL_PATH="$SSH_CONTROL_DIR/control"
+cleanup() {
+    ssh -o "ControlPath=$SSH_CONTROL_PATH" -O exit "$SERVER" 2>/dev/null || true
+    rm -rf "$SSH_CONTROL_DIR"
+}
+trap cleanup EXIT INT TERM
+
+SSH_OPTS="-o ControlMaster=auto -o ControlPath=$SSH_CONTROL_PATH -o ControlPersist=60"
+export RSYNC_RSH="ssh $SSH_OPTS"
 
 pull() {
     echo "=== Pulling from $SERVER ==="
