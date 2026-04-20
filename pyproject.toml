@@ -17,6 +17,7 @@ dependencies = [
     "python-dotenv>=1.0",
     "sqlglot>=25.0",
     "croniter>=2.0",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]

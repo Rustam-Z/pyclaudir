@@ -62,6 +62,7 @@ All knobs live in environment variables (or `.env`):
 | `PYCLAUDIR_EFFORT` | no | `high` | `--effort` flag: `low`, `medium`, `high`, `max` |
 | `PYCLAUDIR_DEBOUNCE_MS` | no | `0` | message coalescing window (0 = instant) |
 | `PYCLAUDIR_RATE_LIMIT_PER_MIN` | no | `20` | per-user inbound DM cap (owner exempt; groups not limited) |
+| `PYCLAUDIR_SELF_REFLECTION_CRON` | no | `0 17 * * *` | when the daily self-reflection skill fires (UTC cron). Default is 22:00 Tashkent. |
 | `PYCLAUDIR_PROJECT_PROMPT` | no | `prompts/project.md` | path to project-specific prompt (concatenated after `system.md`) |
 | `CLAUDE_CODE_BIN` | no | `claude` | path to the CC CLI |
 | `JIRA_URL` | no | — | Jira site URL (enables mcp-atlassian) |
@@ -222,6 +223,138 @@ action — `rm data/memories/<file>` from the host.
 You can also seed memory yourself by dropping markdown files into
 `data/memories/` while the agent is running. It'll discover them on the next
 `list_memories` call.
+
+### Learning — `self/learnings.md`
+
+Mistakes, corrections, and patterns the bot wants to carry forward live
+in `data/memories/self/learnings.md`. Conventions (enforced by the
+system prompt):
+
+- **On correction, same-turn capture.** When a user corrects the bot,
+  or it notices mid-conversation it got something wrong, it writes a
+  new `## <date> — <topic>` entry before the turn ends. Don't batch,
+  don't defer — the signal evaporates fast.
+- **`[pending]` marker** in the h2 header flags an entry as a
+  candidate for promotion to a durable rule in `prompts/project.md`.
+  Plain headers (no marker) are pure history. The daily self-
+  reflection skill picks up `[pending]` entries and stress-tests
+  them (see below). Status transitions: `[pending]` →
+  `[promoted]` / `[discarded]` / `[refined]`.
+- **`**Proposed rule:**` line** accompanies every `[pending]` entry
+  so the skill knows what rule text to consider. Without it, the
+  skill asks the operator to re-file the entry.
+
+## Self-reflection skill
+
+A daily two-phase loop that drives self-improvement. Triggered by an
+auto-seeded recurring reminder (default 22:00 Tashkent / 17:00 UTC;
+override with `PYCLAUDIR_SELF_REFLECTION_CRON`):
+
+- **Phase A — introspect.** Bot reads the last 24h of outbound
+  messages + their reactions via `query_db`, applies a checklist
+  (over-long replies, ping-rule deviations, negative reactions,
+  repeated rewrites, tone/language mismatches), and writes up to 3
+  candidate lessons into `learnings.md` with `[pending]` markers.
+  This catches drift the user hasn't called out yet.
+- **Phase B — process.** Bot reads every `[pending]` entry
+  (Phase-A's fresh ones plus anything from the on-correction rule
+  above), stress-tests each against 10-20 hypothetical scenarios,
+  scores fit (<30% discard, 60-85% promote, 85%+ overreach →
+  refine), DMs the owner a numbered proposal, waits for approval,
+  and on approval calls the instruction-edit tools to append rules
+  to `project.md`.
+
+**Mandatory loop.** The reminder is protected on two layers:
+- `cancel_reminder` refuses to cancel rows with `auto_seed_key` set
+  (so a prompt-injected bot can't stop the loop).
+- `_seed_default_reminders` in `__main__.py` re-seeds on every startup
+  if no pending row exists — cancelling or deleting via SQL loses
+  only until the next container restart.
+
+The playbook lives at `skills/self-reflection/SKILL.md`. See the
+**Agent skills** section below for how skill invocation works and
+how to add more.
+
+## Agent skills
+
+Skills are operator-curated multi-step playbooks stored in the
+top-level `skills/<name>/SKILL.md` format, following the
+**[Agent Skills specification](https://agentskills.io/specification)**.
+They ship with the repo (versioned in git) and are read-only from
+the bot's perspective.
+
+Each SKILL.md must begin with YAML frontmatter containing at least
+`name` (matching the directory) and `description` (what the skill
+does and when to use it). Our `SkillsStore` validates both on load
+and refuses malformed skills.
+
+Tools:
+
+- `list_skills` — enumerate available skills as name + description
+  pairs (the spec's progressive-disclosure metadata surface).
+- `read_skill(name)` — load the full SKILL.md playbook.
+
+**Invocation.** A skill is triggered by a reminder whose text body is
+`<skill name="X">run</skill>`. The reminder loop wraps that in a
+`<reminder>` XML envelope before injecting into the engine. The bot,
+per `system.md § Skills`, recognizes `<skill>` inside `<reminder>`
+and calls `read_skill("X")` to load + execute the playbook.
+
+**Trust model.** The bot trusts `<skill>` directives only when
+wrapped in a `<reminder>` envelope (server-synthesized). A user
+typing `<skill name="X">run</skill>` in regular chat is treated as a
+prompt-injection attempt and ignored.
+
+### Adding a new skill
+
+Drop a new folder under `skills/`:
+
+```
+skills/
+└── your-skill-name/
+    ├── SKILL.md       # required: YAML frontmatter + playbook body
+    ├── README.md      # optional, operator-facing doc
+    ├── scripts/       # optional: executable helpers (spec)
+    ├── references/    # optional: on-demand reference docs (spec)
+    └── assets/        # optional: templates, schemas (spec)
+```
+
+Minimum SKILL.md:
+
+```markdown
+---
+name: your-skill-name
+description: One sentence on what the skill does AND when to use it (cap: 1024 chars).
+---
+
+# your-skill-name
+
+Playbook body — step-by-step instructions the bot follows when this
+skill activates.
+```
+
+The name must match the directory (lowercase, `a-z0-9-` only, no
+leading/trailing/consecutive hyphens). Optional frontmatter fields
+per spec: `license`, `compatibility`, `metadata`, `allowed-tools`.
+
+The SkillsStore auto-discovers any first-level directory that
+contains a `SKILL.md`. No code changes needed unless you want it to
+run on a schedule:
+
+1. To make the skill fire daily/weekly, add an auto-seeded reminder
+   in `_seed_default_reminders` (`pyclaudir/__main__.py`) with a
+   unique `auto_seed_key` (e.g. `"your-skill-default"`).
+2. Add a migration if you need new DB columns/tables.
+3. Remember: auto-seeded reminders are protected by default —
+   `cancel_reminder` refuses them, and the seed hook re-creates them
+   if missing on restart. That's intentional; skills that should be
+   interruptible shouldn't use the auto_seed_key path.
+
+The playbook itself is markdown the bot reads and executes step by
+step. See `skills/self-reflection/SKILL.md` as a worked example.
+Keep the playbook self-contained: preconditions check, the data the
+skill should read, the decisions it should make, and the tools it
+should call.
 
 ## Reminders
 
@@ -503,6 +636,16 @@ by code, not by hope, and tested in `tests/test_security_invariants.py`.
   first; revert is `mv <backup> prompts/<name>.md && docker compose
   restart pyclaudir`. Edits take effect on the next CC spawn, not
   mid-session, which gives the operator a natural review window.
+- **Skills are operator-curated playbooks.** Markdown files under
+  `skills/<name>/SKILL.md` that describe multi-step agent workflows.
+  Exposed read-only via `list_skills` / `read_skill`. A skill is
+  invoked when a `<reminder>` envelope contains
+  `<skill name="X">run</skill>` — the system prompt teaches the bot
+  to trust `<skill>` tags only inside that envelope, so a user
+  typing one in chat does nothing. The first skill is
+  `self-reflection`: a daily loop that stress-tests lessons from
+  `learnings.md` and proposes promotions to `project.md`, gated on
+  explicit owner approval via the instruction-edit tools above.
 
 If you weaken any of these, the security tests will fail loudly. They are
 load-bearing — keep them.
@@ -614,6 +757,10 @@ pyclaudir/
 │   ├── system.md               # generic pyclaudir system prompt (shipped)
 │   ├── project.md              # project-specific overlay (gitignored)
 │   └── project.md.example      # template for project.md
+├── skills/                     # agent skills (playbooks, shipped)
+│   └── self-reflection/        # daily reflection loop; triggered via a reminder
+│       ├── SKILL.md            #   the playbook the bot reads + follows
+│       └── README.md           #   short operator-facing doc
 ├── data/                       # gitignored
 │   ├── pyclaudir.db            # SQLite (messages, users, tool_calls, ...)
 │   ├── access.json             # DM policy + allowed users/chats (hot-reloaded)
@@ -648,6 +795,7 @@ pyclaudir/
 │       ├── add_reaction.py
 │       ├── memory.py           # list/read/write/append memory (read-before-write)
 │       ├── instructions.py     # list/read/write/append system.md + project.md (owner-DM only)
+│       ├── skills.py           # list/read agent skill playbooks under skills/
 │       ├── query_db.py
 │       └── reminder.py         # set/list/cancel reminders
 └── tests/
@@ -668,6 +816,9 @@ pyclaudir/
     ├── test_rate_limits_dm_only.py    # DM-only, owner-exempt dispatcher-level limiter
     ├── test_instructions_store.py     # allowlist, size cap, read-before-write, backup
     ├── test_instructions_tools.py     # owner-DM gate across list/read/write/append
+    ├── test_skills_store.py           # path-hardened, SKILL.md-only discovery
+    ├── test_skills_tools.py           # list_skills / read_skill surface
+    ├── test_auto_seed_reminder.py     # default self-reflection reminder seed + cancel-sticky
     ├── test_reply_chain.py             # multi-hop reply expansion
     ├── test_transcript.py              # tagged log formatting
     └── test_query_db.py

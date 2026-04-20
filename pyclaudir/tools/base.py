@@ -23,6 +23,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..db.database import Database
     from ..instructions_store import InstructionsStore
     from ..memory_store import MemoryStore
+    from ..skills_store import SkillsStore
 
 
 class Heartbeat:
@@ -57,6 +58,7 @@ class ToolContext:
     database: "Database | None" = None
     memory_store: "MemoryStore | None" = None
     instructions_store: "InstructionsStore | None" = None
+    skills_store: "SkillsStore | None" = None
     heartbeat: Heartbeat = field(default_factory=Heartbeat)
     #: Telegram user id of the bot owner. Used by instruction-edit tools
     #: to verify the triggering inbound came from the operator.

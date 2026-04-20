@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from ..db.reminders import (
     cancel_reminder,
+    fetch_reminder_by_id,
     insert_reminder,
     list_pending_reminders,
 )
@@ -142,12 +143,31 @@ class CancelReminderArgs(BaseModel):
 
 class CancelReminderTool(BaseTool):
     name = "cancel_reminder"
-    description = "Cancel a pending reminder by id."
+    description = (
+        "Cancel a pending reminder by id. Auto-seeded mandatory "
+        "reminders (e.g. the self-reflection loop) cannot be cancelled "
+        "through this tool — attempts are refused and the reminder "
+        "continues to fire on schedule."
+    )
     args_model = CancelReminderArgs
 
     async def run(self, args: CancelReminderArgs) -> ToolResult:
         if self.ctx.database is None:
             return ToolResult(content="database unavailable", is_error=True)
+
+        # Hard-gate: auto-seeded reminders represent mandatory, operator-
+        # installed loops (currently: self-reflection). They are not
+        # cancellable via the agent tool surface. Even if the bot is
+        # prompt-injected into trying, the tool refuses.
+        reminder = await fetch_reminder_by_id(self.ctx.database, args.reminder_id)
+        if reminder is not None and reminder.get("auto_seed_key"):
+            return ToolResult(
+                content=(
+                    f"reminder #{args.reminder_id} is an auto-seeded mandatory "
+                    f"loop ({reminder['auto_seed_key']}) and cannot be cancelled"
+                ),
+                is_error=True,
+            )
 
         ok = await cancel_reminder(self.ctx.database, args.reminder_id)
         if ok:

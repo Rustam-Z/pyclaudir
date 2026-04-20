@@ -66,6 +66,20 @@ async def test_messages_has_reactions_column(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_reminders_has_auto_seed_key(tmp_path: Path) -> None:
+    db = await _open(tmp_path)
+    try:
+        rows = await db.fetch_all("PRAGMA table_info(reminders)")
+        cols = {r["name"] for r in rows}
+        assert "auto_seed_key" in cols
+        idx_rows = await db.fetch_all("PRAGMA index_list(reminders)")
+        idx_names = {r["name"] for r in idx_rows}
+        assert "idx_reminders_auto_seed_key" in idx_names
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
 async def test_rate_limits_schema(tmp_path: Path) -> None:
     db = await _open(tmp_path)
     try:
@@ -112,6 +126,7 @@ async def test_migration_is_idempotent(tmp_path: Path) -> None:
         assert 1 in versions
         assert 3 in versions
         assert 4 in versions
+        assert 5 in versions
     finally:
         await db.close()
 

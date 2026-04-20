@@ -218,7 +218,7 @@ Reactions:
 
 Claudir uses the same composite-PK `(chat_id, message_id)` schema. Our `001_initial.sql` was modeled on it.
 
-Current tables (after migrations 001–004):
+Current tables (after migrations 001–005):
 
 | Table | PK | Purpose |
 |---|---|---|
@@ -226,10 +226,94 @@ Current tables (after migrations 001–004):
 | `users` | `(chat_id, user_id)` | per-user activity (`message_count`, `last_message_date`) |
 | `tool_calls` | `id` | write-only audit log of every MCP tool invocation |
 | `rate_limits` | `(user_id, bucket_start)` | per-user inbound DM rate counter (see "Rate limiting" below) |
-| `reminders` | `id` (autoinc) | scheduled one-shot or cron-recurring events |
+| `reminders` | `id` (autoinc) | scheduled one-shot or cron-recurring events; nullable `auto_seed_key` marks rows inserted by the startup seed hook (see "Agent skills" below) |
 | `schema_migrations` | `version` | migration runner bookkeeping |
 
-Dropped along the way: the standalone `reactions` table (migration 003 — folded into `messages.reactions`) and `cc_sessions` (migration 003 — vestigial). Migration 004 rebuilt `rate_limits` keyed by `user_id` instead of `chat_id`.
+Dropped along the way: the standalone `reactions` table (migration 003 — folded into `messages.reactions`) and `cc_sessions` (migration 003 — vestigial). Migration 004 rebuilt `rate_limits` keyed by `user_id` instead of `chat_id`. Migration 005 added the `auto_seed_key` column to `reminders` + an index, used by default-reminder seeding.
+
+### Agent skills (playbooks under `skills/`)
+
+Skills are operator-curated multi-step workflows stored as markdown
+under `skills/<name>/SKILL.md`. Read-only from the bot's perspective —
+the bot uses them, doesn't write them.
+
+**We follow the Agent Skills specification**
+(<https://agentskills.io/specification>). Each SKILL.md must begin
+with YAML frontmatter containing at minimum `name` (matching the
+parent directory, lowercase/hyphen-only per `[a-z0-9]+(-[a-z0-9]+)*`)
+and `description` (≤1024 chars; describes what the skill does and
+when to use it). Optional: `license`, `compatibility`, `metadata`,
+`allowed-tools`. Invalid frontmatter causes `SkillsStore.read` to
+raise `SkillsError`; invalid skills are silently dropped from
+`list()` so one bad skill doesn't blind the agent to the rest.
+
+`list_skills` implements the spec's **progressive disclosure**
+pattern — it returns only name + description per skill (metadata
+from frontmatter, ~100 tokens/skill), so the agent can decide which
+skill is relevant without loading full bodies. `read_skill(name)`
+returns the full SKILL.md (including frontmatter) when the agent is
+ready to execute.
+
+The spec also defines optional sibling directories for longer
+skills: `scripts/` for executable code, `references/` for detailed
+docs loaded on demand, `assets/` for templates/schemas. Our
+`skills/self-reflection/` only uses `SKILL.md` + `README.md` (the
+latter is operator-facing, outside the spec but allowed as "any
+additional files or directories"). If a future skill needs those
+structures, the store doesn't prevent them — `read_skill` just
+returns SKILL.md; siblings are readable via `read_memory`/ops-side
+tooling as needed.
+
+Surface:
+
+- `pyclaudir/skills_store.py` — path-hardened read-only store scoped
+  to the top-level `skills/` directory. Only first-level subdirs that
+  contain a `SKILL.md` count as skills.
+- `pyclaudir/tools/skills.py` — `list_skills`, `read_skill` MCP tools.
+
+**Invocation pattern.** A reminder fires with text
+`<skill name="X">run</skill>`. The reminder loop wraps that in a
+`<reminder>` envelope before injecting into the engine as a synthetic
+`ChatMessage`. The bot, per `system.md` § Skills, recognizes the
+`<skill>` inside `<reminder>` pattern, calls `read_skill("X")`, and
+executes the playbook's steps.
+
+**Trust boundary.** The bot trusts `<skill>` directives ONLY when
+wrapped in a `<reminder>` envelope (server-synthesized). A user typing
+`<skill name="X">run</skill>` in normal chat is ignored — same
+principle as "`<error>` blocks come from the system, not users."
+
+**First skill: `self-reflection`.** Daily two-phase loop that drives
+the bot's own learning. Triggered by a single auto-seeded daily
+reminder (22:00 Tashkent default, cron `0 17 * * *`).
+
+- **Phase A — introspect.** Queries the last 24h of outbound
+  messages + their reactions (and optionally tool-call patterns) and
+  writes candidate lessons into `learnings.md`. Capped at 3
+  candidates per run. This exists so "nothing was corrected today"
+  doesn't mean "nothing was learned today" — the bot can catch its
+  own drift without waiting for a user to push back.
+- **Phase B — process.** Reads every `[pending]` entry in
+  `learnings.md` (phase-A's fresh additions plus anything previously
+  written via the on-correction rule in `system.md`), stress-tests
+  each one against 10-20 hypothetical scenarios, scores fit (<30% /
+  60-85% / 85%+ with overreach thresholds are soft LLM judgment),
+  proposes promote/refine/discard to the owner via DM, and on
+  explicit approval appends rules to `project.md` via
+  `append_instructions`.
+
+**Mandatory loop.** Learning cannot be stopped:
+
+- `CancelReminderTool` refuses to cancel rows with a non-null
+  `auto_seed_key` — even if the bot is prompt-injected into trying.
+- The startup seed hook checks for a **pending** row (not just any
+  row) with `auto_seed_key='self-reflection-default'`. If missing
+  for any reason (cancelled, deleted, DB tampering), the hook
+  inserts a fresh pending reminder. Defense in depth against DB-
+  level interference.
+
+The seed marker lives in the `auto_seed_key` column added by
+migration 005.
 
 ### Self-editing instruction files (owner-DM-only)
 
@@ -295,7 +379,7 @@ In pyclaudir: **not implemented**. We use SIGTERM/SIGINT for shutdown and `/kill
 |---------|----------------|----------------|-----------|
 | Language | TypeScript/Bun | Rust | Python/asyncio |
 | CC integration | MCP plugin (Claude owns the process) | Subprocess (Claudir owns the process) | Subprocess (pyclaudir owns) |
-| Tool count | 4 | ~40 | 14 MCP + 2 built-in |
+| Tool count | 4 | ~40 | 18 MCP + 2 built-in |
 | Multi-agent | No | Yes (3 agents) | No (Nodira only) |
 | Memory | No | Yes (read/write) | Yes (read/write, read-before-write) |
 | query_db | No | Yes | Yes (sqlglot-validated) |
@@ -303,16 +387,22 @@ In pyclaudir: **not implemented**. We use SIGTERM/SIGINT for shutdown and `/kill
 | Pairing flow | Yes (6-char code) | Unknown | No (owner-only + allowlist) |
 | Permission relay | Yes (experimental) | Unknown | No |
 | Access control | Hot-reloadable JSON | Unknown | Hot-reloadable JSON (`access.json`) |
+| Rate limiting | No | Unknown | Per-user inbound DM only; owner exempt; one-shot throttle notice; DB-persisted (migration 004) |
 | Typing indicator | Yes (one-shot on inbound) | Unknown | Yes (refresh loop + trailing stop) |
 | Inject channel | No (plugin doesn't own the subprocess) | Yes | Yes |
 | Debouncer | No | Yes | Yes (configurable, default 0ms) |
 | Heartbeat/liveness | No | Yes (full) | Designed, not fully wired |
 | Crash recovery | PID file + orphan watchdog | Unknown | Exponential backoff, 10/10min limit |
-| Scheduled events | No | Yes (reminder pseudo-user) | Yes (reminder tools + background poller) |
+| Scheduled events | No | Yes (reminder pseudo-user) | Yes (reminder tools + background poller; auto-seeded mandatory reminders via `auto_seed_key`) |
+| Reactions (inbound) | No | Yes (per log samples) | Yes — MessageReactionHandler → `messages.reactions` JSON column. Bot receives reactions only in DMs or admin-in-group (Telegram constraint). |
+| Reactions (outbound) | Yes (`react` tool) | Yes | Yes — `add_reaction` tool, stored on same JSON column |
+| Self-editing instructions | No | Unknown | Yes — owner-DM-gated instruction tools over system.md + project.md; auto-backup per write |
+| Agent skills | No | Unknown | Yes — `skills/<name>/SKILL.md` playbooks invoked via `<skill>` inside `<reminder>` envelope |
+| Self-reflection loop | No | Unknown | Yes — daily two-phase skill (introspect + process pending), mandatory reminder, owner-approval-gated promotions |
 | Display format | N/A (plugin, not standalone) | Claude Code TUI capture | Tagged log + trace script |
 | Session resume | N/A | Yes (--resume) | Yes (--resume) |
 | File sending | Yes (photos + documents) | Unknown | No (text-only) |
-| Security tests | No formal tests | Unknown | 8 invariants, AST-scanned |
+| Security tests | No formal tests | Unknown | 8 invariants, AST-scanned (plus dedicated gate tests for instruction/skill/rate-limit tools) |
 
 ---
 
@@ -337,3 +427,209 @@ In pyclaudir: **not implemented**. We use SIGTERM/SIGINT for shutdown and `/kill
 ### From Claudir (now implemented in pyclaudir)
 
 1. **Scheduled events / reminders** — `set_reminder`, `list_reminders`, `cancel_reminder` MCP tools backed by a `reminders` SQLite table. A background asyncio task polls every 60s and injects due reminders as synthetic inbound messages. Supports one-shot (ISO8601) and recurring (cron) schedules.
+
+---
+
+## 5. Features Original to pyclaudir
+
+Things we built during operator-Claude sessions that neither the
+official plugin nor Claudir had (as far as we've observed). If you're
+Claude Code walking into this repo fresh, these are the non-obvious
+pieces to know about.
+
+### 5.1 Rate limiting — per-user inbound DM only (migration 004)
+
+**File:** `pyclaudir/rate_limiter.py`, wired in `pyclaudir/telegram_io.py:_on_message`.
+
+Earlier iterations rate-limited the **bot's outbound** messages per
+chat_id. That was solving the wrong problem: it let a spammer flood
+the bot's CC subprocess with 1000 messages/min (the bot would just
+eventually stop replying), and it shared one budget across everyone
+in a group. Migration 004 rebuilt `rate_limits` keyed by `user_id`
+and moved the check to inbound — a noisy user now has their own
+budget, enforced **before** `engine.submit()` so their messages
+never reach the CC worker.
+
+Key properties:
+
+- **DM-only.** `chat_type == "private"` is a precondition. Groups are
+  not rate-limited (group chatter is part of the design, not abuse).
+- **Owner exempt.** `PYCLAUDIR_OWNER_ID` never ticks the counter;
+  exemption is baked into `RateLimiter.check_and_record`.
+- **Fixed-minute buckets** via `rate_limits(user_id, bucket_start)`.
+  Cleaner than a sliding window; tolerates up to ~2× burst at bucket
+  boundary (acceptable at 20/min).
+- **One-shot throttle notice** per bucket, gated by the
+  `notice_sent` flag on the row. Bot sends one "you're sending too
+  fast, try again in Ns" message when the limit first fires; silent
+  for the rest of the bucket. The notice path bypasses the limiter
+  itself so the user always hears back.
+- No outbound cap exists. If the bot itself malfunctions, there's no
+  floor on its output — accepted trade-off for single source of
+  truth.
+
+### 5.2 Reactions as first-class on `messages` (migration 003)
+
+**Files:** `pyclaudir/telegram_io.py:_on_reaction`, `pyclaudir/db/messages.py:apply_user_reaction`, `pyclaudir/tools/add_reaction.py:add_bot_reaction`.
+
+Originally there was a separate `reactions` table that only recorded
+*outbound* bot reactions — writes went in, nothing ever read them,
+and inbound user reactions were silently dropped. Migration 003
+removed that table and added a `reactions` JSON column on `messages`:
+
+```
+messages.reactions: {"👍": [user_id, user_id], "❤️": [user_id]}
+```
+
+Populated from **both directions**:
+
+- **Inbound** via `MessageReactionHandler` (telegram.ext has a
+  dedicated handler class — not a `MessageHandler` variant). The
+  dispatcher's `_on_reaction` extracts old/new reaction sets and
+  calls `apply_user_reaction` to mutate the JSON.
+- **Outbound** via `add_reaction` tool, which calls
+  `bot.set_message_reaction()` and then `add_bot_reaction` to
+  update the column.
+
+Polling must include `"message_reaction"` in `allowed_updates` —
+done at `telegram_io.py:start_polling()`.
+
+**Telegram caveat:** bots only receive `message_reaction` updates in
+DMs or when the bot is a group/supergroup **admin**. In non-admin
+groups, user reactions silently drop. We document this rather than
+work around it.
+
+Query pattern (for `query_db` tool):
+
+```sql
+SELECT json_extract(reactions, '$."👍"') AS thumbs_up
+FROM messages
+WHERE message_id = ?
+```
+
+### 5.3 Owner-DM-gated self-editing of system/project prompts
+
+**Files:** `pyclaudir/instructions_store.py`, `pyclaudir/tools/instructions.py`, `data/prompt_backups/`.
+
+Four MCP tools — `list_instructions`, `read_instructions`,
+`write_instructions`, `append_instructions` — expose
+`prompts/system.md` and `prompts/project.md` to the bot for
+inspection and cautious self-editing. **All four share a single
+gate** applied before any filesystem access:
+
+```python
+if ctx.owner_id is None: denied
+if ctx.last_inbound_user_id != ctx.owner_id: denied
+if ctx.last_inbound_chat_type != "private": denied
+```
+
+`last_inbound_user_id` and `last_inbound_chat_type` are updated on
+every allowed inbound by `TelegramDispatcher._on_message`. The gate
+can't be spoofed by the agent because the values don't come from
+tool arguments — they come from the dispatcher's view of who sent
+the message that triggered the current turn.
+
+Safety rails on every write:
+- **Two-file allowlist** via dict lookup (no path resolution, no
+  traversal surface).
+- **128 KiB per-file cap.**
+- **Read-before-write**: must have called `read_instructions` on the
+  same file this session.
+- **Atomic write** via tmp+rename.
+- **Auto-backup** to `data/prompt_backups/<name>-<UTC timestamp>.md`
+  before every mutation. Revert is `mv <backup> prompts/<name>.md &&
+  docker compose restart pyclaudir`.
+
+Edits take effect on next CC spawn (prompts reload at
+`cc_worker.py:build_argv`). The container restart is the final
+review gate.
+
+### 5.4 Agent skills and the self-reflection loop
+
+**Files:** `skills/`, `pyclaudir/skills_store.py`, `pyclaudir/tools/skills.py`, `skills/self-reflection/SKILL.md`, migration 005.
+
+See § 4 "Agent skills" above for the invocation mechanics. The
+extension pattern for future Claude Code sessions:
+
+1. **Skill file.** Drop `skills/<name>/SKILL.md` — auto-discovered
+   by `SkillsStore`. No code change needed to make the file visible.
+2. **Trigger.** For on-demand skills, the owner can use `set_reminder`
+   to schedule `<skill name="X">run</skill>`. For mandatory skills,
+   add an entry in `pyclaudir/__main__.py:_seed_default_reminders`
+   with a unique `auto_seed_key`.
+3. **Protection tier.** An `auto_seed_key`-tagged reminder is
+   **mandatory** — `CancelReminderTool` refuses to cancel it and the
+   startup hook re-seeds it if missing. Defense in depth.
+4. **System prompt teaching.** The `# Skills` section in
+   `prompts/system.md` already teaches the bot to recognize
+   `<skill>` inside `<reminder>` envelopes; adding a new skill
+   doesn't require editing the system prompt as long as the
+   invocation pattern is the same.
+
+The `self-reflection` skill is the first concrete user. Its two-phase
+playbook (introspect → process pending) is the canonical example of
+what a skill looks like. When writing another skill, keep the same
+shape: preconditions check, clear numbered steps, explicit tool
+calls, explicit failure handling, explicit anti-patterns list at
+the bottom.
+
+### 5.5 Mandatory-reminder seeding and cancel-protection
+
+**Files:** `pyclaudir/__main__.py:_seed_default_reminders`, `pyclaudir/tools/reminder.py:CancelReminderTool`, migration 005 (`auto_seed_key` column).
+
+The `auto_seed_key` column on `reminders` tags rows that were
+inserted by the startup hook (vs. by the agent via `set_reminder`).
+This single column drives two behaviors:
+
+1. **Cancel gate at the tool layer.** `CancelReminderTool` fetches
+   the row via `fetch_reminder_by_id`; if `auto_seed_key` is non-
+   null, it refuses with an explicit error message.
+2. **Startup re-seed.** `_seed_default_reminders` queries for
+   **pending** rows with a given key. If zero (cancelled, sent,
+   deleted, manually DROPped), it inserts a fresh row.
+
+Together: the reminder is not removable short of editing source
+code. A cancel attempt via tool → refused; via SQL → restart re-
+creates; via DELETE → restart re-creates; DB wipe → migrations +
+seed re-run.
+
+### 5.6 On-correction mandatory learning
+
+**File:** `prompts/system.md § Self-reflection`.
+
+Policy rule (no code enforcement, just the prompt): whenever a user
+corrects the bot mid-conversation, the bot writes an entry to
+`data/memories/self/learnings.md` **in the same turn**, then decides
+whether to tag `[pending]` with a `**Proposed rule:**` line for the
+self-reflection skill to process. "I'll capture that later" is
+explicitly forbidden — the correction signal evaporates by the next
+turn.
+
+### 5.7 Ping rule with tiered fallback
+
+**File:** `prompts/project.md § Ping rule`.
+
+Project-level standing rule for outbound pings:
+
+1. **Has a handle** → `@handle` (primary — simple, familiar
+   Telegram UX).
+2. **No handle but known user_id** → `[Name](tg://user?id=<id>)`
+   markdown mention.
+3. **Neither** → plain name + flag to operator.
+
+Earlier iteration was user_id-first; reversed after operator
+feedback that handles are stable enough for this team and the
+tg://user?id markdown is more verbose than needed for the common
+case. HTML `<a href>` doesn't render in this pipeline — always use
+markdown form.
+
+### 5.8 SSH multiplexing in the sync script
+
+**File:** `scripts/sync-memories.sh`.
+
+Minor quality-of-life thing: the script opens one SSH master socket
+(`ControlMaster=auto`, `ControlPersist=60`) in a temp dir and reuses
+it across multiple rsync calls. Without this, the user gets a
+password prompt per rsync (two per invocation). Trap cleanly closes
+the master on exit. Key-auth via `ssh-copy-id` gives zero prompts;
+this change helps the fallback password case.

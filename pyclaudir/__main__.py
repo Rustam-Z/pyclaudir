@@ -26,12 +26,19 @@ from .cc_worker import CcSpawnSpec, CcWorker
 from .config import Config
 from .db.database import Database
 from .db.messages import insert_tool_call
-from .db.reminders import fetch_due_reminders, mark_reminder_sent, advance_recurring_reminder
+from .db.reminders import (
+    advance_recurring_reminder,
+    fetch_due_reminders,
+    insert_auto_seeded_reminder,
+    mark_reminder_sent,
+    pending_with_auto_seed_key,
+)
 from .engine import Engine
 from .instructions_store import InstructionsStore
 from .mcp_server import McpServer
 from .memory_store import MemoryStore
 from .rate_limiter import RateLimiter
+from .skills_store import SkillsStore
 from .telegram_io import TelegramDispatcher
 from .tools.base import ToolContext
 
@@ -59,6 +66,64 @@ def _setup_logging() -> None:
     # noisy in normal operation. Comment this out if you want them back.
     logging.getLogger("mcp.server.lowlevel.server").setLevel(logging.WARNING)
     logging.getLogger("mcp.server.streamable_http_manager").setLevel(logging.WARNING)
+
+
+#: Cron expression for the daily self-reflection reminder.
+#: 17:00 UTC = 22:00 in Asia/Tashkent (UTC+5). Change the ENV var
+#: ``PYCLAUDIR_SELF_REFLECTION_CRON`` to override without editing code.
+_DEFAULT_SELF_REFLECTION_CRON = "0 17 * * *"
+_SELF_REFLECTION_KEY = "self-reflection-default"
+
+
+async def _seed_default_reminders(db, config) -> None:
+    """Ensure the default self-reflection reminder is active.
+
+    The self-reflection loop is **mandatory** — the bot shouldn't be
+    able to stop learning. On every startup we check whether a PENDING
+    row with ``auto_seed_key='self-reflection-default'`` exists. If
+    not (missing entirely, cancelled, deleted, whatever the reason),
+    we re-seed. Cancellation is also blocked at the tool layer — see
+    ``CancelReminderTool`` — so this is defense in depth against DB
+    tampering or manual SQL.
+    """
+    existing = await pending_with_auto_seed_key(db, _SELF_REFLECTION_KEY)
+    if existing > 0:
+        log.info(
+            "self-reflection reminder: %d pending row(s) active, skipping seed",
+            existing,
+        )
+        return
+
+    cron_expr = os.environ.get(
+        "PYCLAUDIR_SELF_REFLECTION_CRON", _DEFAULT_SELF_REFLECTION_CRON
+    )
+    # Compute the first trigger time from the cron expression if croniter
+    # is available; otherwise default to "now" so the reminder loop will
+    # pick it up immediately.
+    first_trigger = datetime.now(timezone.utc)
+    try:
+        from croniter import croniter
+
+        first_trigger = croniter(cron_expr, first_trigger).get_next(datetime)
+    except ImportError:  # pragma: no cover
+        log.warning(
+            "croniter not installed, self-reflection reminder set to trigger now"
+        )
+
+    await insert_auto_seeded_reminder(
+        db,
+        auto_seed_key=_SELF_REFLECTION_KEY,
+        chat_id=config.owner_id,
+        user_id=-1,  # synthetic pseudo-user (same convention as reminder loop)
+        text='<skill name="self-reflection">run</skill>',
+        trigger_at=first_trigger.strftime("%Y-%m-%d %H:%M:%S"),
+        cron_expr=cron_expr,
+    )
+    log.info(
+        "seeded default self-reflection reminder (cron=%s, next=%s UTC)",
+        cron_expr,
+        first_trigger.strftime("%Y-%m-%d %H:%M:%S"),
+    )
 
 
 async def _async_main() -> None:
@@ -103,6 +168,13 @@ async def _async_main() -> None:
         backup_dir=config.data_dir / "prompt_backups",
     )
     instructions.ensure_dirs()
+    skills = SkillsStore(root=project_root / "skills")
+    skills.ensure_root()
+
+    # Seed the default self-reflection reminder if the operator hasn't
+    # already seen one (even a cancelled row counts — we respect prior
+    # decisions). Runs exactly once per persistent DB.
+    await _seed_default_reminders(db, config)
 
     async def db_logger(**kwargs):  # called by every MCP tool wrapper
         await insert_tool_call(db, **kwargs)
@@ -114,6 +186,7 @@ async def _async_main() -> None:
         database=db,
         memory_store=memory,
         instructions_store=instructions,
+        skills_store=skills,
         chat_titles=chat_titles,
         owner_id=config.owner_id,
     )
