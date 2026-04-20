@@ -38,10 +38,11 @@ ENV PATH="/app/.venv/bin:$PATH"
 
 WORKDIR /app
 
-# Copy application source and prompts
+# Copy application source, prompts, and skill playbooks
 COPY pyclaudir/ pyclaudir/
 COPY prompts/system.md prompts/system.md
 COPY prompts/project.md.example prompts/project.md.example
+COPY skills/ skills/
 
 # Data directory (mount as volume)
 VOLUME /app/data
