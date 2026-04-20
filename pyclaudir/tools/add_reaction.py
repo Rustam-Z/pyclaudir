@@ -30,15 +30,6 @@ class AddReactionTool(BaseTool):
             message_id=args.message_id,
             reaction=[ReactionTypeEmoji(emoji=args.emoji)],
         )
-
-        # Stop the "typing..." indicator: the reaction is visible feedback,
-        # no need to keep refreshing typing until turn-end.
-        if self.ctx.on_chat_replied is not None:
-            try:
-                self.ctx.on_chat_replied(args.chat_id)
-            except Exception:  # pragma: no cover
-                pass
-
         log_reaction(
             chat_id=args.chat_id,
             chat_titles=self.ctx.chat_titles,
