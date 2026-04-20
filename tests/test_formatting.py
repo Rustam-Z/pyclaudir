@@ -68,7 +68,7 @@ def test_mixed_formatting():
 
 
 def test_sources_with_links():
-    """Reproduces the Nodira formatting bug — markdown links in a list."""
+    """Regression — markdown links in a list rendered broken at one point."""
     md = (
         "Sources:\n"
         "- [VentureBeat — Article](https://venturebeat.com/article)\n"

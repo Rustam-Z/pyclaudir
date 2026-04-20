@@ -29,9 +29,10 @@ invocation:
   previously written via the "on correction" rule) and stress-test
   each, then propose to the owner.
 
-Do phase A first, then phase B. Phase A writes to `learnings.md`;
-phase B reads back what was just written plus any pre-existing
-pending entries.
+Do phase A first, then phase B, then the compaction pass (phase C).
+Phase A writes to `learnings.md`; phase B reads back what was just
+written plus any pre-existing pending entries; phase C keeps the
+file from growing unbounded.
 
 ## Preconditions (check first)
 
@@ -263,6 +264,62 @@ For each approved item (promote or refined-promote):
 
 For each rejected item: update marker to `[discarded]` in
 `learnings.md`.
+
+## Phase C — compact aging entries
+
+After phase B finishes, check whether `learnings.md` is getting
+large. The file has a 64 KiB hard cap (memory files are truncated
+at read time), so runaway growth = silent loss of early history.
+
+### C.1 — when to compact
+
+Skip compaction unless **at least one** of these is true:
+
+- The file is over 40 KiB (about two-thirds of the cap).
+- There are more than 50 h2 entries total.
+- It's been 7+ days since the last compaction (check for a
+  `## Last compaction: <date>` marker near the top; if absent, it's
+  the first pass and you should proceed).
+
+If none apply, skip to Step 7 of phase B.
+
+### C.2 — what to compact
+
+Target **only** entries with `[promoted]`, `[discarded]`, or
+`[refined]` markers that are **older than 90 days**. These have
+been resolved; their full prose is no longer load-bearing. Compact
+each such entry to a one-line summary:
+
+```
+## <YYYY-MM-DD> — <topic> [promoted]
+One-line summary of what the entry concluded. (compacted YYYY-MM-DD)
+```
+
+**Never compact:**
+
+- Entries with `[pending]` or `[error]` markers (unresolved —
+  phase B still wants them).
+- Plain-header entries (no marker — these are history the bot
+  reads at session start; keep them intact).
+- Entries marked as "seed" or "adversarial attack pattern" — these
+  are reference material.
+- Anything less than 90 days old.
+
+### C.3 — the compaction pass
+
+1. `read_memory("self/learnings.md")` (already done in phase B —
+   re-use the content).
+2. Identify compaction targets per C.2.
+3. For each target, preserve the h2 header with the status marker
+   intact, replace the body with the one-line summary + `(compacted
+   YYYY-MM-DD)` footer.
+4. Add or update a `## Last compaction: <today>` line near the top
+   of the file so future runs know when the last pass happened.
+5. `write_memory("self/learnings.md", <new content>)`.
+
+Report the compaction in the step-7 confirmation message: "Done. N
+rule(s) promoted. Compacted M old entries." If no compaction
+happened this run, don't mention it.
 
 ### Step 7 — confirm to the owner
 

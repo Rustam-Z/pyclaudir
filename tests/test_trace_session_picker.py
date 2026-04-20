@@ -50,7 +50,7 @@ def patched_dirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path,
 def test_session_id_file_wins(patched_dirs) -> None:
     """If data/session_id points at a real file, prefer it unconditionally."""
     project_dir, data_dir = patched_dirs
-    bot = project_dir / "abc-nodira.jsonl"
+    bot = project_dir / "abc-bot.jsonl"
     _write_jsonl(bot, [_bot_event()])
 
     operator = project_dir / "xyz-operator.jsonl"
@@ -58,18 +58,18 @@ def test_session_id_file_wins(patched_dirs) -> None:
     # Make operator newer
     os.utime(operator, (operator.stat().st_atime, bot.stat().st_mtime + 100))
 
-    (data_dir / "session_id").write_text("abc-nodira\n")
+    (data_dir / "session_id").write_text("abc-bot\n")
 
     found = trace_mod.find_bot_session()
     assert found is not None
-    assert found.name == "abc-nodira.jsonl"
+    assert found.name == "abc-bot.jsonl"
 
 
 def test_falls_back_to_xml_fingerprint(patched_dirs) -> None:
     """No data/session_id → scan for the <msg ...> fingerprint and ignore
     sessions that look like a regular Claude Code prompt."""
     project_dir, _ = patched_dirs
-    bot = project_dir / "nodira.jsonl"
+    bot = project_dir / "bot.jsonl"
     _write_jsonl(bot, [_bot_event()])
 
     operator = project_dir / "operator.jsonl"
@@ -79,7 +79,7 @@ def test_falls_back_to_xml_fingerprint(patched_dirs) -> None:
 
     found = trace_mod.find_bot_session()
     assert found is not None
-    assert found.name == "nodira.jsonl"
+    assert found.name == "bot.jsonl"
 
 
 def test_returns_none_when_no_bot_session(patched_dirs) -> None:
@@ -102,12 +102,12 @@ def test_session_id_file_with_missing_jsonl_falls_back(patched_dirs) -> None:
     project_dir, data_dir = patched_dirs
     (data_dir / "session_id").write_text("vanished-sid\n")
 
-    bot = project_dir / "real-nodira.jsonl"
+    bot = project_dir / "real-bot.jsonl"
     _write_jsonl(bot, [_bot_event()])
 
     found = trace_mod.find_bot_session()
     assert found is not None
-    assert found.name == "real-nodira.jsonl"
+    assert found.name == "real-bot.jsonl"
 
 
 def test_looks_like_bot_session_skips_non_text_first_event(patched_dirs) -> None:

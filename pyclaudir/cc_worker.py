@@ -227,6 +227,15 @@ class CcWorker:
     CRASH_LIMIT = 10
     CRASH_WINDOW_SECONDS = 600.0
 
+    #: Wedge detection — if the subprocess is mid-turn and neither stdout
+    #: nor MCP heartbeat has shown activity for this many seconds, kill
+    #: the subprocess so the supervisor respawns it. Set conservatively
+    #: (Claude Code + slow MCP calls can legitimately be quiet for a few
+    #: minutes). Override with ``PYCLAUDIR_LIVENESS_TIMEOUT_SECONDS``.
+    LIVENESS_TIMEOUT_SECONDS = 300.0
+    #: How often the liveness monitor wakes to check.
+    LIVENESS_POLL_SECONDS = 30.0
+
     #: Optional callback the supervisor calls when CC crashes.
     #: Signature: ``async on_crash(stderr_tail: list[str], attempt: int, backoff: float)``
     OnCrash = Any  # Callable[[list[str], int, float], Awaitable[None]] | None
@@ -247,8 +256,14 @@ class CcWorker:
         self._session_id: str | None = spec.session_id
         self._crash_times: list[float] = []
         self._supervisor_task: asyncio.Task | None = None
+        self._liveness_task: asyncio.Task | None = None
         self._stop_supervisor = asyncio.Event()
         self._on_crash = on_crash
+        #: ``time.monotonic()`` of the last successfully parsed stdout
+        #: event. Together with ``heartbeat.last_activity`` (bumped on
+        #: every MCP tool call) this tells the liveness monitor whether
+        #: the subprocess is alive-and-working or actually wedged.
+        self._last_event_at: float = time.monotonic()
         # Raw-capture state. We open with "pending-<ts>" names if we don't
         # know the session id at start time, then rename to "<sid>.*" once
         # the system/init event tells us.
@@ -397,6 +412,13 @@ class CcWorker:
 
     async def stop(self) -> None:
         self._stop_supervisor.set()
+        if self._liveness_task and not self._liveness_task.done():
+            self._liveness_task.cancel()
+            try:
+                await self._liveness_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._liveness_task = None
         if self._supervisor_task and not self._supervisor_task.done():
             self._supervisor_task.cancel()
             try:
@@ -437,12 +459,75 @@ class CcWorker:
     async def supervise(self) -> None:
         """Background loop that watches the subprocess and respawns on crash.
 
-        Call this once after :meth:`start`. Returns when the subprocess exits
-        cleanly or when ``stop()`` is called.
+        Also starts a liveness monitor that detects a wedged-mid-turn
+        subprocess (no stdout events, no MCP heartbeat activity, for
+        :attr:`LIVENESS_TIMEOUT_SECONDS`) and kills it so the supervisor
+        respawns it.
+
+        Call this once after :meth:`start`. Returns when the subprocess
+        exits cleanly or when ``stop()`` is called.
         """
         self._supervisor_task = asyncio.create_task(
             self._supervise_loop(), name="cc-supervisor"
         )
+        self._liveness_task = asyncio.create_task(
+            self._liveness_loop(), name="cc-liveness"
+        )
+
+    async def _liveness_loop(self) -> None:
+        """Detect wedged subprocesses and terminate them.
+
+        Only fires when all three conditions hold:
+        1. The subprocess is running (``is_running``).
+        2. A turn is currently in progress (``_current_turn is not None``).
+           Idle silence is fine — we only care about stuck turns.
+        3. Time since the most recent activity signal exceeds
+           :attr:`LIVENESS_TIMEOUT_SECONDS`. Activity signal is the max
+           of ``_last_event_at`` (stdout parse time) and
+           ``heartbeat.last_activity`` (bumped on every MCP tool call).
+
+        On wedge, we call ``_terminate_proc()`` — the supervisor's
+        existing crash-recovery path respawns with the same session id.
+        """
+        import os
+
+        try:
+            timeout = float(
+                os.environ.get(
+                    "PYCLAUDIR_LIVENESS_TIMEOUT_SECONDS",
+                    self.LIVENESS_TIMEOUT_SECONDS,
+                )
+            )
+        except ValueError:
+            timeout = self.LIVENESS_TIMEOUT_SECONDS
+
+        while not self._stop_supervisor.is_set():
+            try:
+                await asyncio.wait_for(
+                    self._stop_supervisor.wait(), timeout=self.LIVENESS_POLL_SECONDS,
+                )
+                return  # stop requested
+            except asyncio.TimeoutError:
+                pass
+
+            if not self.is_running:
+                continue
+            if self._current_turn is None:
+                continue  # idle — silence is expected
+            now = time.monotonic()
+            last_activity = max(self._last_event_at, self.heartbeat.last_activity)
+            silence = now - last_activity
+            if silence <= timeout:
+                continue
+
+            log.warning(
+                "cc subprocess wedged mid-turn: no activity for %.0fs "
+                "(timeout=%.0fs). Terminating to trigger respawn.",
+                silence, timeout,
+            )
+            # Terminate. The supervisor's wait() will wake up and the
+            # crash-recovery path respawns automatically.
+            await self._terminate_proc()
 
     async def _supervise_loop(self) -> None:
         import time
@@ -561,6 +646,7 @@ class CcWorker:
                 except json.JSONDecodeError:
                     log.debug("cc stdout non-json line: %r", line[:200])
                     continue
+                self._last_event_at = time.monotonic()
                 self._handle_event(event)
         except asyncio.CancelledError:
             raise

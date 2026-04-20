@@ -24,7 +24,7 @@ from pyclaudir.telegram_io import TelegramDispatcher
 OWNER = 42
 USER = 100
 DM_CHAT = 100  # DMs: chat_id == user_id in Telegram
-GROUP_CHAT = -1003205927799
+GROUP_CHAT = -1001234567890
 
 
 async def _open(tmp_path: Path) -> Database:

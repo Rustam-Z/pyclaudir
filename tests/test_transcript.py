@@ -24,17 +24,17 @@ def caplog_tx(caplog: pytest.LogCaptureFixture) -> pytest.LogCaptureFixture:
 
 def test_inbound_dm_format(caplog_tx) -> None:
     log_inbound(
-        chat_id=587272213, chat_type="private",
-        chat_titles={587272213: "Rustam"},
-        user_id=587272213, user_name="Rustam",
+        chat_id=12345, chat_type="private",
+        chat_titles={12345: "Alice"},
+        user_id=12345, user_name="Alice",
         message_id=42, reply_to_id=None, text="hi",
         allowed=True,
     )
     line = caplog_tx.records[-1].getMessage()
     assert "[RX]" in line
     assert "DM" in line
-    assert "Rustam" in line
-    assert "587272213" in line
+    assert "Alice" in line
+    assert "12345" in line
     assert "m42" in line
     assert "| hi" in line
 
@@ -42,14 +42,14 @@ def test_inbound_dm_format(caplog_tx) -> None:
 def test_inbound_group_format(caplog_tx) -> None:
     log_inbound(
         chat_id=-1001234567890, chat_type="supergroup",
-        chat_titles={-1001234567890: "Yalla Crew"},
+        chat_titles={-1001234567890: "Team Chat"},
         user_id=42, user_name="Alice",
         message_id=10, reply_to_id=5, text="hello team",
         allowed=True,
     )
     line = caplog_tx.records[-1].getMessage()
     assert "[RX]" in line
-    assert 'G "Yalla Crew"' in line
+    assert 'G "Team Chat"' in line
     assert "Alice[42]" in line
     assert "m10" in line
     assert "→m5" in line
@@ -71,14 +71,14 @@ def test_inbound_dropped_format(caplog_tx) -> None:
 
 
 def test_outbound_uses_cached_title(caplog_tx) -> None:
-    titles = {-1001234567890: "Yalla Crew"}
+    titles = {-1001234567890: "Team Chat"}
     log_outbound(
         chat_id=-1001234567890, chat_titles=titles,
         message_id=99, reply_to_id=10, text="hello!",
     )
     line = caplog_tx.records[-1].getMessage()
     assert "[TX]" in line
-    assert 'G "Yalla Crew"' in line
+    assert 'G "Team Chat"' in line
     assert "m99" in line
     assert "→m10" in line
     assert "| hello!" in line

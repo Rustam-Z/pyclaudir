@@ -623,7 +623,94 @@ tg://user?id markdown is more verbose than needed for the common
 case. HTML `<a href>` doesn't render in this pipeline — always use
 markdown form.
 
-### 5.8 SSH multiplexing in the sync script
+### 5.8 Secrets scrubber at persistence
+
+**File:** `pyclaudir/secrets_scrubber.py`, wired in `telegram_io._to_chat_message`.
+
+System-prompt rule #2 (data-handling) tells the bot not to echo
+secrets. The scrubber is the defense-in-depth layer: it redacts
+credential-shaped strings **before** `insert_message` writes them to
+SQLite. Otherwise an accidental paste of an `sk-…` key would sit in
+`data/pyclaudir.db` forever, readable via `query_db` and grep-able in
+any dump.
+
+Conservative patterns only — Bearer headers, `sk-` keys, GitHub
+tokens, AWS access keys, Slack tokens, JWTs, PEM private-key blocks,
+DSNs with embedded passwords. Redaction sentinel is the literal
+string `[REDACTED]` so a reader immediately sees the substitution
+happened. Misses are acceptable; false positives would break real
+content.
+
+### 5.9 Liveness monitor for wedged subprocesses
+
+**Files:** `pyclaudir/cc_worker.py:_liveness_loop`, env var
+`PYCLAUDIR_LIVENESS_TIMEOUT_SECONDS` (default 300s).
+
+Claudir Part 3's "heartbeat problem": a CC subprocess can go silent
+on stdout during a long MCP call. The health monitor needs to
+distinguish "wedged and needs restart" from "alive and doing real
+work". Solution: two activity signals, liveness fires only when
+BOTH are silent AND a turn is mid-flight:
+
+- `_last_event_at` — bumped in `_read_stdout` on every parseable event.
+- `ToolContext.heartbeat.last_activity` — bumped on every MCP tool call.
+
+The monitor polls every 30s. If `is_running` AND `_current_turn is
+not None` AND `now - max(event, heartbeat) > timeout`, it calls
+`_terminate_proc()`. The existing supervisor's `await proc.wait()`
+wakes up, sees the exit, and respawns with the same session_id via
+the standard crash-recovery path.
+
+Does NOT fire when idle — silence between turns is the normal state.
+This avoids killing a perfectly healthy subprocess just because
+nobody's messaged in a while.
+
+### 5.10 Self-reflection Phase C — compaction
+
+**File:** `skills/self-reflection/SKILL.md § Phase C`.
+
+`learnings.md` is append-only and capped at 64 KiB per memory file.
+Without pruning, a year of daily self-reflection would blow the cap
+and `read_memory` would start truncating. Phase C runs after Phase B
+on each invocation. Compacts **only** old (>90 days), resolved
+(`[promoted]`/`[discarded]`/`[refined]`) entries to one-line
+summaries. Leaves `[pending]`/`[error]` entries, plain-history
+entries, and seeded adversarial examples untouched. Skips the pass
+entirely unless the file is over 40 KiB or >50 entries or it's been
+7+ days since the last compaction (idempotent marker at the top).
+
+### 5.11 Owner-only operational commands
+
+**Files:** `pyclaudir/telegram_io.py:_cmd_health`, `_cmd_audit`.
+
+Two owner-only slash commands for on-demand operational visibility
+without SSH:
+
+- `/health` — last bot send timestamp, self-reflection reminder
+  status (pending / cancelled / missing), lifetime rate-limit notice
+  count.
+- `/audit` — recent failed tool calls (from `tool_calls` where
+  `error IS NOT NULL`), prompt backup count, total memory footprint.
+
+Gated by `_is_owner()` like all other owner commands. Silent no-op
+for non-owners (intentional — doesn't confirm the command exists).
+
+### 5.12 Agent Skills spec conformance + validator
+
+**Files:** `pyclaudir/skills_store.py`, `pyclaudir/scripts/validate_skills.py`.
+
+All skills under `skills/<name>/SKILL.md` follow the Agent Skills
+spec (<https://agentskills.io/specification>). `SkillsStore` parses
+YAML frontmatter, validates `name` matches the directory + the
+`[a-z0-9]+(-[a-z0-9]+)*` regex, caps `description` at 1024 chars.
+`list_skills` implements the spec's progressive-disclosure pattern —
+metadata only at list time, full body only on `read_skill`.
+
+`uv run python -m pyclaudir.scripts.validate_skills` walks every
+first-level skill and reports conformance. Runs cheap; wire into
+pre-commit or CI to prevent shipping a malformed skill.
+
+### 5.13 SSH multiplexing in the sync script
 
 **File:** `scripts/sync-memories.sh`.
 

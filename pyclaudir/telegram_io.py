@@ -2,11 +2,9 @@
 
 The handlers do the absolute minimum: persist the incoming update to SQLite
 and enqueue it on the engine. They never call any LLM directly. Owner-only
-control commands (``/kill``, ``/reset``, ``/restart``) are intercepted before
-the engine sees the message.
-
-In Step 6 the engine is just a placeholder that sends a hardcoded ack so we
-can manually verify the wiring with a real BotFather token.
+slash commands (``/kill``, ``/health``, ``/audit``, ``/access``, ``/allow``,
+``/deny``, ``/dmpolicy``) are intercepted before the engine sees the
+message and silently no-op for non-owners.
 """
 
 from __future__ import annotations
@@ -38,6 +36,7 @@ from .db.messages import (
 )
 from .models import ChatMessage
 from .rate_limiter import RateLimitExceeded, RateLimiter
+from .secrets_scrubber import contains_secret, scrub
 from .tools.base import ToolContext
 from .transcript import log_inbound, log_inbound_edit
 
@@ -54,7 +53,20 @@ def _to_chat_message(update: Update, direction: str = "in") -> ChatMessage | Non
     msg = update.effective_message
     if msg is None or msg.from_user is None:
         return None
-    text = msg.text or msg.caption or ""
+    raw_text = msg.text or msg.caption or ""
+    # Redact credential-shaped strings BEFORE persistence (OWASP LLM02,
+    # data-handling rule #2). If the user pastes an API key, we never
+    # want it landing in SQLite where query_db can later surface it.
+    text = scrub(raw_text)
+    reply_to_text_raw = (
+        (msg.reply_to_message.text or msg.reply_to_message.caption or None)
+        if msg.reply_to_message
+        else None
+    )
+    reply_to_text = scrub(reply_to_text_raw) if reply_to_text_raw else None
+    raw_update_json = json.dumps(update.to_dict(), default=str)
+    if contains_secret(raw_update_json):
+        raw_update_json = scrub(raw_update_json)
     return ChatMessage(
         chat_id=msg.chat_id,
         message_id=msg.message_id,
@@ -65,12 +77,8 @@ def _to_chat_message(update: Update, direction: str = "in") -> ChatMessage | Non
         timestamp=msg.date or datetime.now(timezone.utc),
         text=text,
         reply_to_id=msg.reply_to_message.message_id if msg.reply_to_message else None,
-        reply_to_text=(
-            (msg.reply_to_message.text or msg.reply_to_message.caption or None)
-            if msg.reply_to_message
-            else None
-        ),
-        raw_update_json=json.dumps(update.to_dict(), default=str),
+        reply_to_text=reply_to_text,
+        raw_update_json=raw_update_json,
     )
 
 
@@ -114,8 +122,8 @@ class TelegramDispatcher:
     def _wire_handlers(self) -> None:
         # Owner-only control commands first so they short-circuit the engine.
         self.application.add_handler(CommandHandler("kill", self._cmd_kill))
-        self.application.add_handler(CommandHandler("reset", self._cmd_reset))
-        self.application.add_handler(CommandHandler("restart", self._cmd_restart))
+        self.application.add_handler(CommandHandler("health", self._cmd_health))
+        self.application.add_handler(CommandHandler("audit", self._cmd_audit))
         # Owner-only access management commands.
         self.application.add_handler(CommandHandler("allow", self._cmd_allow))
         self.application.add_handler(CommandHandler("deny", self._cmd_deny))
@@ -149,15 +157,97 @@ class TelegramDispatcher:
         log.warning("/kill received from owner; shutting down")
         await self.application.stop_running()
 
-    async def _cmd_reset(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
-        if not self._is_owner(update):
-            return
-        await update.effective_message.reply_text("reset acknowledged (engine wires this in step 8)")
+    async def _cmd_health(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """Quick operational health readout — owner-only, DM or group.
 
-    async def _cmd_restart(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        Surfaces things that matter day-to-day: when the CC subprocess
+        last produced output, whether the self-reflection auto-seed
+        reminder is active, recent rate-limit hits.
+        """
         if not self._is_owner(update):
             return
-        await update.effective_message.reply_text("restart acknowledged (engine wires this in step 8)")
+        lines: list[str] = ["*pyclaudir health*"]
+        try:
+            row = await self.db.fetch_one(
+                "SELECT MAX(timestamp) AS last FROM messages WHERE direction='out'"
+            )
+            last_tx = row["last"] if row and row["last"] else "(none yet)"
+            lines.append(f"- last bot send: `{last_tx}` UTC")
+        except Exception as exc:
+            lines.append(f"- last bot send: query error ({exc})")
+        try:
+            row = await self.db.fetch_one(
+                "SELECT status, cron_expr, trigger_at FROM reminders "
+                "WHERE auto_seed_key = 'self-reflection-default' "
+                "ORDER BY id DESC LIMIT 1"
+            )
+            if row is None:
+                lines.append("- self-reflection reminder: MISSING (will re-seed on restart)")
+            else:
+                lines.append(
+                    f"- self-reflection reminder: {row['status']} "
+                    f"(cron `{row['cron_expr']}`, next `{row['trigger_at']}` UTC)"
+                )
+        except Exception as exc:
+            lines.append(f"- self-reflection reminder: query error ({exc})")
+        try:
+            row = await self.db.fetch_one(
+                "SELECT COUNT(*) AS c FROM rate_limits WHERE notice_sent = 1"
+            )
+            notices = int(row["c"]) if row else 0
+            lines.append(f"- rate-limit notices fired (lifetime): {notices}")
+        except Exception as exc:
+            lines.append(f"- rate-limit notices: query error ({exc})")
+        await update.effective_message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+    async def _cmd_audit(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """Recent changes / failures / backups — owner-only.
+
+        Richer than /health; intended for occasional "what's been
+        happening" review rather than live monitoring.
+        """
+        if not self._is_owner(update):
+            return
+        lines: list[str] = ["*pyclaudir audit*"]
+        # Recent failed tool calls.
+        try:
+            rows = await self.db.fetch_all(
+                "SELECT tool_name, error, created_at FROM tool_calls "
+                "WHERE error IS NOT NULL AND error != '' "
+                "ORDER BY id DESC LIMIT 5"
+            )
+            if rows:
+                lines.append("*recent tool failures:*")
+                for r in rows:
+                    err = (r["error"] or "")[:80]
+                    lines.append(f"  • `{r['created_at']}` {r['tool_name']} — {err}")
+            else:
+                lines.append("*recent tool failures:* none")
+        except Exception as exc:
+            lines.append(f"*recent tool failures:* query error ({exc})")
+        # Prompt backup count.
+        try:
+            backups_dir = self.config.data_dir / "prompt_backups"
+            if backups_dir.exists():
+                files = [
+                    p for p in backups_dir.iterdir()
+                    if p.is_file() and p.suffix == ".md"
+                ]
+                lines.append(f"*prompt backups:* {len(files)} file(s) in `{backups_dir}`")
+            else:
+                lines.append("*prompt backups:* (none yet)")
+        except Exception as exc:
+            lines.append(f"*prompt backups:* error ({exc})")
+        # Memory footprint.
+        try:
+            mem_dir = self.config.memories_dir
+            total_bytes = sum(
+                p.stat().st_size for p in mem_dir.rglob("*") if p.is_file()
+            ) if mem_dir.exists() else 0
+            lines.append(f"*memory footprint:* {total_bytes:,} bytes under `data/memories/`")
+        except Exception as exc:
+            lines.append(f"*memory footprint:* error ({exc})")
+        await update.effective_message.reply_text("\n".join(lines), parse_mode="Markdown")
 
     # ------------------------------------------------------------------
     # Access management commands (owner-only)

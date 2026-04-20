@@ -141,7 +141,7 @@ def test_event_parser_logs_tool_use(spec: CcSpawnSpec, caplog) -> None:
                     "type": "tool_use",
                     "name": "send_message",
                     "id": "toolu_abcdef1234",
-                    "input": {"chat_id": 587272213, "text": "hello!"},
+                    "input": {"chat_id": 12345, "text": "hello!"},
                 }
             ]
         },

@@ -31,16 +31,38 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
 
-PROJECT_DIR = (
-    Path.home()
-    / ".claude"
-    / "projects"
-    / "-Users-rustam-z-development-agents-yalla"
-)
+
+def _encode_project_dir(p: Path) -> str:
+    """Claude Code encodes the project path as ``~/.claude/projects/<slug>``
+    where ``<slug>`` is the absolute path with every non-``[A-Za-z0-9]``
+    character replaced by ``-``. e.g. ``/Users/alice/dev/my_bot`` →
+    ``-Users-alice-dev-my-bot``.
+    """
+    return re.sub(r"[^A-Za-z0-9]", "-", str(p.resolve()))
+
+
+def _project_dir_for(cwd: Path | None = None) -> Path:
+    """Resolve the CC sessions dir for this project.
+
+    Precedence:
+      1. ``CLAUDE_PROJECT_DIR`` env var (explicit override).
+      2. Encoded form of ``cwd`` (defaults to current working directory).
+
+    Returns a path; the directory may not exist yet if CC hasn't run here.
+    """
+    override = os.environ.get("CLAUDE_PROJECT_DIR")
+    if override:
+        return Path(override).expanduser().resolve()
+    root = cwd or Path.cwd()
+    return Path.home() / ".claude" / "projects" / _encode_project_dir(root)
+
+
+PROJECT_DIR = _project_dir_for()
 
 
 def _data_dir() -> Path:

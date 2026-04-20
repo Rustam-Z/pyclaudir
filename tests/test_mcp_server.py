@@ -6,7 +6,7 @@ from __future__ import annotations
 import pytest
 
 from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import streamable_http_client
 
 from pyclaudir.mcp_server import McpServer
 from pyclaudir.tools.base import ToolContext
@@ -18,7 +18,7 @@ async def test_now_tool_reachable_via_http() -> None:
     await server.start()
     try:
         assert server.port is not None and server.port > 0
-        async with streamablehttp_client(server.url) as (read, write, _):
+        async with streamable_http_client(server.url) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 tools = await session.list_tools()

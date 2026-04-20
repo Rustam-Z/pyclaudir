@@ -28,7 +28,7 @@ $EDITOR .env   # set TELEGRAM_BOT_TOKEN and PYCLAUDIR_OWNER_ID
 uv sync --extra dev
 
 # 4. Run the test suite
-uv run pytest
+uv run python -m pytest -q
 
 # 5. Start the bot
 uv run python -m pyclaudir
@@ -49,6 +49,36 @@ pkill -f 'python -m pyclaudir'
 time. If you see `Conflict: terminated by other getUpdates request`, another
 instance is already running — kill it first.
 
+### Running tests
+
+```bash
+# Full suite, quiet output (expected: 284 passed, no warnings)
+uv run python -m pytest -q
+
+# One file
+uv run python -m pytest tests/test_secrets_scrubber.py -v
+
+# One specific test
+uv run python -m pytest tests/test_liveness.py::test_liveness_kills_on_wedged_turn -v
+
+# Tests whose name matches a pattern
+uv run python -m pytest -k "reaction or skill" -v
+
+# Stop on first failure, show locals on assertion errors
+uv run python -m pytest -x --showlocals
+```
+
+**Always use `uv run python -m pytest`, not bare `uv run pytest`.** The
+bare form can resolve to the *system* pytest outside the project's
+venv, which won't have `aiosqlite`, `pytest-asyncio`, and other runtime
+deps. Symptoms: ~12 collection errors that look like bugs in the code
+but are actually a missing-deps resolution problem. Going through
+`python -m pytest` forces the venv's Python interpreter.
+
+If you've never run the tests on this machine, run `uv sync --extra
+dev` first to install `pytest`, `pytest-asyncio`, and `anyio` into the
+venv.
+
 ## Configuration
 
 All knobs live in environment variables (or `.env`):
@@ -63,6 +93,7 @@ All knobs live in environment variables (or `.env`):
 | `PYCLAUDIR_DEBOUNCE_MS` | no | `0` | message coalescing window (0 = instant) |
 | `PYCLAUDIR_RATE_LIMIT_PER_MIN` | no | `20` | per-user inbound DM cap (owner exempt; groups not limited) |
 | `PYCLAUDIR_SELF_REFLECTION_CRON` | no | `0 17 * * *` | when the daily self-reflection skill fires (UTC cron). Default is 22:00 Tashkent. |
+| `PYCLAUDIR_LIVENESS_TIMEOUT_SECONDS` | no | `300` | wedge-detection threshold. If the CC subprocess is mid-turn with no activity for this long, it gets killed (supervisor respawns). |
 | `PYCLAUDIR_PROJECT_PROMPT` | no | `prompts/project.md` | path to project-specific prompt (concatenated after `system.md`) |
 | `CLAUDE_CODE_BIN` | no | `claude` | path to the CC CLI |
 | `JIRA_URL` | no | — | Jira site URL (enables mcp-atlassian) |
@@ -88,7 +119,7 @@ Telegram dispatcher  →  Engine (debouncer/queue/inject)  →  CC worker  →  
 1. **Telegram dispatcher** (`pyclaudir/telegram_io.py`). PTB v21 with manual
    lifecycle, polling. The handler does *only* two things: persist the
    incoming message to SQLite, then enqueue it on the engine. Owner-only
-   `/kill`, `/reset`, `/restart` short-circuit the engine.
+   `/kill`, `/health`, `/audit`, and the access commands short-circuit the engine.
 2. **Engine** (`pyclaudir/engine.py`). Owns the pending queue, the
    1-second debounce timer, the processing flag, and the inject channel.
    Coalesces bursts; if a message arrives while CC is mid-turn the engine
@@ -160,7 +191,7 @@ without a restart.
 {
   "dm_policy": "owner_only",
   "allowed_users": [],
-  "allowed_chats": [-1003938080260]
+  "allowed_chats": [-1001234567890]
 }
 ```
 
@@ -182,11 +213,27 @@ dropped before the engine sees them.
 
 ### Managing access from Telegram (owner-only commands)
 
+All slash commands below check `update.effective_user.id ==
+PYCLAUDIR_OWNER_ID` and silently no-op for anyone else (no error
+leaked to the caller, by design).
+
+**Access control:**
+
 ```
 /access                      Show current policy, allowed users, allowed chats
 /allow 123456789             Add a user to the DM allowlist
 /deny 123456789              Remove a user from the DM allowlist
 /dmpolicy allowlist          Change DM policy (owner_only | allowlist | open)
+```
+
+**Operational:**
+
+```
+/kill                        Stop the bot cleanly (graceful shutdown)
+/health                      Quick health readout — last bot send, reminder
+                             status, lifetime rate-limit notice count
+/audit                       Richer — recent tool failures, prompt backup
+                             count, memory footprint
 ```
 
 Or edit `data/access.json` directly — changes are picked up on the next
@@ -430,11 +477,11 @@ structured tag lines on top of the usual lifecycle messages:
 Sample (DM with one message):
 
 ```
-21:34:12 INFO  pyclaudir.tx       [RX] DM Rustam[587272213] m42 | how fast are you
+21:34:12 INFO  pyclaudir.tx       [RX] DM Alice[12345] m42 | how fast are you
 21:34:12 INFO  pyclaudir.engine   starting turn with 1 msgs
-21:34:12 INFO  pyclaudir.cc       [CC.user] <msg id="42" chat="587272213" ...>↵how fast are you↵</msg>
-21:34:13 INFO  pyclaudir.cc       [CC.tool→] mcp__pyclaudir__send_message({"chat_id":587272213,"text":"Honestly?…"}) id=toolu_01
-21:34:14 INFO  pyclaudir.tx       [TX] DM Rustam[587272213] m43 | Honestly? Not blazing fast 😅 …
+21:34:12 INFO  pyclaudir.cc       [CC.user] <msg id="42" chat="12345" ...>↵how fast are you↵</msg>
+21:34:13 INFO  pyclaudir.cc       [CC.tool→] mcp__pyclaudir__send_message({"chat_id":12345,"text":"Honestly?…"}) id=toolu_01
+21:34:14 INFO  pyclaudir.tx       [TX] DM Alice[12345] m43 | Honestly? Not blazing fast 😅 …
 21:34:14 INFO  pyclaudir.cc       [CC.tool✓] id=toolu_01 | sent message_id=43
 21:34:14 INFO  pyclaudir.cc       [CC.done]  action=stop reason=Answered the user's question
 ```
@@ -445,7 +492,12 @@ for debugging, comment the relevant lines in `pyclaudir/__main__.py:_setup_loggi
 ### 2. The replayable session viewer (`pyclaudir.scripts.trace`)
 
 Claude Code persists every CC session as a JSONL file at
-`~/.claude/projects/-Users-rustam-z-development-agents-yalla/<session_id>.jsonl`.
+`~/.claude/projects/<encoded-project-dir>/<session_id>.jsonl`, where
+`<encoded-project-dir>` is the absolute project path with every
+non-alphanumeric character replaced by `-` (e.g. `/home/alice/pyclaudir`
+→ `-home-alice-pyclaudir`). `pyclaudir.scripts.trace` computes this
+automatically from the cwd; override with `CLAUDE_PROJECT_DIR` if
+needed.
 This is the **complete conversation log** — every user envelope, every
 assistant message, every tool_use, every tool_result, every thinking block.
 
@@ -528,12 +580,12 @@ sqlite3 data/pyclaudir.db \
 # Per-user activity in a specific chat
 sqlite3 data/pyclaudir.db \
   "SELECT username, first_name, message_count, last_message_date
-   FROM users WHERE chat_id = 587272213 ORDER BY message_count DESC;"
+   FROM users WHERE chat_id = 12345 ORDER BY message_count DESC;"
 
 # Find every reply chain involving a specific user
 sqlite3 data/pyclaudir.db \
   "SELECT message_id, reply_to_id, substr(text,1,100)
-   FROM messages WHERE user_id = 587272213 AND reply_to_id IS NOT NULL;"
+   FROM messages WHERE user_id = 12345 AND reply_to_id IS NOT NULL;"
 ```
 
 `query_db` (the MCP tool) lets the agent run SELECTs against this
@@ -606,8 +658,10 @@ by code, not by hope, and tested in `tests/test_security_invariants.py`.
   `os.system`, `os.popen`, `asyncio.create_subprocess_*` anywhere under
   `pyclaudir/tools/`. The *only* place those primitives are allowed is
   `cc_worker.py`, which spawns `claude` itself.
-- **Owner-only privileged commands.** `/kill`, `/reset`, `/restart` check
-  `update.effective_user.id == PYCLAUDIR_OWNER_ID` before running.
+- **Owner-only privileged commands.** `/kill`, `/health`, `/audit`,
+  `/access`, `/allow`, `/deny`, `/dmpolicy` check
+  `update.effective_user.id == PYCLAUDIR_OWNER_ID` before running and
+  silently no-op for anyone else.
 - **`query_db` is read-only.** Inputs are parsed with `sqlglot` and rejected
   unless they're a single SELECT. CTEs are walked recursively; semicolons,
   PRAGMA, ATTACH, INSERT/UPDATE/DELETE/DROP/CREATE/ALTER all fail. Results
@@ -622,7 +676,21 @@ by code, not by hope, and tested in `tests/test_security_invariants.py`.
   bucket they get one Telegram notice ("you're sending too fast…") then
   the bot goes quiet until the bucket rolls over.
 - **Audit log.** Every MCP tool invocation persists to `tool_calls` (name,
-  args, result, error, duration).
+  args, result, error, duration). Owner can review recent failures via
+  `/audit`.
+- **Secrets scrubbing at persistence.** Inbound message text and the
+  raw Telegram `Update` JSON are passed through `secrets_scrubber.scrub()`
+  before `insert_message` writes to SQLite. Redacts Bearer tokens,
+  `sk-…` keys, GitHub/Slack tokens, AWS access keys, JWTs, PEM private-
+  key blocks, and DSNs with embedded passwords. An accidental credential
+  paste never lands in the DB.
+- **Wedged-subprocess detection.** `CcWorker._liveness_loop` watches
+  for silent-mid-turn subprocesses: if `max(last stdout event,
+  last MCP tool call) < now - PYCLAUDIR_LIVENESS_TIMEOUT_SECONDS`
+  (default 300s) and a turn is in progress, the subprocess is
+  terminated so the crash-recovery path respawns it with the same
+  session id. Doesn't fire when idle (silence is expected between
+  turns).
 - **Instruction tools are owner-DM-only.** The four tools
   `list_instructions`, `read_instructions`, `write_instructions`,
   `append_instructions` expose `prompts/system.md` and
@@ -655,7 +723,7 @@ load-bearing — keep them.
 Once configured, you should be able to:
 
 1. DM the bot, see the bot reply via `send_message`.
-2. Drop `data/memories/user_preferences.md` containing "Rustam prefers
+2. Drop `data/memories/user_preferences.md` containing "Alice prefers
    Russian", ask "what do you know about me?", watch it call
    `list_memories` → `read_memory` and reply in Russian.
 3. Send 5 messages in 2 seconds, see them batched into one turn (debounce).
@@ -667,7 +735,7 @@ Once configured, you should be able to:
    seconds and resume the conversation.
 8. Ask the bot to run a shell command — it should refuse, because it has
    no `Bash` tool and its system prompt tells it to.
-9. Run `uv run pytest tests/test_security_invariants.py` and see all 8
+9. Run `uv run python -m pytest tests/test_security_invariants.py` and see all 8
    invariants pass.
 
 ## Docker deployment
@@ -768,7 +836,8 @@ pyclaudir/
 │   ├── memories/               # the agent's working memory
 │   └── cc_logs/                # raw CC stdout/stderr capture
 ├── scripts/
-│   └── sync-memories.sh        # rsync helper for server ↔ local sync
+│   ├── sync-memories.sh        # rsync helper for server ↔ local sync
+│   └── prune-backups.sh        # archive stale prompt backups (keep newest 50)
 ├── pyclaudir/
 │   ├── __main__.py             # entrypoint + log setup
 │   ├── access.py               # hot-reloadable access.json gate
@@ -784,7 +853,8 @@ pyclaudir/
 │   ├── transcript.py           # [RX]/[TX]/[CC.*] log helpers
 │   ├── models.py
 │   ├── scripts/
-│   │   └── trace.py            # CC session JSONL replay/follow renderer
+│   │   ├── trace.py            # CC session JSONL replay/follow renderer
+│   │   └── validate_skills.py  # validate skills/ against the Agent Skills spec
 │   └── tools/
 │       ├── base.py             # BaseTool, ToolContext, Heartbeat
 │       ├── now.py
@@ -816,9 +886,11 @@ pyclaudir/
     ├── test_rate_limits_dm_only.py    # DM-only, owner-exempt dispatcher-level limiter
     ├── test_instructions_store.py     # allowlist, size cap, read-before-write, backup
     ├── test_instructions_tools.py     # owner-DM gate across list/read/write/append
-    ├── test_skills_store.py           # path-hardened, SKILL.md-only discovery
+    ├── test_skills_store.py           # Agent Skills spec conformance + path hardening
     ├── test_skills_tools.py           # list_skills / read_skill surface
-    ├── test_auto_seed_reminder.py     # default self-reflection reminder seed + cancel-sticky
+    ├── test_auto_seed_reminder.py     # mandatory self-reflection reminder + cancel gate
+    ├── test_secrets_scrubber.py       # credential redaction at persistence boundary
+    ├── test_liveness.py                # wedged-mid-turn subprocess detection
     ├── test_reply_chain.py             # multi-hop reply expansion
     ├── test_transcript.py              # tagged log formatting
     └── test_query_db.py

@@ -77,7 +77,7 @@ def test_rejects_empty_path(store: MemoryStore) -> None:
 
 def test_accepts_legitimate_path(store: MemoryStore) -> None:
     target = store.root / "user_preferences.md"
-    target.write_text("Rustam prefers Russian")
+    target.write_text("Alice prefers Russian")
     resolved = store.resolve_path("user_preferences.md")
     assert resolved == target.resolve()
 
