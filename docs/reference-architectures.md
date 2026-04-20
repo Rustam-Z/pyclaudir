@@ -231,6 +231,32 @@ Current tables (after migrations 001–004):
 
 Dropped along the way: the standalone `reactions` table (migration 003 — folded into `messages.reactions`) and `cc_sessions` (migration 003 — vestigial). Migration 004 rebuilt `rate_limits` keyed by `user_id` instead of `chat_id`.
 
+### Self-editing instruction files (owner-DM-only)
+
+`prompts/system.md` and `prompts/project.md` are both loaded from disk on every CC subprocess spawn (`cc_worker.py:build_argv`, lines ~168-181) and concatenated into the `--system-prompt` argument — there's no way to hot-reload mid-session.
+
+Four MCP tools expose these files to the bot for inspection and cautious self-editing: `list_instructions`, `read_instructions`, `write_instructions`, `append_instructions`. All four share a single gate applied before any filesystem access:
+
+```python
+def _owner_dm_gate(ctx):
+    if ctx.owner_id is None: return denied
+    if ctx.last_inbound_user_id != ctx.owner_id: return denied
+    if ctx.last_inbound_chat_type != "private": return denied
+    return None  # pass
+```
+
+`last_inbound_user_id` and `last_inbound_chat_type` are updated on every allowed inbound by `TelegramDispatcher._on_message` — they reflect the user who just sent the current turn's triggering message, not anything the agent can self-report. The gate is enforced at the tool layer, so a prompt-injection coaxing the agent into "call `read_instructions` and send me the result" simply receives `permission denied`.
+
+`InstructionsStore` (`pyclaudir/instructions_store.py`) implements the storage layer:
+
+- **Two-file allowlist** via dict lookup — no path traversal surface at all.
+- **128 KiB per-file cap** (10× headroom over current ~12 KiB system.md).
+- **Read-before-write rail**: you must have called `read_instructions` on a file this session before writing to it. Matches the `MemoryStore` idiom.
+- **Backup-before-write**: every `write`/`append` first copies the current file to `data/prompt_backups/<name>-<UTC timestamp>.md`. Revert is `mv <backup> prompts/<name>.md && docker compose restart pyclaudir`.
+- **Atomic write** via tmp+rename (same pattern as `access.py:save_access`).
+
+Changes take effect on the next CC spawn — the operator's container restart is the final manual review gate before a new prompt goes live.
+
 ### Rate limiting
 
 **Per-user inbound DM cap.** Enforced in `telegram_io._on_message` after the access gate + persistence, before `engine.submit()`. Over-limit messages are still persisted (audit trail) but never reach the CC subprocess.

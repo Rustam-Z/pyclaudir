@@ -490,6 +490,19 @@ by code, not by hope, and tested in `tests/test_security_invariants.py`.
   the bot goes quiet until the bucket rolls over.
 - **Audit log.** Every MCP tool invocation persists to `tool_calls` (name,
   args, result, error, duration).
+- **Instruction tools are owner-DM-only.** The four tools
+  `list_instructions`, `read_instructions`, `write_instructions`,
+  `append_instructions` expose `prompts/system.md` and
+  `prompts/project.md` to the bot for inspection and (cautious)
+  self-editing. All four gate at the tool layer on
+  `last_inbound_user_id == PYCLAUDIR_OWNER_ID` **and**
+  `chat_type == "private"`. Any other context — group chats,
+  non-owner DMs, or the initial pre-first-message state — returns
+  `permission denied` with no content leak. Every successful write
+  copies the previous content to `data/prompt_backups/<name>-<timestamp>.md`
+  first; revert is `mv <backup> prompts/<name>.md && docker compose
+  restart pyclaudir`. Edits take effect on the next CC spawn, not
+  mid-session, which gives the operator a natural review window.
 
 If you weaken any of these, the security tests will fail loudly. They are
 load-bearing — keep them.
@@ -634,6 +647,7 @@ pyclaudir/
 │       ├── delete_message.py
 │       ├── add_reaction.py
 │       ├── memory.py           # list/read/write/append memory (read-before-write)
+│       ├── instructions.py     # list/read/write/append system.md + project.md (owner-DM only)
 │       ├── query_db.py
 │       └── reminder.py         # set/list/cancel reminders
 └── tests/
@@ -652,6 +666,8 @@ pyclaudir/
     ├── test_recovery_and_limits.py
     ├── test_reactions_update.py       # inbound + bot reactions fold into messages
     ├── test_rate_limits_dm_only.py    # DM-only, owner-exempt dispatcher-level limiter
+    ├── test_instructions_store.py     # allowlist, size cap, read-before-write, backup
+    ├── test_instructions_tools.py     # owner-DM gate across list/read/write/append
     ├── test_reply_chain.py             # multi-hop reply expansion
     ├── test_transcript.py              # tagged log formatting
     └── test_query_db.py

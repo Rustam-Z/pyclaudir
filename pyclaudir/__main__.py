@@ -28,6 +28,7 @@ from .db.database import Database
 from .db.messages import insert_tool_call
 from .db.reminders import fetch_due_reminders, mark_reminder_sent, advance_recurring_reminder
 from .engine import Engine
+from .instructions_store import InstructionsStore
 from .mcp_server import McpServer
 from .memory_store import MemoryStore
 from .rate_limiter import RateLimiter
@@ -96,6 +97,12 @@ async def _async_main() -> None:
         limit=config.rate_limit_per_min,
         owner_id=config.owner_id,
     )
+    project_root = Path(__file__).resolve().parent.parent
+    instructions = InstructionsStore(
+        project_root=project_root,
+        backup_dir=config.data_dir / "prompt_backups",
+    )
+    instructions.ensure_dirs()
 
     async def db_logger(**kwargs):  # called by every MCP tool wrapper
         await insert_tool_call(db, **kwargs)
@@ -106,7 +113,9 @@ async def _async_main() -> None:
         bot=None,  # filled in below once dispatcher exists
         database=db,
         memory_store=memory,
+        instructions_store=instructions,
         chat_titles=chat_titles,
+        owner_id=config.owner_id,
     )
 
     mcp = McpServer(ctx, db_logger=db_logger)
@@ -225,6 +234,7 @@ async def _async_main() -> None:
         engine=None,
         chat_titles=chat_titles,
         rate_limiter=rate_limiter,
+        tool_ctx=ctx,
     )
 
     async def _typing(chat_id: int) -> None:

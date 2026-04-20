@@ -38,6 +38,7 @@ from .db.messages import (
 )
 from .models import ChatMessage
 from .rate_limiter import RateLimitExceeded, RateLimiter
+from .tools.base import ToolContext
 from .transcript import log_inbound, log_inbound_edit
 
 log = logging.getLogger(__name__)
@@ -82,10 +83,16 @@ class TelegramDispatcher:
         *,
         chat_titles: dict[int, str] | None = None,
         rate_limiter: RateLimiter | None = None,
+        tool_ctx: ToolContext | None = None,
     ) -> None:
         self.config = config
         self.db = db
         self.rate_limiter = rate_limiter
+        #: Shared with the MCP server. The dispatcher updates
+        #: ``last_inbound_user_id`` and ``last_inbound_chat_type`` on every
+        #: allowed inbound so the owner-gated instruction tools can verify
+        #: who triggered the current turn.
+        self.tool_ctx = tool_ctx
         #: May be ``None`` at construction time so callers can break the
         #: circular dep between dispatcher (owns the bot) and engine
         #: (needs the bot for the typing indicator). Must be set before
@@ -278,10 +285,20 @@ class TelegramDispatcher:
         if not allowed:
             return
 
+        chat_type = update.effective_chat.type if update.effective_chat else None
+
+        # Record who triggered this turn so owner-gated tools (currently the
+        # instruction read/edit tools) can verify the caller. Done BEFORE the
+        # rate-limit check so the gate's state is fresh even for messages
+        # that ultimately get throttled (defensive; the gate still checks
+        # user_id match either way).
+        if self.tool_ctx is not None:
+            self.tool_ctx.last_inbound_user_id = cm.user_id
+            self.tool_ctx.last_inbound_chat_type = chat_type
+
         # 3. Per-user DM rate limit. Owner is exempt (enforced inside the
         #    limiter). Group messages skip the check — noisy group users
         #    are the group's problem, not ours.
-        chat_type = update.effective_chat.type if update.effective_chat else None
         if self.rate_limiter is not None and chat_type == "private":
             try:
                 await self.rate_limiter.check_and_record(cm.user_id)
