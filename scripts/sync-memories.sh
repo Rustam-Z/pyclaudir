@@ -18,8 +18,8 @@ usage() {
     echo "Usage: $0 {pull|push} user@server"
     echo ""
     echo "Commands:"
-    echo "  pull   Pull memories, DB, and access.json from server to local"
-    echo "  push   Push project.md, memories, and access.json from local to server"
+    echo "  pull   Pull memories, DB from server to local"
+    echo "  push   Push project.md, memories from local to server"
     echo ""
     echo "Environment:"
     echo "  REMOTE_DIR   Remote pyclaudir directory (default: ~/pyclaudir)"
@@ -44,11 +44,6 @@ pull() {
         "$SERVER:$REMOTE_DIR/data/pyclaudir.db" \
         "$LOCAL_DIR/data/pyclaudir.db"
 
-    echo "  access.json..."
-    rsync -avz \
-        "$SERVER:$REMOTE_DIR/data/access.json" \
-        "$LOCAL_DIR/data/access.json" 2>/dev/null || true
-
     echo "=== Pull complete ==="
 }
 
@@ -64,11 +59,6 @@ push() {
     rsync -avz \
         "$LOCAL_DIR/data/memories/" \
         "$SERVER:$REMOTE_DIR/data/memories/"
-
-    echo "  access.json..."
-    rsync -avz \
-        "$LOCAL_DIR/data/access.json" \
-        "$SERVER:$REMOTE_DIR/data/access.json" 2>/dev/null || true
 
     echo "=== Push complete ==="
     echo "Note: restart the container for project.md changes to take effect:"
