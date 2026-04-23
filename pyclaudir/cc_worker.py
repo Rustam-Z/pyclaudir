@@ -151,6 +151,10 @@ class TurnResult:
     stderr_tail: list[str] = field(default_factory=list)
     #: True iff CC produced text without ever calling ``send_message``.
     dropped_text: bool = False
+    #: Non-None when pyclaudir short-circuited this turn (e.g.
+    #: ``"tool-error-limit"``). Engine branches on this before treating
+    #: the result as a normal turn completion.
+    aborted_reason: str | None = None
 
 
 def build_argv(spec: CcSpawnSpec) -> list[str]:
@@ -236,6 +240,16 @@ class CcWorker:
     #: How often the liveness monitor wakes to check.
     LIVENESS_POLL_SECONDS = 30.0
 
+    #: Tool-error circuit breaker. When Claude hits a tool loop (same tool
+    #: failing over and over) pyclaudir aborts the turn long before the
+    #: liveness monitor would notice, so the user gets a fast, clear
+    #: failure instead of multi-minute silence. Abort triggers on the
+    #: 3rd ``is_error=true`` tool_result in a single turn, or when 30s
+    #: have elapsed since the first error and another arrives — whichever
+    #: fires first. Overridable via env.
+    TOOL_ERROR_MAX_COUNT = 3
+    TOOL_ERROR_WINDOW_SECONDS = 30.0
+
     #: Optional callback the supervisor calls when CC crashes.
     #: Signature: ``async on_crash(stderr_tail: list[str], attempt: int, backoff: float)``
     OnCrash = Any  # Callable[[list[str], int, float], Awaitable[None]] | None
@@ -264,6 +278,17 @@ class CcWorker:
         #: every MCP tool call) this tells the liveness monitor whether
         #: the subprocess is alive-and-working or actually wedged.
         self._last_event_at: float = time.monotonic()
+        #: Tool-error circuit-breaker state. Reset in ``send()`` at the
+        #: start of every turn; incremented in ``_handle_event`` each
+        #: time a ``tool_result`` block arrives with ``is_error=true``.
+        self._turn_tool_error_count: int = 0
+        self._turn_first_tool_error_at: float | None = None
+        #: Set just before ``_terminate_proc`` when the worker aborts a
+        #: turn for a known reason (e.g. ``"tool-error-limit"``). The
+        #: engine reads this after ``wait_for_result`` raises so it can
+        #: tailor the user-facing message. One-shot: cleared on read.
+        self._last_abort_reason: str | None = None
+        self._tool_error_abort_task: asyncio.Task | None = None
         # Raw-capture state. We open with "pending-<ts>" names if we don't
         # know the session id at start time, then rename to "<sid>.*" once
         # the system/init event tells us.
@@ -279,6 +304,17 @@ class CcWorker:
     @property
     def is_running(self) -> bool:
         return self._proc is not None and self._proc.returncode is None
+
+    def consume_abort_reason(self) -> str | None:
+        """Return the reason for the most recent aborted turn, if any.
+
+        One-shot: the value is cleared after this read so the next turn
+        starts with a clean slate. The engine calls this after
+        ``wait_for_result`` raises, to pick the user-facing message.
+        """
+        reason = self._last_abort_reason
+        self._last_abort_reason = None
+        return reason
 
     async def start(self) -> None:
         argv = build_argv(self.spec)
@@ -578,6 +614,8 @@ class CcWorker:
         if self._proc is None or self._proc.stdin is None:
             raise RuntimeError("cc worker not started")
         self._current_turn = TurnResult()
+        self._turn_tool_error_count = 0
+        self._turn_first_tool_error_at = None
         log_cc_user(text)
         envelope = {
             "type": "user",
@@ -680,6 +718,72 @@ class CcWorker:
     # Event dispatch
     # ------------------------------------------------------------------
 
+    def _record_tool_error(self) -> None:
+        """Track a tool_result with ``is_error=true`` and trip the
+        circuit breaker if Claude is looping on a failing tool.
+
+        Threshold (either condition trips the abort):
+        - ``TOOL_ERROR_MAX_COUNT`` errors in a single turn, OR
+        - Another error arrives ``TOOL_ERROR_WINDOW_SECONDS`` or more
+          after the first error of this turn.
+
+        On trip: mark the abort reason and schedule ``_terminate_proc``
+        so the existing crash-recovery path respawns the subprocess.
+        The engine's ``_control_loop`` picks up the abort reason via
+        ``consume_abort_reason`` and chooses a tuned user-facing message.
+        """
+        try:
+            max_count = int(
+                os.environ.get(
+                    "PYCLAUDIR_TOOL_ERROR_MAX_COUNT",
+                    self.TOOL_ERROR_MAX_COUNT,
+                )
+            )
+        except ValueError:
+            max_count = self.TOOL_ERROR_MAX_COUNT
+        try:
+            window = float(
+                os.environ.get(
+                    "PYCLAUDIR_TOOL_ERROR_WINDOW_SECONDS",
+                    self.TOOL_ERROR_WINDOW_SECONDS,
+                )
+            )
+        except ValueError:
+            window = self.TOOL_ERROR_WINDOW_SECONDS
+
+        now = time.monotonic()
+        if self._turn_first_tool_error_at is None:
+            self._turn_first_tool_error_at = now
+        self._turn_tool_error_count += 1
+        elapsed = now - self._turn_first_tool_error_at
+
+        if (
+            self._turn_tool_error_count >= max_count
+            or elapsed >= window
+        ):
+            # Guard against double-firing if abort is already in flight.
+            if (
+                self._tool_error_abort_task is not None
+                and not self._tool_error_abort_task.done()
+            ):
+                return
+            log.warning(
+                "cc tool-error circuit breaker tripped: %d errors in %.1fs "
+                "(max=%d, window=%.0fs). Terminating to trigger respawn.",
+                self._turn_tool_error_count, elapsed, max_count, window,
+            )
+            self._last_abort_reason = "tool-error-limit"
+            # Unblock the engine's ``wait_for_result`` immediately with a
+            # sentinel TurnResult — the supervisor's respawn path can
+            # take seconds, we don't want the user waiting on it.
+            sentinel = TurnResult(aborted_reason="tool-error-limit")
+            sentinel.stderr_tail = list(self._stderr_tail)
+            self._result_queue.put_nowait(sentinel)
+            self._current_turn = None
+            self._tool_error_abort_task = asyncio.create_task(
+                self._terminate_proc(), name="cc-tool-error-abort",
+            )
+
     def _handle_event(self, event: dict[str, Any]) -> None:
         """Parse one stream-json event from the CC subprocess.
 
@@ -753,11 +857,14 @@ class CcWorker:
                         )
                     else:
                         text = "" if raw is None else str(raw)
+                    is_error = bool(block.get("is_error", False))
                     log_cc_tool_result(
                         tool_use_id=str(block.get("tool_use_id", "")),
                         content=text,
-                        is_error=bool(block.get("is_error", False)),
+                        is_error=is_error,
                     )
+                    if is_error:
+                        self._record_tool_error()
             return
 
         if etype == "result":

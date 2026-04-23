@@ -29,6 +29,13 @@ from .models import ChatMessage
 #: refresh slightly faster than that to avoid a visible gap.
 TYPING_REFRESH_SECONDS = 4.0
 
+#: If a turn hasn't produced a reply to a chat within this many seconds,
+#: send a "still working" message so the user knows the bot is alive.
+#: The typing indicator alone is too ambiguous on long turns. Fires at
+#: most once per chat per turn. Overridable via
+#: ``PYCLAUDIR_PROGRESS_NOTIFY_SECONDS``.
+PROGRESS_NOTIFY_SECONDS = 30.0
+
 #: Telegram clients suppress very brief typing displays to avoid flicker —
 #: typing that's "live" for less than ~1 second often never visually
 #: renders in the user's client. We enforce a minimum visible duration
@@ -36,7 +43,7 @@ TYPING_REFRESH_SECONDS = 4.0
 #: model responds in a fraction of a second the user actually sees the
 #: indicator. Concretely: ``notify_chat_replied`` defers the actual
 #: dismissal until this many seconds have elapsed since typing started.
-MIN_TYPING_VISIBLE_SECONDS = 1.5
+MIN_TYPING_VISIBLE_SECONDS = 1
 
 #: Async callable shape: ``await typing_action(chat_id)`` should fire one
 #: ``send_chat_action`` to that chat. Engine doesn't import telegram.
@@ -191,6 +198,12 @@ class Engine:
         #: Background task that defers the actual stop when ``notify_chat_replied``
         #: fires before the minimum visible duration has elapsed.
         self._typing_deferred_stop: asyncio.Task | None = None
+        #: Chats that have received at least one ``send_message`` reply
+        #: during the current turn. Populated by ``notify_chat_replied``,
+        #: cleared on each new turn in ``_kick``. The progress watchdog
+        #: skips these chats — no point telling the user "still working"
+        #: when they've already seen the model's first reply.
+        self._replied_chats_this_turn: set[int] = set()
         self._stop = asyncio.Event()
 
     # ------------------------------------------------------------------
@@ -254,6 +267,7 @@ class Engine:
             self._pending = []
             self._is_processing.set()
         self._active_chats = {m.chat_id for m in batch}
+        self._replied_chats_this_turn.clear()
         xml = await format_messages_with_context(batch, self._db)
         log.info("starting turn with %d msgs", len(batch))
         # Show "typing..." in every chat involved in this batch.
@@ -427,6 +441,11 @@ class Engine:
         to introduce an extra ``await`` between message delivery and
         notification.
         """
+        # Always track the reply, even if typing was already stopped —
+        # the progress watchdog uses this to skip chats that have
+        # already seen a reply.
+        self._replied_chats_this_turn.add(chat_id)
+
         if chat_id not in self._typing_chats:
             return
 
@@ -535,6 +554,36 @@ class Engine:
             except Exception as exc:
                 log.warning("failed to send error notification to %s: %s", chat_id, exc)
 
+    async def _progress_notify_after(self, delay: float) -> None:
+        """Fire once after ``delay`` seconds to tell waiting users the
+        bot is still working.
+
+        Skips chats that already received a ``send_message`` reply this
+        turn — they've already seen the model is alive. Uses
+        ``_error_notify`` (the bot-direct path) rather than the MCP
+        server, because MCP may be the thing that's slow.
+        """
+        try:
+            await asyncio.sleep(delay)
+        except asyncio.CancelledError:
+            return
+        if self._error_notify is None:
+            return
+        pending = self._active_chats - self._replied_chats_this_turn
+        for chat_id in pending:
+            try:
+                await self._error_notify(
+                    chat_id,
+                    "⏳ Still working on your request — this is taking "
+                    "a bit longer than usual.",
+                )
+                log.info("sent progress notification to chat %s", chat_id)
+            except Exception as exc:
+                log.warning(
+                    "progress notification failed for chat %s: %s",
+                    chat_id, exc,
+                )
+
     # ------------------------------------------------------------------
     # Control loop
     # ------------------------------------------------------------------
@@ -552,60 +601,94 @@ class Engine:
                 # long-running turn (e.g. code review) queue in _pending
                 # and are dispatched only after this returns. See README
                 # "Known limitations — Single-turn blocking".
+                import os as _os
                 try:
-                    result: TurnResult = await self._worker.wait_for_result()
-                except Exception as exc:
-                    # CC subprocess died mid-turn. The worker's supervisor
-                    # will handle respawning; our job is to tell the user.
-                    log.error("turn failed: %s", exc)
+                    progress_delay = float(
+                        _os.environ.get(
+                            "PYCLAUDIR_PROGRESS_NOTIFY_SECONDS",
+                            PROGRESS_NOTIFY_SECONDS,
+                        )
+                    )
+                except ValueError:
+                    progress_delay = PROGRESS_NOTIFY_SECONDS
+                progress_task = asyncio.create_task(
+                    self._progress_notify_after(progress_delay),
+                    name="pyclaudir-progress-notify",
+                )
+                try:
+                    try:
+                        result: TurnResult = await self._worker.wait_for_result()
+                    except Exception as exc:
+                        # CC subprocess died mid-turn. The worker's
+                        # supervisor will handle respawning; our job is
+                        # to tell the user.
+                        log.error("turn failed: %s", exc)
+                        self._is_processing.clear()
+                        await self._stop_typing()
+                        await self._notify_error_to_chats(
+                            "⚠️ Sorry, I ran into a temporary issue. "
+                            "I'm restarting and will be back in a few seconds."
+                        )
+                        self._active_chats.clear()
+                        continue
+
                     self._is_processing.clear()
                     await self._stop_typing()
-                    await self._notify_error_to_chats(
-                        "⚠️ Sorry, I ran into a temporary issue. "
-                        "I'm restarting and will be back in a few seconds."
+
+                    if result.aborted_reason == "tool-error-limit":
+                        # Worker tripped its tool-error circuit breaker
+                        # and has scheduled subprocess termination. Don't
+                        # notify here — ``_on_cc_crash`` will tell the
+                        # user when the subprocess exits. We leave
+                        # ``_active_chats`` alone so the callback knows
+                        # who to notify.
+                        log.warning("turn aborted: tool-error-limit")
+                        continue
+
+                    action = result.control.action if result.control else None
+                    log.info(
+                        "turn done (action=%s, dropped_text=%s, text_blocks=%d)",
+                        action, result.dropped_text, len(result.text_blocks),
                     )
-                    self._active_chats.clear()
-                    continue
 
-                self._is_processing.clear()
-                await self._stop_typing()
-                action = result.control.action if result.control else None
-                log.info(
-                    "turn done (action=%s, dropped_text=%s, text_blocks=%d)",
-                    action, result.dropped_text, len(result.text_blocks),
-                )
+                    # Check for rate-limit signals in stderr
+                    for line in result.stderr_tail:
+                        lower = line.lower()
+                        if "rate limit" in lower or "overloaded" in lower:
+                            await self._notify_error_to_chats(
+                                "⚠️ I've been rate-limited by the API. "
+                                "Give me a moment and try again shortly."
+                            )
+                            break
 
-                # Check for rate-limit signals in stderr
-                for line in result.stderr_tail:
-                    lower = line.lower()
-                    if "rate limit" in lower or "overloaded" in lower:
-                        await self._notify_error_to_chats(
-                            "⚠️ I've been rate-limited by the API. "
-                            "Give me a moment and try again shortly."
+                    if result.dropped_text:
+                        error_xml = (
+                            "<error>You produced text but did not call send_message. "
+                            "Use the tool — text content blocks are invisible to the user.</error>"
                         )
-                        break
+                        await self._worker.send(error_xml)
+                        self._is_processing.set()
+                        if self._typing_chats:
+                            await self._start_typing(set(self._typing_chats))
+                        continue
 
-                if result.dropped_text:
-                    error_xml = (
-                        "<error>You produced text but did not call send_message. "
-                        "Use the tool — text content blocks are invisible to the user.</error>"
-                    )
-                    await self._worker.send(error_xml)
-                    self._is_processing.set()
-                    if self._typing_chats:
-                        await self._start_typing(set(self._typing_chats))
-                    continue
+                    self._active_chats.clear()
 
-                self._active_chats.clear()
+                    if action == "sleep" and result.control and result.control.sleep_ms:
+                        await asyncio.sleep(result.control.sleep_ms / 1000)
 
-                if action == "sleep" and result.control and result.control.sleep_ms:
-                    await asyncio.sleep(result.control.sleep_ms / 1000)
-
-                # If new messages arrived while we were processing, kick them now.
-                async with self._lock:
-                    has_pending = bool(self._pending)
-                if has_pending:
-                    await self._kick()
+                    # If new messages arrived while we were processing, kick them now.
+                    async with self._lock:
+                        has_pending = bool(self._pending)
+                    if has_pending:
+                        await self._kick()
+                finally:
+                    if not progress_task.done():
+                        progress_task.cancel()
+                    try:
+                        await progress_task
+                    except (asyncio.CancelledError, Exception):
+                        pass
         except asyncio.CancelledError:
             raise
         except Exception:  # pragma: no cover

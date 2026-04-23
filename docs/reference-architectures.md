@@ -720,3 +720,62 @@ it across multiple rsync calls. Without this, the user gets a
 password prompt per rsync (two per invocation). Trap cleanly closes
 the master on exit. Key-auth via `ssh-copy-id` gives zero prompts;
 this change helps the fallback password case.
+
+### 5.14 Fast-fail tool-error breaker + long-turn progress notification
+
+**Files:** `pyclaudir/cc_worker.py` (`_record_tool_error`,
+`TurnResult.aborted_reason`), `pyclaudir/engine.py`
+(`_progress_notify_after`, `_replied_chats_this_turn`),
+`prompts/system.md § Long tasks`. Env vars
+`PYCLAUDIR_TOOL_ERROR_MAX_COUNT` (3), `PYCLAUDIR_TOOL_ERROR_WINDOW_SECONDS`
+(30), `PYCLAUDIR_PROGRESS_NOTIFY_SECONDS` (30).
+
+Two complementary UX fixes around slow turns. Both extend the 5.9
+liveness-monitor story: that monitor catches a truly wedged process
+at 5 minutes, but real users can't tolerate 5-minute silence and
+real-world stalls are usually tool retry loops, not OS-level hangs.
+
+**Tool-error breaker.** Claude, given a deterministic tool failure
+(e.g. `permission denied` on a gated tool, schema violation, size
+cap exceeded), will typically retry the same call 4–6 times before
+giving up. With slow forward passes that burned ~6 minutes in a
+real incident before 5.9's liveness threshold triggered the kill.
+The breaker inspects every `tool_result` block with `is_error=true`
+at stream-json parse time and counts them per-turn. When the
+count hits 3 or 30 seconds elapse since the first error, the
+worker puts a sentinel `TurnResult(aborted_reason="tool-error-limit")`
+on the result queue and schedules `_terminate_proc`. The sentinel
+unblocks the engine's `wait_for_result` immediately — the engine
+doesn't have to wait for the subprocess exit to propagate through
+the supervisor. User notification is handled by the existing
+`_on_cc_crash` callback when the subprocess actually exits,
+preventing duplicate messages. Counters reset in `CcWorker.send()`
+at the start of every turn.
+
+**Progress notification.** On long but legitimate turns (deep
+research, big code reads), the 4-second typing refresh is
+ambiguous — the user can't tell silence-from-typing apart from
+silence-from-dead-bot. The engine wraps `wait_for_result` with a
+watchdog task that sleeps `PROGRESS_NOTIFY_SECONDS` and then
+posts "⏳ Still working on your request…" via `_error_notify`
+(the bot-direct path that bypasses MCP, so it works even when
+MCP is the slow component). Fires once per turn, only for chats
+in `_active_chats - _replied_chats_this_turn` — the engine
+populates `_replied_chats_this_turn` from `notify_chat_replied`
+when `send_message` delivers, so the harness fallback is
+automatically suppressed whenever the model has already sent a
+reply. The watchdog is cancelled in a `try/finally` that wraps
+the whole turn-handling block.
+
+**Model-side guidance.** `prompts/system.md § Long tasks` tells
+the model to send an upfront `send_message` heads-up ("On it —
+this will take a minute.") when it can tell a task will be slow.
+Interaction with the harness: the heads-up hits `notify_chat_replied`,
+which adds the chat to `_replied_chats_this_turn`, which makes
+the 30-second fallback skip it. Result: the model's warning
+naturally dedupes the harness fallback. If the model forgets,
+the harness catches it.
+
+No changes to the crash-loop detector (10 crashes / 10 min
+`CrashLoop`) — a few circuit-breaker aborts per hour doesn't
+pile up fast enough to trip it in normal use.

@@ -94,6 +94,9 @@ All knobs live in environment variables (or `.env`):
 | `PYCLAUDIR_RATE_LIMIT_PER_MIN` | no | `20` | per-user inbound DM cap (owner exempt; groups not limited) |
 | `PYCLAUDIR_SELF_REFLECTION_CRON` | no | `0 17 * * *` | when the daily self-reflection skill fires (UTC cron). Default is 22:00 Tashkent. |
 | `PYCLAUDIR_LIVENESS_TIMEOUT_SECONDS` | no | `300` | wedge-detection threshold. If the CC subprocess is mid-turn with no activity for this long, it gets killed (supervisor respawns). |
+| `PYCLAUDIR_TOOL_ERROR_MAX_COUNT` | no | `3` | max `is_error=true` tool results in a single turn before the engine aborts the turn. Prevents Claude from burning minutes retrying a deterministically-failing tool. |
+| `PYCLAUDIR_TOOL_ERROR_WINDOW_SECONDS` | no | `30` | if a tool error arrives this many seconds or more after the first error of the turn, the breaker trips even below `MAX_COUNT`. |
+| `PYCLAUDIR_PROGRESS_NOTIFY_SECONDS` | no | `30` | if a turn hasn't sent a reply to a chat within this window, the harness pings the chat with "still working on your request". Suppressed for chats that already saw a reply this turn. |
 | `PYCLAUDIR_PROJECT_PROMPT` | no | `prompts/project.md` | path to project-specific prompt (concatenated after `system.md`) |
 | `CLAUDE_CODE_BIN` | no | `claude` | path to the CC CLI |
 | `JIRA_URL` | no | — | Jira site URL (enables mcp-atlassian) |
@@ -691,6 +694,23 @@ by code, not by hope, and tested in `tests/test_security_invariants.py`.
   terminated so the crash-recovery path respawns it with the same
   session id. Doesn't fire when idle (silence is expected between
   turns).
+- **Tool-error circuit breaker.** A stream-json `tool_result` with
+  `is_error=true` increments a per-turn counter in `CcWorker`; when
+  the counter hits `PYCLAUDIR_TOOL_ERROR_MAX_COUNT` (default 3) or
+  the first-error window exceeds `PYCLAUDIR_TOOL_ERROR_WINDOW_SECONDS`
+  (default 30s), the worker puts a sentinel `TurnResult` on the
+  result queue and schedules `_terminate_proc`. The engine unblocks
+  immediately; `_on_cc_crash` notifies the user on respawn. Prevents
+  Claude from burning minutes looping on a deterministically-failing
+  tool (e.g. permission denied, schema violation).
+- **Long-turn progress notification.** If a turn hasn't produced a
+  `send_message` to a chat within `PYCLAUDIR_PROGRESS_NOTIFY_SECONDS`
+  (default 30s), the engine sends a one-shot "still working on your
+  request" via the bot-direct path. Chats that already received a
+  reply this turn are skipped. The model is also instructed (see
+  `prompts/system.md § Long tasks`) to warn up-front when it knows
+  a task will be slow — the model's own `send_message` suppresses
+  the harness fallback because it updates `_replied_chats_this_turn`.
 - **Instruction tools are owner-DM-only.** The four tools
   `list_instructions`, `read_instructions`, `write_instructions`,
   `append_instructions` expose `prompts/system.md` and
