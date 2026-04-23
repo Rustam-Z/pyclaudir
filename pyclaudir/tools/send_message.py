@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from typing import Literal
 
 from pydantic import BaseModel, Field
+
+log = logging.getLogger(__name__)
 
 from ..db.messages import insert_message
 from ..formatting import markdown_to_telegram_html
@@ -44,6 +47,10 @@ class SendMessageTool(BaseTool):
             text=text,
             reply_to_message_id=args.reply_to_message_id,
             parse_mode=parse_mode,
+        )
+        log.info(
+            "hot-path stage=delivered chat=%s msg=%s",
+            args.chat_id, sent.message_id,
         )
 
         # Notify the engine immediately so the "typing..." indicator can

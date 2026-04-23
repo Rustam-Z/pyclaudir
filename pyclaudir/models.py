@@ -26,6 +26,11 @@ class ChatMessage(BaseModel):
     reply_to_id: int | None = None
     reply_to_text: str | None = None
     raw_update_json: str | None = None
+    #: ``time.monotonic()`` at the moment the dispatcher first saw this
+    #: message. Used only for hot-path latency logging (``hot-path stage=...``);
+    #: not persisted. ``None`` for synthetic messages (reminders, etc.) that
+    #: don't originate from a Telegram update.
+    received_at_monotonic: float | None = Field(default=None, exclude=True)
 
 
 class ControlAction(BaseModel):

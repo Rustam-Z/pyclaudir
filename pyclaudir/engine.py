@@ -258,6 +258,17 @@ class Engine:
         log.info("starting turn with %d msgs", len(batch))
         # Show "typing..." in every chat involved in this batch.
         await self._start_typing(set(self._active_chats))
+        import time as _t
+        now = _t.monotonic()
+        oldest_receipt = min(
+            (m.received_at_monotonic for m in batch if m.received_at_monotonic is not None),
+            default=now,
+        )
+        log.info(
+            "hot-path stage=worker-send chats=%s msgs=%d t_ms=%d",
+            sorted(self._active_chats), len(batch),
+            int((now - oldest_receipt) * 1000),
+        )
         await self._worker.send(xml)
 
     async def _maybe_inject(self) -> None:
@@ -295,8 +306,55 @@ class Engine:
     # Typing indicator
     # ------------------------------------------------------------------
 
+    def prime_typing(self, chat_id: int) -> None:
+        """Early typing fire from the dispatcher, before debounce + submit.
+
+        Called by :class:`TelegramDispatcher` the moment an allowed,
+        non-rate-limited message arrives. Without this, the user waits for
+        debounce + XML format + ``worker.send`` before the "typing..."
+        indicator renders.
+
+        Fire-and-forget: spawns the Telegram API call as a background task
+        so the dispatcher never blocks. Idempotent — if the chat is already
+        covered by the refresh loop, no extra API call is made.
+        """
+        if self._typing_action is None:
+            return
+        import time
+
+        is_new_chat = chat_id not in self._typing_chats
+        if not self._typing_chats:
+            # First chat of a fresh turn — anchor the min-visible clock.
+            self._typing_started_at = time.monotonic()
+        self._typing_chats.add(chat_id)
+
+        if is_new_chat:
+            action = self._typing_action
+            asyncio.create_task(
+                self._safe_typing_call(action, chat_id),
+                name=f"pyclaudir-typing-prime-{chat_id}",
+            )
+
+        if self._typing_task is None or self._typing_task.done():
+            self._typing_wake.clear()
+            self._typing_task = asyncio.create_task(
+                self._typing_refresh_loop(), name="pyclaudir-typing"
+            )
+
+    async def _safe_typing_call(self, action: TypingAction, chat_id: int) -> None:
+        try:
+            await action(chat_id)
+        except Exception as exc:
+            log.warning("prime_typing failed for chat %s: %s", chat_id, exc)
+
     async def _start_typing(self, chat_ids: set[int]) -> None:
-        """Fire the first typing call synchronously, then spawn the refresh loop."""
+        """Ensure typing is live for ``chat_ids``. Idempotent.
+
+        If the refresh loop is already running (e.g. dispatcher called
+        :meth:`prime_typing` first), extends coverage to any new chats in
+        the batch without resetting ``_typing_started_at`` — that would
+        break ``MIN_TYPING_VISIBLE_SECONDS``. Otherwise starts fresh.
+        """
         log.info(
             "start_typing called: chats=%s action_set=%s task_state=%s",
             chat_ids,
@@ -309,14 +367,26 @@ class Engine:
             return
         import time
 
+        loop_running = self._typing_task is not None and not self._typing_task.done()
+        if loop_running:
+            new_chats = chat_ids - self._typing_chats
+            if not new_chats:
+                return
+            self._typing_chats.update(new_chats)
+            for chat_id in new_chats:
+                try:
+                    await self._typing_action(chat_id)
+                except Exception as exc:
+                    log.warning("typing action failed for chat %s: %s", chat_id, exc)
+            return
+
         self._typing_chats = set(chat_ids)
         self._typing_wake.clear()
         self._typing_started_at = time.monotonic()
         await self._fire_typing_once()
-        if self._typing_task is None or self._typing_task.done():
-            self._typing_task = asyncio.create_task(
-                self._typing_refresh_loop(), name="pyclaudir-typing"
-            )
+        self._typing_task = asyncio.create_task(
+            self._typing_refresh_loop(), name="pyclaudir-typing"
+        )
 
     def notify_chat_replied(self, chat_id: int) -> None:
         """Called by ``send_message`` the moment Telegram confirms delivery.

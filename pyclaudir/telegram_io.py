@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Protocol
 
@@ -47,6 +48,8 @@ class EnginePort(Protocol):
     """Minimal surface the engine must expose to the dispatcher."""
 
     async def submit(self, msg: ChatMessage) -> None: ...
+
+    def prime_typing(self, chat_id: int) -> None: ...
 
 
 def _to_chat_message(update: Update, direction: str = "in") -> ChatMessage | None:
@@ -332,9 +335,15 @@ class TelegramDispatcher:
             self.chat_titles[chat.id] = title
 
     async def _on_message(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        received_at = time.monotonic()
         cm = _to_chat_message(update, direction="in")
         if cm is None:
             return
+        cm.received_at_monotonic = received_at
+        log.info(
+            "hot-path stage=receipt chat=%s msg=%s t_ms=0",
+            cm.chat_id, cm.message_id,
+        )
 
         self._remember_chat_title(update)
 
@@ -409,6 +418,16 @@ class TelegramDispatcher:
         if self.engine is None:
             log.error("dispatcher received message before engine was attached")
             return
+
+        # Fire typing indicator NOW — before debounce + XML format + worker.send.
+        # Without this, the user waits silently for the whole hot path before
+        # Telegram renders "typing...". Fire-and-forget inside prime_typing.
+        self.engine.prime_typing(cm.chat_id)
+        log.info(
+            "hot-path stage=submit chat=%s msg=%s t_ms=%d",
+            cm.chat_id, cm.message_id,
+            int((time.monotonic() - received_at) * 1000),
+        )
         await self.engine.submit(cm)
 
     async def _on_reaction(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
