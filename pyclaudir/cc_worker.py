@@ -596,11 +596,16 @@ class CcWorker:
     async def inject(self, text: str) -> None:
         """Send additional user content to a running turn.
 
-        We can't *literally* push text into a turn that's already mid-stream
-        in CC's protocol — what we do instead is write a fresh user envelope
-        to stdin so the next reasoning step in the current turn sees it.
-        Claude Code reads stdin at message boundaries, so the inject lands as
-        soon as the model finishes its current step.
+        Event-driven: writes a fresh user envelope directly to CC's stdin
+        and returns as soon as the OS accepts the bytes (typically
+        microseconds). No polling, no queue in the hot path — claudir's
+        1s inject poll doesn't apply here. CC reads stdin at message
+        boundaries, so the inject lands at the next reasoning step.
+
+        The ``_inject_queue`` is a fallback for the narrow windows when
+        stdin is unavailable (proc not started yet, or ``BrokenPipeError``
+        during a crash-restart). Callers must not assume queued items
+        will be replayed automatically.
         """
         if self._proc is None or self._proc.stdin is None:
             await self._inject_queue.put(text)

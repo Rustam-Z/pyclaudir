@@ -272,7 +272,16 @@ class Engine:
         await self._worker.send(xml)
 
     async def _maybe_inject(self) -> None:
-        """Flush any pending messages into the worker's inject queue."""
+        """Write pending messages to CC's stdin mid-turn.
+
+        Called from :meth:`submit` whenever a new message arrives while a
+        turn is already running. The worker's ``inject`` is event-driven
+        (direct stdin write), not polled, so the follow-up lands at CC's
+        next message boundary — typically the next reasoning step. The
+        dispatcher's ``_on_message`` awaits this, so we must not do slow
+        work here: the only I/O is the DB reply-chain lookup and the
+        stdin drain, both ~microseconds for normal payloads.
+        """
         async with self._lock:
             if not self._pending:
                 return
@@ -280,7 +289,18 @@ class Engine:
             self._pending = []
         xml = await format_messages_with_context(batch, self._db)
         await self._worker.inject(xml)
-        log.info("injected %d msgs into running turn", len(batch))
+
+        import time as _t
+        now = _t.monotonic()
+        oldest_receipt = min(
+            (m.received_at_monotonic for m in batch if m.received_at_monotonic is not None),
+            default=now,
+        )
+        log.info(
+            "hot-path stage=inject chats=%s msgs=%d t_ms=%d",
+            sorted({m.chat_id for m in batch}), len(batch),
+            int((now - oldest_receipt) * 1000),
+        )
 
         # Re-arm the typing indicator for the injected chats. There are
         # two cases to handle, and the bug we're fixing was that we only
