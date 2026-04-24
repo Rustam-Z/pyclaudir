@@ -250,9 +250,10 @@ message.
 
 ### First run bootstrap
 
-If `data/access.json` doesn't exist on startup, pyclaudir creates it from
-`PYCLAUDIR_ALLOWED_CHATS` in `.env` (if set) with `dm_policy: "owner_only"`.
-After that, `access.json` is the source of truth and the env var is ignored.
+If `data/access.json` doesn't exist on startup, pyclaudir creates it
+empty: `dm_policy: "owner_only"`, no allowed users or chats. Only the
+owner DM works until you grant more access via `/telegram:access` (or
+by editing `access.json` directly — changes are hot-reloaded).
 
 A template is provided at `data/access.json.example`.
 
@@ -902,7 +903,8 @@ pyclaudir/
 │   ├── telegram_io.py
 │   ├── engine.py               # debouncer, queue, inject, control loop
 │   ├── cc_worker.py            # subprocess + raw capture + crash recovery
-│   ├── cc_schema.py            # ControlAction JSON schema
+│   ├── cc_schema.py            # ControlAction JSON schema (flat — see §5.15)
+│   ├── cc_failure_classifier.py # CC stderr/text → user-facing message map
 │   ├── mcp_server.py           # FastMCP host + tool auto-discovery
 │   ├── memory_store.py         # path-hardened read-only file store
 │   ├── rate_limiter.py

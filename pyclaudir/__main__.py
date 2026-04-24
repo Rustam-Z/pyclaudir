@@ -132,19 +132,13 @@ async def _async_main() -> None:
     config = Config.from_env()
     config.ensure_dirs()
 
-    # Bootstrap access.json from env vars on first run.
+    # Bootstrap access.json on first run with the safest default:
+    # owner-only DMs, no allowed chats. Owner adds others later via
+    # /telegram:access (which mutates the file in place).
     if not config.access_path.exists():
-        seed_chats = []
-        raw = os.environ.get("PYCLAUDIR_ALLOWED_CHATS", "")
-        if raw:
-            seed_chats = [int(c.strip()) for c in raw.split(",") if c.strip()]
-        seed = AccessConfig(
-            dm_policy="owner_only",
-            allowed_users=[],
-            allowed_chats=seed_chats,
-        )
+        seed = AccessConfig(dm_policy="owner_only", allowed_users=[], allowed_chats=[])
         save_access(config.access_path, seed)
-        log.info("created %s (dm_policy=owner_only, chats=%s)", config.access_path, seed_chats)
+        log.info("created %s (dm_policy=owner_only, chats=[])", config.access_path)
     else:
         access = load_access(config.access_path)
         log.info(

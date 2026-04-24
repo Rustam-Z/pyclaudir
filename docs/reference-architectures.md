@@ -805,3 +805,66 @@ chats it lands in the right one.
 No changes to the crash-loop detector (10 crashes / 10 min
 `CrashLoop`) — a few circuit-breaker aborts per hour doesn't
 pile up fast enough to trip it in normal use.
+
+### 5.15 StructuredOutput contract — conditional `reason`, capped length
+
+**Files:** `pyclaudir/cc_schema.py` (`CONTROL_ACTION_SCHEMA`,
+`REASON_MAX_LENGTH`), `pyclaudir/models.py` (`ControlAction`
+`@model_validator`), `prompts/system.md § Tool discipline`.
+
+Every turn ends with a `StructuredOutput` tool call whose input
+matches `CONTROL_ACTION_SCHEMA`: `{action, reason?, sleep_ms?}` with
+`action ∈ {stop, sleep, heartbeat}`. The interesting design choice is
+**how the `reason` requirement is split between the schema and the
+client.**
+
+**Why `reason` exists at all.** Without a forced justification on
+`stop`, LLMs default to "done" reflexively and drop active
+conversations — Claudir documented the failure mode, we hit it
+ourselves before the field was added. `reason` is a forcing function:
+the model can't just emit `{"action":"stop"}`; it has to *justify* the
+stop in the same step. As a side benefit the field becomes a free
+audit trail — "why didn't the bot reply to m1470?" is answered by
+reading `[CC.done] action=stop reason=…` in the transcript log
+(`transcript.py:182`).
+
+**Why it's required only on `stop`.** `sleep` and `heartbeat` are
+provisional, not terminal — there's no conversation to drop, so the
+forcing-function argument doesn't apply. Requiring a reason on every
+turn would burn tokens on noise without buying any safety. The
+`@model_validator(mode="after")` on `ControlAction` enforces non-empty
+reason iff `action == "stop"`; sleep/heartbeat may omit the field
+entirely.
+
+**Why the schema is flat (no `if`/`then`/`oneOf`).** The first
+implementation expressed the conditional in the JSON schema itself
+using `allOf` + `if`/`then`. Anthropic's API rejected it at runtime:
+`"input_schema does not support oneOf, allOf, or anyOf at the top
+level"` — the schema we hand to Claude Code via `--json-schema` is
+forwarded into the tool's `input_schema` payload sent to the API, and
+the API constrains tool schemas more tightly than the general
+JSON-Schema draft allows. Resolution: keep the schema flat with
+`required: ["action"]` only, and move the conditional invariant to the
+pydantic validator. Trade-off: the model can technically emit
+`{"action":"stop"}` with no reason and the API won't reject it
+upstream, but the worker's `_handle_event` validation catches it,
+logs a warning, and leaves `control=None` (turn ends with no parsed
+action). The prompt is what makes the model comply in practice; the
+validator is the safety net.
+
+**Why `maxLength: 100`.** Cost ceiling. Without a cap a single
+rambling justification can burn 100+ tokens; over a long session
+that's real money. 100 chars ≈ 25 tokens worst-case, paired with the
+prompt nudge "≤10 words, terse" the realised cost is ~10–15 tokens
+per stop. `REASON_MAX_LENGTH` is exposed as a module constant so the
+cap and the schema can never drift.
+
+**`heartbeat` is currently a no-op.** The enum value exists in the
+schema and validator, but the engine's control loop branches only on
+`sleep` (for `sleep_ms`) and treats everything else — including
+`heartbeat` — as turn-complete (`engine.py:794-822`). Wiring real
+"continue in same turn" semantics would require injecting a
+zero-content user envelope back to CC's stdin, plus loop guards.
+Deferred until a concrete need surfaces; today the model reaches
+`StructuredOutput` only when it thinks it's done, and "I need
+another step" is naturally handled by calling another tool instead.
