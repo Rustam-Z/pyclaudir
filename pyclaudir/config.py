@@ -43,6 +43,18 @@ def _int(name: str, default: int) -> int:
         raise RuntimeError(f"{name} must be an integer, got {raw!r}") from exc
 
 
+def _bool(name: str, default: bool) -> bool:
+    raw = _env(name)
+    if raw is None:
+        return default
+    v = raw.strip().lower()
+    if v in ("1", "true", "yes", "on"):
+        return True
+    if v in ("0", "false", "no", "off"):
+        return False
+    raise RuntimeError(f"{name} must be a boolean (true/false), got {raw!r}")
+
+
 def _csv_ints(name: str) -> list[int]:
     raw = _env(name)
     if raw is None:
@@ -73,6 +85,12 @@ class Config:
     debounce_ms: int
     rate_limit_per_min: int
     claude_code_bin: str
+    #: When False (default), the ``Agent`` subagent-spawning tool is hard-
+    #: denied at the Claude Code argv layer AND the subagent docs are kept
+    #: out of the system prompt. Set ``PYCLAUDIR_ENABLE_SUBAGENTS=true`` to
+    #: re-enable — subagents eat a lot of tokens per turn, so off is the
+    #: safe default.
+    enable_subagents: bool
 
     # Derived paths
     db_path: Path = field(init=False)
@@ -99,6 +117,7 @@ class Config:
             debounce_ms=_int("PYCLAUDIR_DEBOUNCE_MS", 0),
             rate_limit_per_min=_int("PYCLAUDIR_RATE_LIMIT_PER_MIN", 20),
             claude_code_bin=_env("CLAUDE_CODE_BIN", "claude") or "claude",
+            enable_subagents=_bool("PYCLAUDIR_ENABLE_SUBAGENTS", False),
         )
 
     @classmethod
@@ -113,6 +132,7 @@ class Config:
             debounce_ms=1000,
             rate_limit_per_min=20,
             claude_code_bin="claude",
+            enable_subagents=False,
         )
 
     def ensure_dirs(self) -> None:

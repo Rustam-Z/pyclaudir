@@ -31,6 +31,8 @@ TOOLS_DIR = PKG_ROOT / "tools"
 def fake_spec(tmp_path: Path) -> CcSpawnSpec:
     sp = tmp_path / "system.md"
     sp.write_text("Pretend system prompt.")
+    subp = tmp_path / "subagents.md"
+    subp.write_text("# Subagents\n\nPretend subagent docs with read-only rule.")
     mcp = tmp_path / "mcp.json"
     mcp.write_text(json.dumps({"mcpServers": {"pyclaudir": {"type": "http", "url": "http://x/mcp"}}}))
     schema = tmp_path / "schema.json"
@@ -41,6 +43,7 @@ def fake_spec(tmp_path: Path) -> CcSpawnSpec:
         system_prompt_path=sp,
         mcp_config_path=mcp,
         json_schema_path=schema,
+        subagents_prompt_path=subp,
     )
 
 
@@ -53,14 +56,13 @@ def fake_spec(tmp_path: Path) -> CcSpawnSpec:
 # would let the agent mutate the host or read arbitrary files, and there is no
 # operator scenario where it should be allowed to do that directly.
 #
-# Agent (subagent spawning) is also on the allowlist, by operator decision,
-# so Nodira can delegate large-payload summarization. A subagent inherits
-# the parent's --allowedTools / --disallowedTools (Bash/Edit/Write/Read/
-# NotebookEdit stay denied), so it is NOT a wider host surface. The real
-# exposure is that a subagent can make destructive MCP writes on Nodira's
-# identity with a prompt Nodira may not fully vet; the mitigation lives in
-# system.md's "# Subagents" section (no user-supplied prompts forwarded
-# verbatim, read-only tasks by default), not at the argv layer.
+# Agent (subagent spawning) is gated behind the spec flag
+# ``enable_subagents`` (driven by PYCLAUDIR_ENABLE_SUBAGENTS, default off).
+# Subagent turns burn a lot of tokens so the safe default is off; when off
+# we hard-deny Agent at the argv layer (belt-and-braces, because unlisted
+# tools are otherwise implicitly reachable via ToolSearch) and strip the
+# subagent docs from the system prompt. Flipping the flag on is an
+# explicit operator decision.
 # ---------------------------------------------------------------------------
 
 
@@ -86,21 +88,46 @@ def test_invariant_1_argv_has_allowlist_and_denylist(fake_spec: CcSpawnSpec) -> 
     assert "mcp__mcp-gitlab" in allowed_value
     assert "WebFetch" in allowed_value
     assert "WebSearch" in allowed_value
-    # Agent tool (subagent spawning) is explicitly allowed. Security caveats
-    # documented in system.md's "# Subagents" section.
-    assert "Agent" in allowed_value
+    # Agent is off by default — must NOT be on the allowlist, MUST be on
+    # the denylist (belt-and-braces vs ToolSearch-driven rediscovery).
+    assert "Agent" not in allowed_value
 
     assert "--disallowedTools" in argv
     deny_idx = argv.index("--disallowedTools") + 1
     deny_value = argv[deny_idx]
-    for forbidden in ("Bash", "Edit", "Write", "Read", "NotebookEdit"):
+    for forbidden in ("Bash", "Edit", "Write", "Read", "NotebookEdit", "Agent"):
         assert forbidden in deny_value, f"{forbidden} missing from --disallowedTools"
     assert "WebFetch" not in deny_value
     assert "WebSearch" not in deny_value
 
+    # Subagent docs must NOT be in the system prompt when the flag is off.
+    sp_idx = argv.index("--system-prompt") + 1
+    assert "# Subagents" not in argv[sp_idx]
+
     # Effort flag must be present (Claudir-confirmed: high effort + extended
     # thinking reduces round-trips and overall latency).
     assert "--effort" in argv
+
+
+def test_invariant_1_argv_subagents_enabled(fake_spec: CcSpawnSpec) -> None:
+    """With enable_subagents=True, Agent moves from deny to allow and the
+    subagent documentation block is appended to the system prompt."""
+    import dataclasses
+    spec_on = dataclasses.replace(fake_spec, enable_subagents=True)
+    argv = build_argv(spec_on)
+
+    allowed_value = argv[argv.index("--allowedTools") + 1]
+    deny_value = argv[argv.index("--disallowedTools") + 1]
+    system_prompt = argv[argv.index("--system-prompt") + 1]
+
+    assert "Agent" in allowed_value
+    assert "Agent" not in deny_value
+    # The hard-deny five must still be denied even with subagents on.
+    for forbidden in ("Bash", "Edit", "Write", "Read", "NotebookEdit"):
+        assert forbidden in deny_value, f"{forbidden} missing from --disallowedTools"
+    # Docs appended.
+    assert "# Subagents" in system_prompt
+    assert "read-only" in system_prompt.lower()
 
 
 def test_invariant_1_argv_never_has_dangerously_skip(fake_spec: CcSpawnSpec) -> None:

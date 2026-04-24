@@ -118,16 +118,12 @@ ALLOWED_TOOLS: tuple[str, ...] = (
     # Web
     "WebFetch",
     "WebSearch",
-    # Subagents — spawn a fresh Claude in an isolated context window to
-    # digest a large payload (big file read, multi-MR diff, long tool
-    # result) and return just the summary. A subagent inherits the
-    # parent's --allowedTools / --disallowedTools, so Bash/Edit/Write/
-    # Read/NotebookEdit remain denied. The real exposure is that a
-    # subagent can make destructive MCP writes (Jira/GitLab, memory,
-    # send_message) on Nodira's identity with a prompt Nodira may not
-    # fully vet — see the "# Subagents" section in system.md for the
-    # hard rules on prompt construction and read-only defaults.
-    "Agent",
+    # NOTE: "Agent" (subagent spawning) is *not* in this static tuple.
+    # It is conditionally injected by ``build_argv`` when the spawn spec
+    # has ``enable_subagents=True`` (driven by PYCLAUDIR_ENABLE_SUBAGENTS).
+    # When disabled — the default — it is appended to ``--disallowedTools``
+    # instead, because Claude Code treats tools absent from both lists as
+    # implicitly reachable (the agent can find them via ToolSearch).
 )
 
 #: Forbidden flag — never pass this. ``build_argv`` enforces it at build
@@ -149,6 +145,17 @@ class CcSpawnSpec:
     #: ``<cc_logs_dir>/<session_id>.stream.jsonl`` and ``<session_id>.stderr.log``
     #: as the data arrives. Set to ``None`` to disable raw capture.
     cc_logs_dir: Path | None = None
+    #: When True, the ``Agent`` tool is added to ``--allowedTools`` and the
+    #: subagent documentation (``subagents_prompt_path``) is appended to the
+    #: system prompt. When False (default), ``Agent`` is added to
+    #: ``--disallowedTools`` and the docs file is not read — Nodira cannot
+    #: spawn subagents and doesn't even see the capability. Subagent turns
+    #: are token-heavy; keep off unless you need them. Driven by
+    #: ``PYCLAUDIR_ENABLE_SUBAGENTS``.
+    enable_subagents: bool = False
+    #: Path to the subagent docs markdown. Read and appended to the system
+    #: prompt iff ``enable_subagents`` is True. Ignored otherwise.
+    subagents_prompt_path: Path | None = None
 
 
 @dataclass
@@ -193,8 +200,25 @@ def build_argv(spec: CcSpawnSpec) -> list[str]:
     if spec.project_prompt_path and spec.project_prompt_path.exists():
         system_prompt += "\n\n" + spec.project_prompt_path.read_text(encoding="utf-8")
     system_prompt += "\n\n" + runtime_block
+    if spec.enable_subagents:
+        if spec.subagents_prompt_path is None or not spec.subagents_prompt_path.exists():
+            raise FileNotFoundError(
+                "enable_subagents=True but subagents_prompt_path is missing: "
+                f"{spec.subagents_prompt_path!r}"
+            )
+        system_prompt += "\n\n" + spec.subagents_prompt_path.read_text(encoding="utf-8")
     json_schema = spec.json_schema_path.read_text(encoding="utf-8")
     json.loads(json_schema)  # sanity check
+
+    # Subagent gating: when enabled, Agent goes in allow; when disabled,
+    # Agent goes in deny (belt-and-braces, because unlisted tools are
+    # still implicitly reachable via ToolSearch).
+    if spec.enable_subagents:
+        allowed_tools = ALLOWED_TOOLS + ("Agent",)
+        disallowed_tools = DISALLOWED_TOOLS
+    else:
+        allowed_tools = ALLOWED_TOOLS
+        disallowed_tools = DISALLOWED_TOOLS + ("Agent",)
 
     argv: list[str] = [
         spec.binary,
@@ -207,8 +231,8 @@ def build_argv(spec: CcSpawnSpec) -> list[str]:
         "--system-prompt", system_prompt,
         "--mcp-config", str(spec.mcp_config_path),
         "--strict-mcp-config",
-        "--allowedTools", ",".join(ALLOWED_TOOLS),
-        "--disallowedTools", ",".join(DISALLOWED_TOOLS),
+        "--allowedTools", ",".join(allowed_tools),
+        "--disallowedTools", ",".join(disallowed_tools),
         "--json-schema", json_schema,
     ]
     if spec.session_id:

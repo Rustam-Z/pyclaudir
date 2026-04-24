@@ -9,10 +9,11 @@ whose capabilities are pruned by `--allowedTools` / `--disallowedTools`.
 `Bash`, `Edit`, `Write`, `Read`, and `NotebookEdit` are hard-denied, so
 the agent can't execute shell commands, edit code, or read arbitrary
 files directly. Its primary surface is the tools in `pyclaudir/tools/`
-(exposed via a locally-hosted MCP server), plus `WebFetch`, `WebSearch`,
-and `Agent` (subagent spawning). See `pyclaudir/cc_worker.py` for the
-authoritative allow/deny lists and `prompts/system.md` for the subagent
-security rules.
+(exposed via a locally-hosted MCP server), plus `WebFetch` and
+`WebSearch`. `Agent` (subagent spawning) is available behind the
+`PYCLAUDIR_ENABLE_SUBAGENTS` flag, **off by default** — subagent turns
+burn a lot of tokens. See `pyclaudir/cc_worker.py` for the authoritative
+allow/deny lists.
 
 ## Quickstart
 
@@ -101,6 +102,7 @@ All knobs live in environment variables (or `.env`):
 | `PYCLAUDIR_TOOL_ERROR_MAX_COUNT` | no | `3` | max `is_error=true` tool results in a single turn before the engine aborts the turn. Prevents Claude from burning minutes retrying a deterministically-failing tool. |
 | `PYCLAUDIR_TOOL_ERROR_WINDOW_SECONDS` | no | `30` | if a tool error arrives this many seconds or more after the first error of the turn, the breaker trips even below `MAX_COUNT`. |
 | `PYCLAUDIR_PROGRESS_NOTIFY_SECONDS` | no | `60` | if a turn hasn't sent a reply to a chat within this window, the harness posts "Still on it — one moment." as a Telegram **reply** to the user's triggering message. Suppressed for chats that already saw a reply this turn. |
+| `PYCLAUDIR_ENABLE_SUBAGENTS` | no | `false` | when `true`, the `Agent` tool is added to `--allowedTools` and the subagent docs are injected into the system prompt. When `false` (default), `Agent` is hard-denied and the docs are kept out entirely. Subagent turns are token-heavy — leave off unless you need them. |
 | `PYCLAUDIR_PROJECT_PROMPT` | no | `prompts/project.md` | path to project-specific prompt (concatenated after `system.md`) |
 | `CLAUDE_CODE_BIN` | no | `claude` | path to the CC CLI |
 | `JIRA_URL` | no | — | Jira site URL (enables mcp-atlassian) |

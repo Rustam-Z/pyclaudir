@@ -259,6 +259,8 @@ async def _async_main() -> None:
         effort=config.effort,
         session_id=session_id,
         cc_logs_dir=config.cc_logs_dir,
+        enable_subagents=config.enable_subagents,
+        subagents_prompt_path=Path("prompts/subagents.md").resolve(),
     )
     async def _on_cc_crash(stderr_tail: list[str], attempt: int, backoff: float) -> None:
         # Notify active chats if the engine has any
