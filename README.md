@@ -28,7 +28,7 @@ $EDITOR .env   # set TELEGRAM_BOT_TOKEN and PYCLAUDIR_OWNER_ID
 uv sync --extra dev
 
 # 4. Run the test suite
-uv run python -m pytest -q   # expect: 313 passed
+uv run python -m pytest -q
 
 # 5. Start the bot
 uv run python -m pyclaudir
@@ -52,7 +52,7 @@ instance is already running — kill it first.
 ### Running tests
 
 ```bash
-# Full suite, quiet output (expected: 313 passed, no warnings)
+# Full suite, quiet output (expected: 284 passed, no warnings)
 uv run python -m pytest -q
 
 # One file
@@ -879,7 +879,6 @@ pyclaudir/
 │       ├── base.py             # BaseTool, ToolContext, Heartbeat
 │       ├── now.py
 │       ├── send_message.py
-│       ├── send_message_draft.py  # animated progress preview (sendMessageDraft; Bot API 9.5+)
 │       ├── reply_to_message.py
 │       ├── edit_message.py
 │       ├── delete_message.py
@@ -901,7 +900,6 @@ pyclaudir/
     ├── test_cc_worker_argv.py
     ├── test_cc_raw_capture.py          # raw stdout/stderr capture
     ├── test_engine_debouncer.py
-    ├── test_send_message_draft.py      # sendMessageDraft tool contract (auto draft_id, error paths)
     ├── test_inject_and_dropped_text.py
     ├── test_recovery_and_limits.py
     ├── test_reactions_update.py       # inbound + bot reactions fold into messages
