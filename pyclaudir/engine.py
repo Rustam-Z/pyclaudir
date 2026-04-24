@@ -22,6 +22,7 @@ import xml.sax.saxutils as sx
 from datetime import datetime
 from typing import TYPE_CHECKING, Awaitable, Callable
 
+from .cc_failure_classifier import CcFailureClassification, classify_cc_failure
 from .db.messages import fetch_reply_chain
 from .models import ChatMessage
 
@@ -35,6 +36,16 @@ TYPING_REFRESH_SECONDS = 4.0
 #: most once per chat per turn. Overridable via
 #: ``PYCLAUDIR_PROGRESS_NOTIFY_SECONDS``.
 PROGRESS_NOTIFY_SECONDS = 60.0
+
+#: How many consecutive ``dropped_text`` turns the engine will tolerate
+#: before giving up, notifying the user, and dropping the turn. Reuses
+#: the existing tool-error circuit-breaker threshold
+#: (:data:`CcWorker.TOOL_ERROR_MAX_COUNT`, default 3, overridable via
+#: ``PYCLAUDIR_TOOL_ERROR_MAX_COUNT``) so operators tune one knob, not
+#: two. Each drop means the model emitted text without calling
+#: ``send_message`` — without this cap a broken CC state (bad model
+#: name, missing API access, malformed structured output) loops forever
+#: with the user stuck staring at a typing indicator.
 
 #: Telegram clients suppress very brief typing displays to avoid flicker —
 #: typing that's "live" for less than ~1 second often never visually
@@ -217,6 +228,14 @@ class Engine:
         #: skips these chats — no point telling the user "still working"
         #: when they've already seen the model's first reply.
         self._replied_chats_this_turn: set[int] = set()
+        #: Count of consecutive ``dropped_text`` results across turns.
+        #: Reset on (a) a new user turn via ``_kick``, (b) any successful
+        #: turn, and (c) after the cap is hit and the user has been
+        #: notified — so their next follow-up message isn't pre-tainted
+        #: by a prior failure. Bounded by ``CcWorker.TOOL_ERROR_MAX_COUNT``
+        #: / ``PYCLAUDIR_TOOL_ERROR_MAX_COUNT`` — same knob the tool-error
+        #: circuit breaker uses.
+        self._dropped_text_retries: int = 0
         self._stop = asyncio.Event()
 
     # ------------------------------------------------------------------
@@ -285,6 +304,7 @@ class Engine:
             m.chat_id: m.message_id for m in batch if m.message_id > 0
         }
         self._replied_chats_this_turn.clear()
+        self._dropped_text_retries = 0
         xml = await format_messages_with_context(batch, self._db)
         log.info("starting turn with %d msgs", len(batch))
         # Show "typing..." in every chat involved in this batch.
@@ -571,6 +591,102 @@ class Engine:
             except Exception as exc:
                 log.warning("failed to send error notification to %s: %s", chat_id, exc)
 
+    @staticmethod
+    def _max_consecutive_failures() -> int:
+        """The shared ceiling on consecutive turn-level failures.
+
+        Used by both the tool-error circuit breaker (in :mod:`pyclaudir.cc_worker`)
+        and the dropped-text handler here. Reading the env var at call
+        time — rather than caching at import — keeps tests reproducible
+        when they monkeypatch the environment.
+        """
+        import os
+        from .cc_worker import CcWorker
+
+        try:
+            return int(
+                os.environ.get(
+                    "PYCLAUDIR_TOOL_ERROR_MAX_COUNT",
+                    CcWorker.TOOL_ERROR_MAX_COUNT,
+                )
+            )
+        except ValueError:
+            return CcWorker.TOOL_ERROR_MAX_COUNT
+
+    async def _handle_dropped_text(self, result: "TurnResult") -> None:
+        """Handle a turn that ended with text but no ``send_message`` call.
+
+        Two outcomes:
+
+        1. **Below the shared failure cap** — inject an ``<error>`` into
+           Nodira's next turn reminding her to use ``send_message``, so
+           a recoverable slip (e.g. she started typing a plain answer)
+           self-corrects in one additional turn.
+        2. **At or above the cap** — stop nagging the model, surface a
+           user-facing message, and drop the turn. The best-available
+           diagnostic (classifier match on text blocks, or the raw first
+           block) is included so the user understands why.
+        """
+        self._dropped_text_retries += 1
+        max_retries = self._max_consecutive_failures()
+
+        if self._dropped_text_retries < max_retries:
+            # Recoverable — inject the corrective reminder and let the
+            # model try again.
+            error_xml = (
+                "<error>You produced text but did not call send_message. "
+                "Use the tool — text content blocks are invisible to the user.</error>"
+            )
+            await self._worker.send(error_xml)
+            self._is_processing.set()
+            if self._typing_chats:
+                await self._start_typing(set(self._typing_chats))
+            return
+
+        # Cap hit. Build the clearest user-facing message we can from
+        # what CC gave us.
+        user_msg = self._build_dropped_text_user_message(result)
+        log.warning(
+            "dropped_text retry limit hit (%d/%d); surfacing to user",
+            self._dropped_text_retries, max_retries,
+        )
+        await self._notify_error_to_chats(user_msg)
+        self._active_chats.clear()
+        self._active_triggers.clear()
+        # Reset counter so the *next* user turn starts clean even if the
+        # underlying CC issue persists — we don't want to nuke their
+        # first follow-up message silently.
+        self._dropped_text_retries = 0
+
+    @staticmethod
+    def _build_dropped_text_user_message(result: "TurnResult") -> str:
+        """Compose a user-facing message for a capped dropped-text failure.
+
+        Prefers a classifier-matched message (e.g. "model unavailable —
+        fix PYCLAUDIR_MODEL") over the generic fallback. Either way we
+        include a trimmed snippet of CC's own diagnostic so the user
+        can see the underlying error, not just a generic apology.
+        """
+        classification: CcFailureClassification | None = classify_cc_failure(
+            result.text_blocks
+        )
+        if classification is not None:
+            user_msg = classification.user_message
+            detail = classification.matched_source
+        else:
+            user_msg = (
+                "⚠️ I hit a technical issue and couldn't finish that turn. "
+                "Please try again in a moment."
+            )
+            snippet = (result.text_blocks[0] if result.text_blocks else "").strip()
+            if len(snippet) > 400:
+                snippet = snippet[:400].rstrip() + "…"
+            detail = snippet
+
+        if detail:
+            user_msg = f"{user_msg}\n\nDetails:\n{detail}"
+        return user_msg
+
     async def _progress_notify_after(self, delay: float) -> None:
         """Fire once after ``delay`` seconds to tell waiting users the
         bot is still working.
@@ -681,26 +797,23 @@ class Engine:
                         action, result.dropped_text, len(result.text_blocks),
                     )
 
-                    # Check for rate-limit signals in stderr
-                    for line in result.stderr_tail:
-                        lower = line.lower()
-                        if "rate limit" in lower or "overloaded" in lower:
-                            await self._notify_error_to_chats(
-                                "⚠️ I've been rate-limited by the API. "
-                                "Give me a moment and try again shortly."
-                            )
-                            break
+                    # Best-effort classification: if stderr tells us the
+                    # failure mode (rate-limit, auth, quota…), surface a
+                    # targeted message. This is orthogonal to dropped_text
+                    # handling — a turn can be both rate-limited AND
+                    # dropped_text, but we only notify once per turn.
+                    stderr_classification = classify_cc_failure(result.stderr_tail)
+                    if stderr_classification is not None:
+                        await self._notify_error_to_chats(
+                            stderr_classification.user_message
+                        )
 
                     if result.dropped_text:
-                        error_xml = (
-                            "<error>You produced text but did not call send_message. "
-                            "Use the tool — text content blocks are invisible to the user.</error>"
-                        )
-                        await self._worker.send(error_xml)
-                        self._is_processing.set()
-                        if self._typing_chats:
-                            await self._start_typing(set(self._typing_chats))
+                        await self._handle_dropped_text(result)
                         continue
+
+                    # Successful turn — reset the dropped-text retry counter.
+                    self._dropped_text_retries = 0
 
                     self._active_chats.clear()
                     self._active_triggers.clear()

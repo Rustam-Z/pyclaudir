@@ -284,13 +284,24 @@ class CcWorker:
     TOOL_ERROR_MAX_COUNT = 3
     TOOL_ERROR_WINDOW_SECONDS = 30.0
 
-    #: Optional callback the supervisor calls when CC crashes.
+    #: Optional callback the supervisor calls when CC crashes (one per
+    #: crash, before the backoff/respawn).
     #: Signature: ``async on_crash(stderr_tail: list[str], attempt: int, backoff: float)``
     OnCrash = Any  # Callable[[list[str], int, float], Awaitable[None]] | None
+    #: Optional callback the supervisor calls *once* when the crash loop
+    #: has exhausted its budget (:attr:`CRASH_LIMIT` crashes in
+    #: :attr:`CRASH_WINDOW_SECONDS`) — a terminal condition: no further
+    #: respawn will be attempted by this worker. The operator needs to
+    #: intervene. Fires before the underlying :class:`CrashLoop` is
+    #: re-raised so the callback can notify the owner/users even though
+    #: the worker is about to die.
+    #: Signature: ``async on_giveup(stderr_tail: list[str], crash_count: int)``
+    OnGiveup = Any  # Callable[[list[str], int], Awaitable[None]] | None
 
     def __init__(
         self, spec: CcSpawnSpec, *, heartbeat: Heartbeat | None = None,
         on_crash: OnCrash = None,
+        on_giveup: OnGiveup = None,
     ) -> None:
         self.spec = spec
         self.heartbeat = heartbeat or Heartbeat()
@@ -307,6 +318,7 @@ class CcWorker:
         self._liveness_task: asyncio.Task | None = None
         self._stop_supervisor = asyncio.Event()
         self._on_crash = on_crash
+        self._on_giveup = on_giveup
         #: ``time.monotonic()`` of the last successfully parsed stdout
         #: event. Together with ``heartbeat.last_activity`` (bumped on
         #: every MCP tool call) this tells the liveness monitor whether
@@ -619,6 +631,17 @@ class CcWorker:
             self._crash_times = [t for t in self._crash_times if now - t < self.CRASH_WINDOW_SECONDS]
             self._crash_times.append(now)
             if len(self._crash_times) >= self.CRASH_LIMIT:
+                # Terminal — fire the giveup callback so the operator
+                # and active users learn the bot is actually down, then
+                # re-raise so the supervisor task exits. Callback errors
+                # are swallowed so a buggy callback can't mask CrashLoop.
+                if self._on_giveup is not None:
+                    try:
+                        await self._on_giveup(
+                            list(self._stderr_tail), len(self._crash_times),
+                        )
+                    except Exception:
+                        log.debug("on_giveup callback failed", exc_info=True)
                 raise CrashLoop(
                     f"cc subprocess crashed {self.CRASH_LIMIT} times in "
                     f"{self.CRASH_WINDOW_SECONDS:.0f}s; bailing out"

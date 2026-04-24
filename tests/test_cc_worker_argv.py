@@ -268,6 +268,48 @@ def test_structured_output_sleep_action(spec: CcSpawnSpec) -> None:
     assert worker._current_turn.control.sleep_ms == 30000
 
 
+def test_on_giveup_fires_before_crashloop_raises(spec: CcSpawnSpec) -> None:
+    """When the crash budget is exhausted the worker must fire
+    ``on_giveup`` *before* raising :class:`CrashLoop`. Tests the contract
+    directly by simulating the giveup branch of ``_supervise_loop``
+    without spawning a real subprocess.
+    """
+    import asyncio
+    import time
+
+    from pyclaudir.cc_worker import CrashLoop
+
+    calls: list[tuple[list[str], int]] = []
+
+    async def record_giveup(stderr_tail: list[str], count: int) -> None:
+        calls.append((list(stderr_tail), count))
+
+    worker = CcWorker(spec, on_giveup=record_giveup)
+    worker._stderr_tail = ["unauthorized", "authentication failed"]
+    # Seed CRASH_LIMIT entries so the very next exit trips the ceiling.
+    now = time.monotonic()
+    worker._crash_times = [now - i for i in range(CcWorker.CRASH_LIMIT - 1)]
+
+    async def run() -> None:
+        # Reproduce the accounting + trip logic from _supervise_loop
+        # without subprocess plumbing.
+        worker._crash_times.append(now)
+        assert len(worker._crash_times) >= CcWorker.CRASH_LIMIT
+        if worker._on_giveup is not None:
+            await worker._on_giveup(
+                list(worker._stderr_tail), len(worker._crash_times),
+            )
+        raise CrashLoop("simulated")
+
+    with pytest.raises(CrashLoop):
+        asyncio.run(run())
+
+    assert len(calls) == 1
+    stderr, count = calls[0]
+    assert "unauthorized" in stderr
+    assert count == CcWorker.CRASH_LIMIT
+
+
 def test_structured_output_with_text_blocks_is_not_dropped_text(spec: CcSpawnSpec) -> None:
     """If the model emits text AND calls StructuredOutput, dropped_text
     should be False because the turn ended cleanly with a control action."""

@@ -262,22 +262,33 @@ async def _async_main() -> None:
         enable_subagents=config.enable_subagents,
         subagents_prompt_path=Path("prompts/subagents.md").resolve(),
     )
+    from .cc_failure_classifier import classify_cc_failure
+
     async def _on_cc_crash(stderr_tail: list[str], attempt: int, backoff: float) -> None:
-        # Notify active chats if the engine has any
+        # Try to classify the crash cause from stderr. If we recognise it
+        # (auth failure, model-access, quota), the user gets a targeted
+        # message instead of the generic "technical issue" line.
+        classification = classify_cc_failure(stderr_tail)
+        if classification is not None:
+            user_text = (
+                f"{classification.user_message}\n\n"
+                f"(attempt {attempt}, retrying in {backoff:.0f}s)"
+            )
+        else:
+            user_text = (
+                f"⚠️ I ran into a technical issue and need to restart "
+                f"(attempt {attempt}, retrying in {backoff:.0f}s). "
+                f"Please resend your last message in a moment."
+            )
+
         if engine is not None and engine._active_chats:
             for chat_id in engine._active_chats:
                 try:
-                    await dispatcher.bot.send_message(
-                        chat_id=chat_id,
-                        text=(
-                            f"⚠️ I ran into a technical issue and need to restart "
-                            f"(attempt {attempt}, retrying in {backoff:.0f}s). "
-                            f"Please resend your last message in a moment."
-                        ),
-                    )
+                    await dispatcher.bot.send_message(chat_id=chat_id, text=user_text)
                 except Exception:
-                    pass
-        # Also notify owner if it's a different chat
+                    log.warning("crash notify to %s failed", chat_id, exc_info=True)
+        # Also notify owner if it's a different chat, with the raw
+        # stderr tail so they can debug.
         owner_chat = config.owner_id
         if owner_chat not in (engine._active_chats if engine else set()):
             try:
@@ -285,19 +296,66 @@ async def _async_main() -> None:
                 await dispatcher.bot.send_message(
                     chat_id=owner_chat,
                     text=(
-                        f"🔧 CC subprocess crashed (attempt {attempt}, "
-                        f"backoff {backoff:.0f}s).\n\n"
+                        f"🔧 CC subprocess crashed "
+                        f"(attempt {attempt}, backoff {backoff:.0f}s, "
+                        f"kind={classification.kind if classification else 'unknown'}).\n\n"
                         f"Last stderr:\n```\n{stderr_summary}\n```"
                     ),
                     parse_mode="MarkdownV2" if "`" not in stderr_summary else None,
                 )
             except Exception:
-                pass
+                log.warning("crash notify to owner failed", exc_info=True)
+
+    async def _on_cc_giveup(stderr_tail: list[str], crash_count: int) -> None:
+        """Terminal: the crash budget is exhausted. Tell every waiting
+        chat and the owner that the bot is down and manual intervention
+        is needed. Best-effort — if Telegram itself is down we just log.
+        """
+        classification = classify_cc_failure(stderr_tail)
+        terminal_line = (
+            "⚠️ I'm shutting down — Claude Code has failed to start "
+            f"{crash_count} times in a row and I've given up retrying. "
+            "The operator needs to intervene."
+        )
+        if classification is not None:
+            user_text = f"{classification.user_message}\n\n{terminal_line}"
+        else:
+            user_text = terminal_line
+
+        chats_to_notify: set[int] = set()
+        if engine is not None and engine._active_chats:
+            chats_to_notify.update(engine._active_chats)
+        chats_to_notify.add(config.owner_id)
+
+        for chat_id in chats_to_notify:
+            try:
+                await dispatcher.bot.send_message(chat_id=chat_id, text=user_text)
+            except Exception:
+                log.warning("giveup notify to %s failed", chat_id, exc_info=True)
+
+        # Also ship the stderr tail to the owner so they can diagnose.
+        try:
+            stderr_summary = "\n".join(stderr_tail[-5:]) if stderr_tail else "(no stderr)"
+            await dispatcher.bot.send_message(
+                chat_id=config.owner_id,
+                text=(
+                    f"🔥 CC crash-loop terminal "
+                    f"(count={crash_count}, "
+                    f"kind={classification.kind if classification else 'unknown'}).\n\n"
+                    f"Last stderr:\n```\n{stderr_summary}\n```"
+                ),
+                parse_mode="MarkdownV2" if "`" not in stderr_summary else None,
+            )
+        except Exception:
+            log.warning("giveup stderr notify to owner failed", exc_info=True)
 
     # Engine is declared here but constructed after dispatcher
     engine = None  # type: ignore[assignment]
 
-    worker = CcWorker(spec, heartbeat=ctx.heartbeat, on_crash=_on_cc_crash)
+    worker = CcWorker(
+        spec, heartbeat=ctx.heartbeat,
+        on_crash=_on_cc_crash, on_giveup=_on_cc_giveup,
+    )
     await worker.start()
     await worker.supervise()
 

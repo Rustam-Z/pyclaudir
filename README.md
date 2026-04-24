@@ -99,7 +99,7 @@ All knobs live in environment variables (or `.env`):
 | `PYCLAUDIR_RATE_LIMIT_PER_MIN` | no | `20` | per-user inbound DM cap (owner exempt; groups not limited) |
 | `PYCLAUDIR_SELF_REFLECTION_CRON` | no | `0 17 * * *` | when the daily self-reflection skill fires (UTC cron). Default is 22:00 Tashkent. |
 | `PYCLAUDIR_LIVENESS_TIMEOUT_SECONDS` | no | `300` | wedge-detection threshold. If the CC subprocess is mid-turn with no activity for this long, it gets killed (supervisor respawns). |
-| `PYCLAUDIR_TOOL_ERROR_MAX_COUNT` | no | `3` | max `is_error=true` tool results in a single turn before the engine aborts the turn. Prevents Claude from burning minutes retrying a deterministically-failing tool. |
+| `PYCLAUDIR_TOOL_ERROR_MAX_COUNT` | no | `3` | **Shared consecutive-failure cap** for two failure paths: (a) max `is_error=true` tool results in a single turn before the worker aborts the turn; (b) max consecutive turns ending with `dropped_text=True` (model emitted text without calling `send_message`) before the engine surfaces the CC diagnostic to the user. Prevents silent infinite loops when Claude is looping on a failing tool OR on a broken model-access / auth state. |
 | `PYCLAUDIR_TOOL_ERROR_WINDOW_SECONDS` | no | `30` | if a tool error arrives this many seconds or more after the first error of the turn, the breaker trips even below `MAX_COUNT`. |
 | `PYCLAUDIR_PROGRESS_NOTIFY_SECONDS` | no | `60` | if a turn hasn't sent a reply to a chat within this window, the harness posts "Still on it — one moment." as a Telegram **reply** to the user's triggering message. Suppressed for chats that already saw a reply this turn. |
 | `PYCLAUDIR_ENABLE_SUBAGENTS` | no | `false` | when `true`, the `Agent` tool is added to `--allowedTools` and the subagent docs are injected into the system prompt. When `false` (default), `Agent` is hard-denied and the docs are kept out entirely. Subagent turns are token-heavy — leave off unless you need them. |
@@ -709,6 +709,28 @@ by code, not by hope, and tested in `tests/test_security_invariants.py`.
   immediately; `_on_cc_crash` notifies the user on respawn. Prevents
   Claude from burning minutes looping on a deterministically-failing
   tool (e.g. permission denied, schema violation).
+- **Dropped-text retry cap.** A turn that ends with text blocks but no
+  `send_message` call (`dropped_text=True`) increments
+  `Engine._dropped_text_retries` — a *cross-turn* counter that shares
+  the `PYCLAUDIR_TOOL_ERROR_MAX_COUNT` ceiling with the tool-error
+  breaker. Below the cap the engine injects a corrective
+  `<error>Use send_message</error>`; at the cap it calls
+  `classify_cc_failure` on the text blocks, surfaces a targeted
+  message (e.g. "model unavailable — fix `PYCLAUDIR_MODEL`") to the
+  user, and resets. Catches CC-native diagnostics (invalid model,
+  auth failure, quota) that would otherwise loop silently.
+- **Crash-loop terminal notification.** When the crash budget
+  (`CRASH_LIMIT` = 10 crashes in `CRASH_WINDOW_SECONDS` = 10 min) is
+  exhausted, `CcWorker._supervise_loop` fires the `on_giveup`
+  callback *before* raising `CrashLoop` — so owner + any active
+  chats get a clear "I'm shutting down, operator needs to
+  intervene" message (classified where possible) instead of the
+  supervisor task dying silently.
+- **Failure classifier.** `pyclaudir/cc_failure_classifier.py` is the
+  single authoritative mapping from CC stderr / text blocks to
+  user-facing messages. Used by the engine's post-turn stderr sweep,
+  the dropped-text handler, the on_crash hook, and the on_giveup
+  hook. Add a new failure mode = append one `CcFailurePattern`.
 - **Long-turn progress notification.** If a turn hasn't produced a
   `send_message` to a chat within `PYCLAUDIR_PROGRESS_NOTIFY_SECONDS`
   (default 60s), the engine sends a one-shot `"Still on it — one
