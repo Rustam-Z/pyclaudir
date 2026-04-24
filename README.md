@@ -5,10 +5,14 @@ Claude Code subprocess and a local MCP server.
 
 `pyclaudir` is the Python distillation of the Rust *Claudir* architecture:
 the LLM lives inside a `claude --print --input-format stream-json` subprocess
-that talks to the outside world *only* through tools we register with a
-locally-hosted MCP server. There is no shell access, no general filesystem
-access, no web fetch — the agent can do exactly the things in `pyclaudir/tools/`
-and nothing else.
+whose capabilities are pruned by `--allowedTools` / `--disallowedTools`.
+`Bash`, `Edit`, `Write`, `Read`, and `NotebookEdit` are hard-denied, so
+the agent can't execute shell commands, edit code, or read arbitrary
+files directly. Its primary surface is the tools in `pyclaudir/tools/`
+(exposed via a locally-hosted MCP server), plus `WebFetch`, `WebSearch`,
+and `Agent` (subagent spawning). See `pyclaudir/cc_worker.py` for the
+authoritative allow/deny lists and `prompts/system.md` for the subagent
+security rules.
 
 ## Quickstart
 

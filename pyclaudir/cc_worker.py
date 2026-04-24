@@ -118,6 +118,16 @@ ALLOWED_TOOLS: tuple[str, ...] = (
     # Web
     "WebFetch",
     "WebSearch",
+    # Subagents — spawn a fresh Claude in an isolated context window to
+    # digest a large payload (big file read, multi-MR diff, long tool
+    # result) and return just the summary. A subagent inherits the
+    # parent's --allowedTools / --disallowedTools, so Bash/Edit/Write/
+    # Read/NotebookEdit remain denied. The real exposure is that a
+    # subagent can make destructive MCP writes (Jira/GitLab, memory,
+    # send_message) on Nodira's identity with a prompt Nodira may not
+    # fully vet — see the "# Subagents" section in system.md for the
+    # hard rules on prompt construction and read-only defaults.
+    "Agent",
 )
 
 #: Forbidden flag — never pass this. ``build_argv`` enforces it at build

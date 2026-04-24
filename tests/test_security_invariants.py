@@ -51,7 +51,16 @@ def fake_spec(tmp_path: Path) -> CcSpawnSpec:
 # answer questions that need fresh information. They are explicitly on the
 # allowlist now. Bash/Edit/Write/Read/NotebookEdit remain hard-denied — those
 # would let the agent mutate the host or read arbitrary files, and there is no
-# operator scenario where it should be allowed to do that.
+# operator scenario where it should be allowed to do that directly.
+#
+# Agent (subagent spawning) is also on the allowlist, by operator decision,
+# so Nodira can delegate large-payload summarization. A subagent inherits
+# the parent's --allowedTools / --disallowedTools (Bash/Edit/Write/Read/
+# NotebookEdit stay denied), so it is NOT a wider host surface. The real
+# exposure is that a subagent can make destructive MCP writes on Nodira's
+# identity with a prompt Nodira may not fully vet; the mitigation lives in
+# system.md's "# Subagents" section (no user-supplied prompts forwarded
+# verbatim, read-only tasks by default), not at the argv layer.
 # ---------------------------------------------------------------------------
 
 
@@ -77,6 +86,9 @@ def test_invariant_1_argv_has_allowlist_and_denylist(fake_spec: CcSpawnSpec) -> 
     assert "mcp__mcp-gitlab" in allowed_value
     assert "WebFetch" in allowed_value
     assert "WebSearch" in allowed_value
+    # Agent tool (subagent spawning) is explicitly allowed. Security caveats
+    # documented in system.md's "# Subagents" section.
+    assert "Agent" in allowed_value
 
     assert "--disallowedTools" in argv
     deny_idx = argv.index("--disallowedTools") + 1
