@@ -10,6 +10,12 @@ import json
 #: burn 100+ tokens — cheap per turn, expensive over a long session.
 REASON_MAX_LENGTH = 100
 
+#: The Anthropic API's tool ``input_schema`` rejects top-level ``oneOf``,
+#: ``allOf``, and ``anyOf`` (and likely ``if``/``then``). That means we
+#: can't express "reason is required only on stop" in the schema itself
+#: — this must stay a flat object. The "required on stop" invariant is
+#: instead enforced client-side by :class:`~pyclaudir.models.ControlAction`'s
+#: ``@model_validator`` when the stream-json event is parsed.
 CONTROL_ACTION_SCHEMA: dict = {
     "type": "object",
     "properties": {
@@ -23,7 +29,8 @@ CONTROL_ACTION_SCHEMA: dict = {
             "maxLength": REASON_MAX_LENGTH,
             "description": (
                 "Terse justification (≤10 words). "
-                "Required only when action == 'stop'."
+                "REQUIRED non-empty when action == 'stop'. "
+                "Optional (may be omitted) when action is 'sleep' or 'heartbeat'."
             ),
         },
         "sleep_ms": {
@@ -33,27 +40,6 @@ CONTROL_ACTION_SCHEMA: dict = {
     },
     "required": ["action"],
     "additionalProperties": False,
-    # Conditional: reason is required and must be non-empty when stopping.
-    # For sleep/heartbeat it's optional — those actions are provisional,
-    # not terminal, so the forcing-function argument doesn't apply.
-    "allOf": [
-        {
-            "if": {
-                "properties": {"action": {"const": "stop"}},
-                "required": ["action"],
-            },
-            "then": {
-                "required": ["reason"],
-                "properties": {
-                    "reason": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": REASON_MAX_LENGTH,
-                    },
-                },
-            },
-        },
-    ],
 }
 
 

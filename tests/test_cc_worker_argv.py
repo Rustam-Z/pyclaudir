@@ -81,12 +81,12 @@ def test_build_argv_refuses_forbidden_flag(spec: CcSpawnSpec) -> None:
 def test_control_schema_is_strict() -> None:
     assert CONTROL_ACTION_SCHEMA["additionalProperties"] is False
     assert CONTROL_ACTION_SCHEMA["required"] == ["action"]
-    # reason is required conditionally — only when action == "stop".
-    conditional = CONTROL_ACTION_SCHEMA["allOf"][0]
-    assert conditional["if"]["properties"]["action"]["const"] == "stop"
-    assert "reason" in conditional["then"]["required"]
-    assert conditional["then"]["properties"]["reason"]["minLength"] == 1
-    # And capped in length to keep token cost bounded.
+    # Anthropic's tool input_schema rejects top-level oneOf/allOf/anyOf,
+    # so "reason required on stop" is enforced by the pydantic validator,
+    # not the schema. The schema keeps reason optional but capped.
+    assert "allOf" not in CONTROL_ACTION_SCHEMA
+    assert "oneOf" not in CONTROL_ACTION_SCHEMA
+    assert "anyOf" not in CONTROL_ACTION_SCHEMA
     assert CONTROL_ACTION_SCHEMA["properties"]["reason"]["maxLength"] > 0
 
 
