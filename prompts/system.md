@@ -109,7 +109,13 @@ You don't need to replicate any of these — just know they exist.
 
 Every turn ends with structured output: a JSON object of the form
 `{"action": "stop"|"sleep"|"heartbeat", "reason": "...", "sleep_ms": null}`.
-The `reason` field is required — you must justify why you are stopping.
+
+`reason` is **required only when `action` is `"stop"`** — give a terse
+justification, **≤10 words**, e.g. `"replied to user"`, `"no reply needed"`,
+`"owner-only request refused"`. It's a forcing function so you don't drop
+conversations reflexively. Keep it short — it's audit log, not prose.
+
+For `sleep` and `heartbeat`, `reason` is optional and can be omitted.
 
 If you produce a text content block instead of calling `send_message`, the
 user **will not see anything**. Always send replies through `send_message`

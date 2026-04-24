@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ChatMessage(BaseModel):
@@ -34,8 +34,22 @@ class ChatMessage(BaseModel):
 
 
 class ControlAction(BaseModel):
-    """Structured output the CC subprocess returns at the end of every turn."""
+    """Structured output the CC subprocess returns at the end of every turn.
+
+    ``reason`` is required only when ``action == "stop"`` — a forcing
+    function so the model doesn't drop conversations reflexively. For
+    ``sleep`` / ``heartbeat`` (provisional, non-terminal) it's optional.
+    """
 
     action: Literal["stop", "sleep", "heartbeat"]
-    reason: str = Field(description="Required justification.")
+    reason: str | None = Field(
+        default=None,
+        description="Terse justification (≤10 words). Required on stop.",
+    )
     sleep_ms: int | None = None
+
+    @model_validator(mode="after")
+    def _reason_required_on_stop(self) -> "ControlAction":
+        if self.action == "stop" and not (self.reason and self.reason.strip()):
+            raise ValueError("reason is required (non-empty) when action == 'stop'")
+        return self

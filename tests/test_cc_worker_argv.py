@@ -80,8 +80,32 @@ def test_build_argv_refuses_forbidden_flag(spec: CcSpawnSpec) -> None:
 
 def test_control_schema_is_strict() -> None:
     assert CONTROL_ACTION_SCHEMA["additionalProperties"] is False
-    assert "action" in CONTROL_ACTION_SCHEMA["required"]
-    assert "reason" in CONTROL_ACTION_SCHEMA["required"]
+    assert CONTROL_ACTION_SCHEMA["required"] == ["action"]
+    # reason is required conditionally — only when action == "stop".
+    conditional = CONTROL_ACTION_SCHEMA["allOf"][0]
+    assert conditional["if"]["properties"]["action"]["const"] == "stop"
+    assert "reason" in conditional["then"]["required"]
+    assert conditional["then"]["properties"]["reason"]["minLength"] == 1
+    # And capped in length to keep token cost bounded.
+    assert CONTROL_ACTION_SCHEMA["properties"]["reason"]["maxLength"] > 0
+
+
+def test_control_action_requires_reason_only_on_stop() -> None:
+    from pyclaudir.models import ControlAction
+    import pytest
+
+    # stop without reason → rejected
+    with pytest.raises(ValueError, match="reason is required"):
+        ControlAction(action="stop")
+    with pytest.raises(ValueError, match="reason is required"):
+        ControlAction(action="stop", reason="   ")
+
+    # stop with reason → ok
+    ControlAction(action="stop", reason="replied to user")
+
+    # sleep / heartbeat without reason → ok (provisional, not terminal)
+    ControlAction(action="sleep")
+    ControlAction(action="heartbeat")
 
 
 def test_event_parser_handles_assistant_text(spec: CcSpawnSpec) -> None:
