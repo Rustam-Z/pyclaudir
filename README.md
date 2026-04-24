@@ -96,7 +96,7 @@ All knobs live in environment variables (or `.env`):
 | `PYCLAUDIR_LIVENESS_TIMEOUT_SECONDS` | no | `300` | wedge-detection threshold. If the CC subprocess is mid-turn with no activity for this long, it gets killed (supervisor respawns). |
 | `PYCLAUDIR_TOOL_ERROR_MAX_COUNT` | no | `3` | max `is_error=true` tool results in a single turn before the engine aborts the turn. Prevents Claude from burning minutes retrying a deterministically-failing tool. |
 | `PYCLAUDIR_TOOL_ERROR_WINDOW_SECONDS` | no | `30` | if a tool error arrives this many seconds or more after the first error of the turn, the breaker trips even below `MAX_COUNT`. |
-| `PYCLAUDIR_PROGRESS_NOTIFY_SECONDS` | no | `30` | if a turn hasn't sent a reply to a chat within this window, the harness pings the chat with "still working on your request". Suppressed for chats that already saw a reply this turn. |
+| `PYCLAUDIR_PROGRESS_NOTIFY_SECONDS` | no | `60` | if a turn hasn't sent a reply to a chat within this window, the harness posts "Still on it — one moment." as a Telegram **reply** to the user's triggering message. Suppressed for chats that already saw a reply this turn. |
 | `PYCLAUDIR_PROJECT_PROMPT` | no | `prompts/project.md` | path to project-specific prompt (concatenated after `system.md`) |
 | `CLAUDE_CODE_BIN` | no | `claude` | path to the CC CLI |
 | `JIRA_URL` | no | — | Jira site URL (enables mcp-atlassian) |
@@ -705,12 +705,20 @@ by code, not by hope, and tested in `tests/test_security_invariants.py`.
   tool (e.g. permission denied, schema violation).
 - **Long-turn progress notification.** If a turn hasn't produced a
   `send_message` to a chat within `PYCLAUDIR_PROGRESS_NOTIFY_SECONDS`
-  (default 30s), the engine sends a one-shot "still working on your
-  request" via the bot-direct path. Chats that already received a
-  reply this turn are skipped. The model is also instructed (see
-  `prompts/system.md § Long tasks`) to warn up-front when it knows
-  a task will be slow — the model's own `send_message` suppresses
-  the harness fallback because it updates `_replied_chats_this_turn`.
+  (default 60s), the engine sends a one-shot `"Still on it — one
+  moment."` via the bot-direct path, posted as a Telegram **reply
+  to the user's triggering message** (`reply_to_message_id` taken
+  from the per-chat `_active_triggers` dict populated at turn
+  start). Threading makes the routing correct by construction —
+  the notice lands in the chat of the replied-to message, not
+  whichever chat a separate chat_id field happens to point at.
+  If a turn batched messages from multiple chats, each unreplied
+  chat gets its own threaded notice tied to its own message.
+  Chats that already received a reply this turn are skipped. The
+  model is also instructed (see `prompts/system.md § Long tasks`)
+  to warn up-front when it knows a task will be slow — the model's
+  own `send_message` suppresses the harness fallback because it
+  updates `_replied_chats_this_turn`.
 - **Instruction tools are owner-DM-only.** The four tools
   `list_instructions`, `read_instructions`, `write_instructions`,
   `append_instructions` expose `prompts/system.md` and

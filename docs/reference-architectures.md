@@ -725,10 +725,10 @@ this change helps the fallback password case.
 
 **Files:** `pyclaudir/cc_worker.py` (`_record_tool_error`,
 `TurnResult.aborted_reason`), `pyclaudir/engine.py`
-(`_progress_notify_after`, `_replied_chats_this_turn`),
-`prompts/system.md § Long tasks`. Env vars
+(`_progress_notify_after`, `_replied_chats_this_turn`,
+`_active_triggers`), `prompts/system.md § Long tasks`. Env vars
 `PYCLAUDIR_TOOL_ERROR_MAX_COUNT` (3), `PYCLAUDIR_TOOL_ERROR_WINDOW_SECONDS`
-(30), `PYCLAUDIR_PROGRESS_NOTIFY_SECONDS` (30).
+(30), `PYCLAUDIR_PROGRESS_NOTIFY_SECONDS` (60).
 
 Two complementary UX fixes around slow turns. Both extend the 5.9
 liveness-monitor story: that monitor catches a truly wedged process
@@ -757,24 +757,50 @@ research, big code reads), the 4-second typing refresh is
 ambiguous — the user can't tell silence-from-typing apart from
 silence-from-dead-bot. The engine wraps `wait_for_result` with a
 watchdog task that sleeps `PROGRESS_NOTIFY_SECONDS` and then
-posts "⏳ Still working on your request…" via `_error_notify`
-(the bot-direct path that bypasses MCP, so it works even when
-MCP is the slow component). Fires once per turn, only for chats
-in `_active_chats - _replied_chats_this_turn` — the engine
+posts `"Still on it — one moment."` via `_error_notify` (the
+bot-direct path that bypasses MCP, so it works even when MCP is
+the slow component). Fires once per turn, only for chats in
+`_active_chats - _replied_chats_this_turn` — the engine
 populates `_replied_chats_this_turn` from `notify_chat_replied`
 when `send_message` delivers, so the harness fallback is
 automatically suppressed whenever the model has already sent a
 reply. The watchdog is cancelled in a `try/finally` that wraps
 the whole turn-handling block.
 
-**Model-side guidance.** `prompts/system.md § Long tasks` tells
-the model to send an upfront `send_message` heads-up ("On it —
+**Threaded as a Telegram reply.** The notice is posted with
+`reply_to_message_id` set to the user's triggering inbound
+message, tracked per-chat in `_active_triggers: dict[chat_id,
+message_id]` populated in `_kick` from the batch (synthetic
+reminders with `message_id == 0` are excluded so Telegram
+doesn't reject the reply). This fixes a real routing bug:
+before threading, the watchdog iterated `_active_chats` and
+sent a plain message — when debounce coalesced a DM essay
+request with a short group message in the same turn, the model
+replied to the group and the watchdog then fired in the DM (or
+vice versa), so the user saw "Still on it…" in the chat where
+the bot wasn't actually working. With `reply_to_message_id`
+set from the per-chat trigger, the destination chat is
+determined by the message you reply to — misrouting becomes
+impossible by construction. `_error_notify`'s signature is
+`(chat_id, text, reply_to_message_id=None)`; crash and
+rate-limit notifications still pass `None` because they're
+global to the turn, not threaded to any single request.
+Regression tests live in
+`tests/test_progress_notify.py::test_progress_notification_threads_to_each_chats_own_trigger`
+and `...no_reply_to_for_synthetic_reminder`.
+
+**Model-side guidance.** `prompts/system.md` tells the model up
+front (short line at the top of `# Identity`) to flag long tasks
+with one sentence, and the dedicated `# Long tasks` section gives
+the full rule — send an upfront `send_message` heads-up ("On it —
 this will take a minute.") when it can tell a task will be slow.
-Interaction with the harness: the heads-up hits `notify_chat_replied`,
-which adds the chat to `_replied_chats_this_turn`, which makes
-the 30-second fallback skip it. Result: the model's warning
-naturally dedupes the harness fallback. If the model forgets,
-the harness catches it.
+Interaction with the harness: the heads-up hits
+`notify_chat_replied`, which adds the chat to
+`_replied_chats_this_turn`, which makes the 60-second fallback
+skip it. Result: the model's warning naturally dedupes the harness
+fallback. If the model forgets, the harness catches it — now
+threaded to the user's own message, so even if the batch crossed
+chats it lands in the right one.
 
 No changes to the crash-loop detector (10 crashes / 10 min
 `CrashLoop`) — a few circuit-breaker aborts per hour doesn't

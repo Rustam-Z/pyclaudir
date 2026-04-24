@@ -60,21 +60,27 @@ def short_progress_env():
 async def test_progress_notification_fires_on_long_turn(short_progress_env) -> None:
     """Turn lasts longer than the progress threshold → user gets pinged."""
     worker = FakeWorker()
-    notifications: list[tuple[int, str]] = []
+    notifications: list[tuple[int, str, int | None]] = []
 
-    async def fake_error_notify(chat_id: int, text: str) -> None:
-        notifications.append((chat_id, text))
+    async def fake_error_notify(
+        chat_id: int, text: str, reply_to_message_id: int | None = None
+    ) -> None:
+        notifications.append((chat_id, text, reply_to_message_id))
 
     eng = Engine(worker, debounce_ms=10, error_notify=fake_error_notify)
     await eng.start()
     try:
-        await eng.submit(_msg("hello", chat_id=-100))
+        await eng.submit(_msg("hello", mid=7, chat_id=-100))
         # Let the turn start and the progress watchdog fire.
         await asyncio.sleep(0.2)
         assert len(notifications) == 1
-        chat_id, text = notifications[0]
+        chat_id, text, reply_to = notifications[0]
         assert chat_id == -100
-        assert "Still working" in text
+        assert "Still on it" in text
+        # The notice must be threaded to the user's own triggering
+        # message — this is what guarantees it routes to the right
+        # chat regardless of what other chats were active.
+        assert reply_to == 7
 
         # Finish the turn cleanly so stop() doesn't hang.
         worker.feed_result(
@@ -91,10 +97,12 @@ async def test_progress_notification_suppressed_if_turn_finishes_fast(
 ) -> None:
     """Turn completes before the threshold → no progress notification."""
     worker = FakeWorker()
-    notifications: list[tuple[int, str]] = []
+    notifications: list[tuple[int, str, int | None]] = []
 
-    async def fake_error_notify(chat_id: int, text: str) -> None:
-        notifications.append((chat_id, text))
+    async def fake_error_notify(
+        chat_id: int, text: str, reply_to_message_id: int | None = None
+    ) -> None:
+        notifications.append((chat_id, text, reply_to_message_id))
 
     eng = Engine(worker, debounce_ms=10, error_notify=fake_error_notify)
     await eng.start()
@@ -119,10 +127,12 @@ async def test_progress_notification_skips_replied_chats(
 ) -> None:
     """If a chat already saw a ``send_message`` reply this turn, skip it."""
     worker = FakeWorker()
-    notifications: list[tuple[int, str]] = []
+    notifications: list[tuple[int, str, int | None]] = []
 
-    async def fake_error_notify(chat_id: int, text: str) -> None:
-        notifications.append((chat_id, text))
+    async def fake_error_notify(
+        chat_id: int, text: str, reply_to_message_id: int | None = None
+    ) -> None:
+        notifications.append((chat_id, text, reply_to_message_id))
 
     eng = Engine(worker, debounce_ms=10, error_notify=fake_error_notify)
     await eng.start()
@@ -145,13 +155,93 @@ async def test_progress_notification_skips_replied_chats(
 
 
 @pytest.mark.asyncio
+async def test_progress_notification_threads_to_each_chats_own_trigger(
+    short_progress_env,
+) -> None:
+    """Regression: when a turn batches messages from two chats, each
+    unreplied chat must get a progress notice threaded to *its own*
+    message_id. Previously we just sent to ``_active_chats`` with no
+    reply_to, which in the essay-in-DM / short-reply-in-group case
+    made the notice appear in the chat where the bot was *not* working.
+    """
+    worker = FakeWorker()
+    notifications: list[tuple[int, str, int | None]] = []
+
+    async def fake_error_notify(
+        chat_id: int, text: str, reply_to_message_id: int | None = None
+    ) -> None:
+        notifications.append((chat_id, text, reply_to_message_id))
+
+    eng = Engine(worker, debounce_ms=10, error_notify=fake_error_notify)
+    await eng.start()
+    try:
+        # Two inbound messages from two different chats coalesced by debounce.
+        await eng.submit(_msg("write me an essay", mid=101, chat_id=-100))
+        await eng.submit(_msg("ping", mid=202, chat_id=-200))
+        # Model answered only the group — DM still waiting on the essay.
+        await asyncio.sleep(0.02)
+        eng.notify_chat_replied(-200)
+        # Watchdog fires.
+        await asyncio.sleep(0.1)
+
+        # Exactly one notice, in the unreplied chat, threaded to its
+        # own triggering message (not the other chat's).
+        assert len(notifications) == 1
+        chat_id, _text, reply_to = notifications[0]
+        assert chat_id == -100
+        assert reply_to == 101
+
+        worker.feed_result(
+            TurnResult(control=ControlAction(action="stop", reason="ok"))
+        )
+        await asyncio.sleep(0.05)
+    finally:
+        await eng.stop()
+
+
+@pytest.mark.asyncio
+async def test_progress_notification_no_reply_to_for_synthetic_reminder(
+    short_progress_env,
+) -> None:
+    """Synthetic reminder messages have ``message_id=0``; we must not
+    pass that as ``reply_to_message_id`` (Telegram would reject it).
+    """
+    worker = FakeWorker()
+    notifications: list[tuple[int, str, int | None]] = []
+
+    async def fake_error_notify(
+        chat_id: int, text: str, reply_to_message_id: int | None = None
+    ) -> None:
+        notifications.append((chat_id, text, reply_to_message_id))
+
+    eng = Engine(worker, debounce_ms=10, error_notify=fake_error_notify)
+    await eng.start()
+    try:
+        await eng.submit(_msg("<reminder>...</reminder>", mid=0, chat_id=-100))
+        await asyncio.sleep(0.2)
+        assert len(notifications) == 1
+        chat_id, _text, reply_to = notifications[0]
+        assert chat_id == -100
+        assert reply_to is None
+
+        worker.feed_result(
+            TurnResult(control=ControlAction(action="stop", reason="ok"))
+        )
+        await asyncio.sleep(0.05)
+    finally:
+        await eng.stop()
+
+
+@pytest.mark.asyncio
 async def test_progress_notification_per_turn_reset(short_progress_env) -> None:
     """``_replied_chats_this_turn`` is cleared between turns."""
     worker = FakeWorker()
-    notifications: list[tuple[int, str]] = []
+    notifications: list[tuple[int, str, int | None]] = []
 
-    async def fake_error_notify(chat_id: int, text: str) -> None:
-        notifications.append((chat_id, text))
+    async def fake_error_notify(
+        chat_id: int, text: str, reply_to_message_id: int | None = None
+    ) -> None:
+        notifications.append((chat_id, text, reply_to_message_id))
 
     eng = Engine(worker, debounce_ms=10, error_notify=fake_error_notify)
     await eng.start()

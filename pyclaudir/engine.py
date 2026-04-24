@@ -34,7 +34,7 @@ TYPING_REFRESH_SECONDS = 4.0
 #: The typing indicator alone is too ambiguous on long turns. Fires at
 #: most once per chat per turn. Overridable via
 #: ``PYCLAUDIR_PROGRESS_NOTIFY_SECONDS``.
-PROGRESS_NOTIFY_SECONDS = 30.0
+PROGRESS_NOTIFY_SECONDS = 60.0
 
 #: Telegram clients suppress very brief typing displays to avoid flicker —
 #: typing that's "live" for less than ~1 second often never visually
@@ -49,10 +49,15 @@ MIN_TYPING_VISIBLE_SECONDS = 1
 #: ``send_chat_action`` to that chat. Engine doesn't import telegram.
 TypingAction = Callable[[int], Awaitable[None]]
 
-#: Async callable shape: ``await error_notify(chat_id, text)`` sends an
-#: error message directly via the bot, bypassing the MCP layer (which
-#: is dead when we need this). Engine doesn't import telegram.
-ErrorNotify = Callable[[int, str], Awaitable[None]]
+#: Async callable shape:
+#: ``await error_notify(chat_id, text, reply_to_message_id=None)``
+#: sends a message directly via the bot, bypassing the MCP layer
+#: (which is dead when we need this). When ``reply_to_message_id``
+#: is set the bot replies to that message (used by the progress
+#: watchdog so the "still working" notice threads to the user's
+#: request and routes to the correct chat by construction).
+#: Engine doesn't import telegram.
+ErrorNotify = Callable[[int, str, "int | None"], Awaitable[None]]
 
 if TYPE_CHECKING:  # pragma: no cover
     from .cc_worker import CcWorker, TurnResult
@@ -179,6 +184,14 @@ class Engine:
         #: Chat IDs from the most recent batch. Used by error notification
         #: so we know which chats were waiting when a failure occurs.
         self._active_chats: set[int] = set()
+        #: For each active chat, the most recent inbound ``message_id``
+        #: in the current turn's batch. The progress watchdog uses this
+        #: as ``reply_to_message_id`` so the "still working" notice
+        #: threads to the user's own message and is guaranteed to land
+        #: in the correct chat. Synthetic messages (reminders,
+        #: ``message_id == 0``) are excluded — Telegram would reject a
+        #: reply to a non-existent message.
+        self._active_triggers: dict[int, int] = {}
         self._pending: list[ChatMessage] = []
         self._lock = asyncio.Lock()
         self._is_processing = asyncio.Event()
@@ -267,6 +280,10 @@ class Engine:
             self._pending = []
             self._is_processing.set()
         self._active_chats = {m.chat_id for m in batch}
+        # Latest real message_id per chat (skip synthetic mid=0 reminders).
+        self._active_triggers = {
+            m.chat_id: m.message_id for m in batch if m.message_id > 0
+        }
         self._replied_chats_this_turn.clear()
         xml = await format_messages_with_context(batch, self._db)
         log.info("starting turn with %d msgs", len(batch))
@@ -549,7 +566,7 @@ class Engine:
             return
         for chat_id in self._active_chats:
             try:
-                await self._error_notify(chat_id, text)
+                await self._error_notify(chat_id, text, None)
                 log.info("sent error notification to chat %s", chat_id)
             except Exception as exc:
                 log.warning("failed to send error notification to %s: %s", chat_id, exc)
@@ -562,6 +579,14 @@ class Engine:
         turn — they've already seen the model is alive. Uses
         ``_error_notify`` (the bot-direct path) rather than the MCP
         server, because MCP may be the thing that's slow.
+
+        Posts as a **reply** to the user's triggering message (tracked
+        per-chat in ``_active_triggers``). Threading the notice makes
+        the routing correct by construction — the chat the reply
+        lands in is determined by the message_id, not by any "most
+        recent chat" guess. If a turn batched messages from multiple
+        chats, each unreplied chat gets its own threaded notice tied
+        to its own message.
         """
         try:
             await asyncio.sleep(delay)
@@ -571,13 +596,17 @@ class Engine:
             return
         pending = self._active_chats - self._replied_chats_this_turn
         for chat_id in pending:
+            reply_to = self._active_triggers.get(chat_id)
             try:
                 await self._error_notify(
                     chat_id,
-                    "⏳ Still working on your request — this is taking "
-                    "a bit longer than usual.",
+                    "Still on it — one moment.",
+                    reply_to,
                 )
-                log.info("sent progress notification to chat %s", chat_id)
+                log.info(
+                    "sent progress notification to chat %s (reply_to=%s)",
+                    chat_id, reply_to,
+                )
             except Exception as exc:
                 log.warning(
                     "progress notification failed for chat %s: %s",
@@ -630,6 +659,7 @@ class Engine:
                             "I'm restarting and will be back in a few seconds."
                         )
                         self._active_chats.clear()
+                        self._active_triggers.clear()
                         continue
 
                     self._is_processing.clear()
@@ -673,6 +703,7 @@ class Engine:
                         continue
 
                     self._active_chats.clear()
+                    self._active_triggers.clear()
 
                     if action == "sleep" and result.control and result.control.sleep_ms:
                         await asyncio.sleep(result.control.sleep_ms / 1000)

@@ -327,9 +327,16 @@ async def _async_main() -> None:
         except Exception as exc:
             log.warning("send_chat_action failed for chat %s: %s", chat_id, exc)
 
-    async def _error_notify(chat_id: int, text: str) -> None:
+    async def _error_notify(
+        chat_id: int,
+        text: str,
+        reply_to_message_id: int | None = None,
+    ) -> None:
         try:
-            await dispatcher.bot.send_message(chat_id=chat_id, text=text)
+            kwargs: dict = {"chat_id": chat_id, "text": text}
+            if reply_to_message_id:
+                kwargs["reply_to_message_id"] = reply_to_message_id
+            await dispatcher.bot.send_message(**kwargs)
         except Exception as exc:
             log.warning("error notify failed for chat %s: %s", chat_id, exc)
 

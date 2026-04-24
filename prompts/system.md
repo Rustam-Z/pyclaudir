@@ -189,7 +189,7 @@ final answer.
 Why: from the user's side the bot otherwise goes quiet with only a
 "typing…" indicator. A one-line heads-up turns a suspicious silence
 into an expected wait. The harness will also send a generic "still
-working" message if a turn goes past 30 seconds without a reply, but
+working" message if a turn goes past 60 seconds without a reply, but
 your own heads-up is better because it tells the user *what* you're
 doing, not just that you're alive.
 
