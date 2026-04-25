@@ -132,6 +132,27 @@ ALLOWED_TOOLS: tuple[str, ...] = (
 FORBIDDEN_FLAG = "--dangerously-skip-permissions"
 
 
+#: Tools whose first appearance in a turn means "the model has decided to
+#: produce something the user will see in Telegram." Used to defer the
+#: typing indicator until the model has clearly committed to talking
+#: (otherwise ``Nodira is typing…`` fires for turns that end in
+#: ``StructuredOutput stop`` with no reply — peer-to-peer group chatter,
+#: emoji acks, m1470-style quote echoes — which is misleading UX).
+#:
+#: Excluded by design: ``add_reaction`` (the reaction itself IS the reply),
+#: ``delete_message`` (rarely the whole response), research tools
+#: (``query_db``, memory/skill reads, ``WebSearch``, …) which may or may
+#: not lead to a reply, and ``StructuredOutput`` (the turn-end control
+#: action, never user-visible). See the plan at
+#: ``~/.claude/plans/if-nodira-doesn-t-send-partitioned-castle.md`` for
+#: rationale.
+MESSAGE_TOOL_NAMES: frozenset[str] = frozenset({
+    "mcp__pyclaudir__send_message",
+    "mcp__pyclaudir__reply_to_message",
+    "mcp__pyclaudir__edit_message",
+})
+
+
 @dataclass(frozen=True)
 class CcSpawnSpec:
     binary: str
@@ -277,6 +298,13 @@ class CcWorker:
     #: the worker is about to die.
     #: Signature: ``async on_giveup(stderr_tail: list[str], crash_count: int)``
     OnGiveup = Any  # Callable[[list[str], int], Awaitable[None]] | None
+    #: Optional callback fired *once per turn* the first time the model
+    #: emits a ``tool_use`` whose name is in :data:`MESSAGE_TOOL_NAMES`.
+    #: Used by the engine to defer the typing indicator until the model
+    #: has clearly committed to producing user-visible output. Reset
+    #: on every ``send()`` so each turn starts fresh.
+    #: Signature: ``async on_tool_use(tool_name: str)``.
+    OnToolUse = Any  # Callable[[str], Awaitable[None]] | None
 
     def __init__(
         self,
@@ -286,6 +314,7 @@ class CcWorker:
         heartbeat: Heartbeat | None = None,
         on_crash: OnCrash = None,
         on_giveup: OnGiveup = None,
+        on_tool_use: OnToolUse = None,
     ) -> None:
         self.spec = spec
         self.heartbeat = heartbeat or Heartbeat()
@@ -317,6 +346,11 @@ class CcWorker:
         self._stop_supervisor = asyncio.Event()
         self._on_crash = on_crash
         self._on_giveup = on_giveup
+        self._on_tool_use = on_tool_use
+        #: One-shot per-turn flag for the engaged-typing signal. Reset in
+        #: ``send()``. Flipped to True the first time ``_handle_event``
+        #: sees a ``tool_use`` whose name is in :data:`MESSAGE_TOOL_NAMES`.
+        self._engaged_signal_fired: bool = False
         #: ``time.monotonic()`` of the last successfully parsed stdout
         #: event. Together with ``heartbeat.last_activity`` (bumped on
         #: every MCP tool call) this tells the liveness monitor whether
@@ -671,6 +705,7 @@ class CcWorker:
         self._current_turn = TurnResult()
         self._turn_tool_error_count = 0
         self._turn_first_tool_error_at = None
+        self._engaged_signal_fired = False
         self._cancel_tool_error_watchdog()
         log_cc_user(text)
         envelope = {
@@ -899,6 +934,20 @@ class CcWorker:
                         tool_use_id=str(block.get("id", "")),
                         args=tool_input,
                     )
+                    # First "model committed to talking" signal of the
+                    # turn → tell the engine to fire typing now. Skipped
+                    # for research/control tools so a turn that ends in a
+                    # silent stop never shows typing. Fire-and-forget.
+                    if (
+                        not self._engaged_signal_fired
+                        and tool_name in MESSAGE_TOOL_NAMES
+                        and self._on_tool_use is not None
+                    ):
+                        self._engaged_signal_fired = True
+                        asyncio.create_task(
+                            self._on_tool_use(tool_name),
+                            name="cc-on-tool-use",
+                        )
                     # StructuredOutput is the definitive turn-end signal.
                     # Claudir confirmed: the action lives in the tool_use
                     # event's input field, NOT in the result event payload.

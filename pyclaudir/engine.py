@@ -302,8 +302,10 @@ class Engine:
         self._dropped_text_retries = 0
         xml = await format_messages_with_context(batch, self._db)
         log.info("starting turn with %d msgs", len(batch))
-        # Show "typing..." in every chat involved in this batch.
-        await self._start_typing(set(self._active_chats))
+        # Typing is NOT fired here. The CC worker calls
+        # ``notify_model_engaged`` once the model emits its first
+        # message-producing tool_use, which is the point at which we know
+        # this turn will produce a Telegram-visible reply.
         import time as _t
         now = _t.monotonic()
         oldest_receipt = min(
@@ -373,15 +375,17 @@ class Engine:
     # ------------------------------------------------------------------
 
     def prime_typing(self, chat_id: int) -> None:
-        """Early typing fire from the dispatcher, before debounce + submit.
+        """Eager typing fire — public API, **no longer wired in production**.
 
-        Called by :class:`TelegramDispatcher` the moment an allowed,
-        non-rate-limited message arrives. Without this, the user waits for
-        debounce + XML format + ``worker.send`` before the "typing..."
-        indicator renders.
+        Production now uses :meth:`notify_model_engaged`, which defers
+        typing until the model has clearly committed to producing a
+        Telegram-visible reply. ``prime_typing`` is kept as a public
+        engine API for callers that want the old "type immediately on
+        receive" semantics (and for tests that exercise the typing
+        machinery directly).
 
         Fire-and-forget: spawns the Telegram API call as a background task
-        so the dispatcher never blocks. Idempotent — if the chat is already
+        so the caller never blocks. Idempotent — if the chat is already
         covered by the refresh loop, no extra API call is made.
         """
         if self._typing_action is None:
@@ -402,6 +406,55 @@ class Engine:
             )
 
         if self._typing_task is None or self._typing_task.done():
+            self._typing_wake.clear()
+            self._typing_task = asyncio.create_task(
+                self._typing_refresh_loop(), name="pyclaudir-typing"
+            )
+
+    def notify_model_engaged(self) -> None:
+        """Fire typing for every chat in the current turn's batch.
+
+        Called by the CC worker the **first time** the model emits a
+        ``tool_use`` whose name is in
+        :data:`pyclaudir.cc_worker.MESSAGE_TOOL_NAMES` (send_message /
+        reply_to_message / edit_message). That's the moment we know the
+        model has committed to producing user-visible output — before
+        that, firing typing is speculation that produces "Nodira is
+        typing… [silence]" UX for turns the model decides to ignore.
+
+        Synchronous on purpose: the dict mutations and timer anchor
+        happen immediately, the actual Telegram API calls dispatch as
+        background tasks. This ordering matters because ``send_message``
+        will fire :meth:`notify_chat_replied` ~10ms after this — that
+        method needs ``_typing_chats`` populated and ``_typing_started_at``
+        set to arm the ``MIN_TYPING_VISIBLE_SECONDS`` defer correctly.
+        Idempotent — already-firing chats are skipped silently, so the
+        worker calling this redundantly (it shouldn't, but) is safe.
+        """
+        if self._typing_action is None or not self._active_chats:
+            return
+        import time
+
+        action = self._typing_action
+        added_any = False
+        for chat_id in self._active_chats:
+            if chat_id in self._typing_chats:
+                continue
+            if not self._typing_chats:
+                # First chat being added → anchor the min-visible clock
+                # before the API call dispatches, so notify_chat_replied
+                # sees a fresh ``_typing_started_at`` if it fires next.
+                self._typing_started_at = time.monotonic()
+            self._typing_chats.add(chat_id)
+            added_any = True
+            asyncio.create_task(
+                self._safe_typing_call(action, chat_id),
+                name=f"pyclaudir-typing-engaged-{chat_id}",
+            )
+
+        if added_any and (
+            self._typing_task is None or self._typing_task.done()
+        ):
             self._typing_wake.clear()
             self._typing_task = asyncio.create_task(
                 self._typing_refresh_loop(), name="pyclaudir-typing"
@@ -612,8 +665,13 @@ class Engine:
             )
             await self._worker.send(error_xml)
             self._is_processing.set()
-            if self._typing_chats:
-                await self._start_typing(set(self._typing_chats))
+            # The model already engaged once this turn (it produced
+            # text, just forgot to call send_message). Re-fire typing so
+            # the user sees the corrective retry isn't dead air. Without
+            # this, ``_typing_chats`` is empty (since the engaged-typing
+            # signal is per-worker-turn and ``send()`` reset the flag),
+            # so the retry would be silent until the next message tool.
+            self.notify_model_engaged()
             return
 
         # Cap hit. Build the clearest user-facing message we can from

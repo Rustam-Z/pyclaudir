@@ -391,6 +391,15 @@ async def _async_main() -> None:
         typing_action=_typing,
         error_notify=_error_notify,
     )
+    # Wire the worker → engine "model engaged" signal. Same chicken-and-
+    # egg pattern as ``dispatcher.engine = engine`` below — both objects
+    # exist now, so we can hand the engine method to the worker. The
+    # worker calls this once per turn the first time the model emits a
+    # message-producing tool_use; the engine fires typing in response.
+    async def _on_engaged(_tool_name: str) -> None:
+        engine.notify_model_engaged()
+
+    worker._on_tool_use = _on_engaged
     await engine.start()
 
     # Background reminder scheduler — polls every 60s for due reminders
