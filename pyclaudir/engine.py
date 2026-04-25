@@ -44,7 +44,7 @@ TYPING_REFRESH_SECONDS = 5
 #: model responds in a fraction of a second the user actually sees the
 #: indicator. Concretely: ``notify_chat_replied`` defers the actual
 #: dismissal until this many seconds have elapsed since typing started.
-MIN_TYPING_VISIBLE_SECONDS = 0
+MIN_TYPING_VISIBLE_SECONDS = 1
 
 #: Async callable shape: ``await typing_action(chat_id)`` should fire one
 #: ``send_chat_action`` to that chat. Engine doesn't import telegram.
