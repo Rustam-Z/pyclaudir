@@ -212,15 +212,23 @@ async def test_no_typing_action_is_safe() -> None:
 
 
 @pytest.mark.asyncio
-async def test_notify_chat_replied_stops_typing_after_min_visible_duration() -> None:
+async def test_notify_chat_replied_stops_typing_after_min_visible_duration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """``notify_chat_replied`` should defer the actual stop until typing
     has been visible for at least ``MIN_TYPING_VISIBLE_SECONDS`` so the
     user's Telegram client actually renders the indicator.
 
     Without this defer, a fast turn 2 (warm CC, response in <1s) would
     have its typing call dismissed before the client could render it.
+
+    The prod default is currently 0 (deferral disabled); we override it
+    here so the deferral branch is still exercised.
     """
-    from pyclaudir.engine import MIN_TYPING_VISIBLE_SECONDS
+    import pyclaudir.engine as engine_mod
+
+    monkeypatch.setattr(engine_mod, "MIN_TYPING_VISIBLE_SECONDS", 1)
+    MIN_TYPING_VISIBLE_SECONDS = engine_mod.MIN_TYPING_VISIBLE_SECONDS
 
     worker = FakeWorker()
     typing_calls: list[int] = []

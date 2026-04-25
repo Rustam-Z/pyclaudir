@@ -27,9 +27,10 @@ from .config import Config
 from .db.messages import fetch_reply_chain
 from .models import ChatMessage
 
-#: Telegram's typing action expires after ~5s on the server side, so we
-#: refresh slightly faster than that to avoid a visible gap.
-TYPING_REFRESH_SECONDS = 4.0
+#: How often we re-fire ``send_chat_action`` while a turn is in flight.
+#: Telegram's typing action expires after ~5s on the server side; matching
+#: that interval keeps the indicator continuous without spamming the API.
+TYPING_REFRESH_SECONDS = 5
 
 # Failure-handling thresholds — progress-notify window and the dropped-
 # text retry cap — live on ``Config`` (see ``progress_notify_seconds`` /
@@ -43,7 +44,7 @@ TYPING_REFRESH_SECONDS = 4.0
 #: model responds in a fraction of a second the user actually sees the
 #: indicator. Concretely: ``notify_chat_replied`` defers the actual
 #: dismissal until this many seconds have elapsed since typing started.
-MIN_TYPING_VISIBLE_SECONDS = 1
+MIN_TYPING_VISIBLE_SECONDS = 0
 
 #: Async callable shape: ``await typing_action(chat_id)`` should fire one
 #: ``send_chat_action`` to that chat. Engine doesn't import telegram.
@@ -207,9 +208,9 @@ class Engine:
         self._typing_task: asyncio.Task | None = None
         self._typing_chats: set[int] = set()
         #: Set whenever something changes the typing set (a chat is added
-        #: or removed). The typing loop ``wait_for``s this with a 4-second
-        #: timeout, so it wakes immediately on a removal instead of sleeping
-        #: out the full refresh interval.
+        #: or removed). The typing loop ``wait_for``s this with a
+        #: ``TYPING_REFRESH_SECONDS`` timeout, so it wakes immediately on a
+        #: removal instead of sleeping out the full refresh interval.
         self._typing_wake = asyncio.Event()
         #: ``time.monotonic()`` value at the moment typing was first armed
         #: for the current turn. Used by :meth:`notify_chat_replied` to
@@ -540,17 +541,19 @@ class Engine:
                 log.warning("typing action failed for chat %s: %s", chat_id, exc)
 
     async def _typing_refresh_loop(self) -> None:
-        """Refresh typing every ~4s (the first call already fired in start).
+        """Refresh typing every ``TYPING_REFRESH_SECONDS`` (the first call
+        already fired in start).
 
         Telegram's typing action expires server-side after ~5s, so we
-        refresh slightly faster than that to avoid a visible gap. The
+        refresh on the same cadence to keep the indicator continuous. The
         first call has already been awaited synchronously by
         :meth:`_start_typing`, so this loop only handles the *subsequent*
         ticks.
 
-        Between refreshes we ``wait_for`` the wake event with a 4s timeout
-        so :meth:`notify_chat_replied` can short-circuit the sleep and exit
-        the loop immediately when the model successfully sends a message.
+        Between refreshes we ``wait_for`` the wake event with the same
+        timeout so :meth:`notify_chat_replied` can short-circuit the sleep
+        and exit the loop immediately when the model successfully sends a
+        message.
         """
         try:
             while self._typing_chats:
