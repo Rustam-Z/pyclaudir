@@ -281,9 +281,8 @@ async def _async_main() -> None:
                         f"🔧 CC subprocess crashed "
                         f"(attempt {attempt}, backoff {backoff:.0f}s, "
                         f"kind={classification.kind if classification else 'unknown'}).\n\n"
-                        f"Last stderr:\n```\n{stderr_summary}\n```"
+                        f"Last stderr:\n{stderr_summary}"
                     ),
-                    parse_mode="MarkdownV2" if "`" not in stderr_summary else None,
                 )
             except Exception:
                 log.warning("crash notify to owner failed", exc_info=True)
@@ -324,9 +323,8 @@ async def _async_main() -> None:
                     f"🔥 CC crash-loop terminal "
                     f"(count={crash_count}, "
                     f"kind={classification.kind if classification else 'unknown'}).\n\n"
-                    f"Last stderr:\n```\n{stderr_summary}\n```"
+                    f"Last stderr:\n{stderr_summary}"
                 ),
-                parse_mode="MarkdownV2" if "`" not in stderr_summary else None,
             )
         except Exception:
             log.warning("giveup stderr notify to owner failed", exc_info=True)
@@ -450,6 +448,11 @@ async def _async_main() -> None:
 
     def _stop(*_a):
         log.info("signal received, shutting down")
+        # Tell the cc supervisor we're shutting down BEFORE it observes
+        # the subprocess exit (the SIGINT propagates to the same process
+        # group, so cc is exiting in parallel). Without this the
+        # supervisor treats the clean exit as a crash and respawns.
+        worker._stop_supervisor.set()
         stop_event.set()
 
     loop = asyncio.get_running_loop()
