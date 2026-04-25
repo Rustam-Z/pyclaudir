@@ -115,7 +115,7 @@ The plugin can forward Claude Code's tool-approval prompts to Telegram:
 
 ## 2. Claudir (Rust) — The Ancestor
 
-Claudir is the original Rust architecture (~33k LoC) that pyclaudir is a "Python distillation" of. It was described in a multi-part internal design series. No public GitHub repo or blog exists. Everything below is reconstructed from the build prompt, code comments referencing "Claudir Part N", the pyclaudir codebase itself, and the operator's session log.
+Claudir is the original Rust architecture (~33k LoC) that pyclaudir is a "Python distillation" of. It was described in a multi-part internal design series. The reference write-up lives at <https://gist.github.com/nodir-t/da74c78281f203b0439609ebe5866f49> — read it before changing anything in this doc. The summary below is reconstructed from that gist, the build prompt, code comments referencing "Claudir Part N", the pyclaudir codebase itself, and the operator's session log.
 
 ### Core architecture
 
