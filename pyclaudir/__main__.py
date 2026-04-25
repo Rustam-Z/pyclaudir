@@ -391,15 +391,45 @@ async def _async_main() -> None:
 
     # Background reminder scheduler — polls every 60s for due reminders
     # and injects them into the engine as synthetic inbound messages.
+    #
+    # **Defer-when-busy policy**: a due reminder is held back if the
+    # engine is mid-turn or a real user has been active within
+    # ``REMINDER_QUIET_SECONDS`` (5 min). This stops long reminder
+    # turns (most importantly the daily self-reflection skill) from
+    # preempting active conversations. The reminder stays in the
+    # ``pending`` set and is retried on the next 60s poll. To prevent
+    # indefinite starvation in a continuously-busy deployment, a
+    # reminder that's been overdue more than ``REMINDER_MAX_DEFER``
+    # fires anyway.
+    REMINDER_MAX_DEFER = 60 * 60  # 1 hour
+
     async def _reminder_loop() -> None:
         from .models import ChatMessage
 
         while True:
             await asyncio.sleep(60)
             try:
-                now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+                now_dt = datetime.now(timezone.utc)
+                now_utc = now_dt.strftime("%Y-%m-%d %H:%M:%S")
                 due = await fetch_due_reminders(db, now_utc)
+                fired_count = 0
                 for r in due:
+                    # Defer if engine is busy or a user is active, unless
+                    # this reminder is already too overdue to defer further.
+                    try:
+                        trigger_dt = datetime.strptime(
+                            r["trigger_at"], "%Y-%m-%d %H:%M:%S"
+                        ).replace(tzinfo=timezone.utc)
+                        overdue_seconds = (now_dt - trigger_dt).total_seconds()
+                    except (ValueError, TypeError):
+                        overdue_seconds = 0.0  # malformed → fire now
+                    if overdue_seconds < REMINDER_MAX_DEFER and engine.is_busy():
+                        log.info(
+                            "deferring reminder #%d (overdue %.0fs, engine busy)",
+                            r["id"], overdue_seconds,
+                        )
+                        continue
+
                     reminder_xml = (
                         f'<reminder id="{r["id"]}" chat_id="{r["chat_id"]}" '
                         f'user_id="{r["user_id"]}">{r["text"]}</reminder>'
@@ -412,6 +442,7 @@ async def _async_main() -> None:
                         timestamp=datetime.now(timezone.utc),
                         text=reminder_xml,
                     ))
+                    fired_count += 1
                     if r["cron_expr"]:
                         try:
                             from croniter import croniter
@@ -428,8 +459,8 @@ async def _async_main() -> None:
                             await mark_reminder_sent(db, r["id"])
                     else:
                         await mark_reminder_sent(db, r["id"])
-                if due:
-                    log.info("fired %d reminder(s)", len(due))
+                if fired_count:
+                    log.info("fired %d reminder(s)", fired_count)
             except Exception:
                 log.exception("reminder loop error")
 

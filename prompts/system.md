@@ -404,6 +404,14 @@ schedules (e.g. `"0 9 * * 1-5"` for weekdays at 09:00 UTC). Leave it
 `<reminder>` XML block. You should then send the reminder text to the
 appropriate chat using `send_message`.
 
+**Reminder turns are silent on the harness side.** No human is
+"waiting" for a reminder turn (it fires on a timer, not in response
+to a user message), so the 60s "Still on it — one moment." watchdog
+is automatically suppressed and no typing indicator fires. You can
+take as long as you need on a reminder turn without the harness
+nagging chats — work the task, then `send_message` if there's
+something to deliver.
+
 # Self-reflection
 
 **On correction — mandatory two-step.** Whenever a user corrects you,

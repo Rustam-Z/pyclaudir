@@ -209,9 +209,11 @@ async def test_progress_notification_threads_to_each_chats_own_trigger() -> None
 
 
 @pytest.mark.asyncio
-async def test_progress_notification_no_reply_to_for_synthetic_reminder() -> None:
-    """Synthetic reminder messages have ``message_id=0``; we must not
-    pass that as ``reply_to_message_id`` (Telegram would reject it).
+async def test_progress_watchdog_skips_reminder_only_turn() -> None:
+    """Synthetic reminders (``message_id=0``) have no human waiting on the
+    other end — the cron-triggered self-reflection skill is the canonical
+    case. The progress watchdog must stay silent for reminder-only turns
+    so it doesn't ping the seeded chat (e.g. owner DM at midnight UTC).
     """
     worker = FakeWorker()
     notifications: list[tuple[int, str, int | None]] = []
@@ -226,10 +228,49 @@ async def test_progress_notification_no_reply_to_for_synthetic_reminder() -> Non
     try:
         await eng.submit(_msg("<reminder>...</reminder>", mid=0, chat_id=-100))
         await asyncio.sleep(0.2)
+        assert notifications == []
+        # _active_chats should not contain the reminder's chat — the same
+        # filter that excludes mid=0 from _active_triggers excludes it
+        # here too.
+        assert -100 not in eng._active_chats
+
+        worker.feed_result(
+            TurnResult(control=ControlAction(action="stop", reason="ok"))
+        )
+        await asyncio.sleep(0.05)
+    finally:
+        await eng.stop()
+
+
+@pytest.mark.asyncio
+async def test_progress_watchdog_pings_only_real_user_when_batched_with_reminder() -> None:
+    """If a reminder happens to arrive while a real user message is being
+    batched, the watchdog must fire only for the real user — not for the
+    reminder's seeded chat. Before the fix both chats were pinged
+    because the reminder's chat_id leaked into _active_chats.
+    """
+    worker = FakeWorker()
+    notifications: list[tuple[int, str, int | None]] = []
+
+    async def fake_error_notify(
+        chat_id: int, text: str, reply_to_message_id: int | None = None
+    ) -> None:
+        notifications.append((chat_id, text, reply_to_message_id))
+
+    eng = _short_progress_engine(worker, error_notify=fake_error_notify)
+    await eng.start()
+    try:
+        # Reminder seeded at owner DM (-100) coalesces with a real user
+        # message in a group (-200, mid=42).
+        await eng.submit(_msg("<reminder>...</reminder>", mid=0, chat_id=-100))
+        await eng.submit(_msg("hey bot", mid=42, chat_id=-200))
+        await asyncio.sleep(0.2)
+
+        # Exactly one ping, to the real user, threaded to their message.
         assert len(notifications) == 1
         chat_id, _text, reply_to = notifications[0]
-        assert chat_id == -100
-        assert reply_to is None
+        assert chat_id == -200
+        assert reply_to == 42
 
         worker.feed_result(
             TurnResult(control=ControlAction(action="stop", reason="ok"))

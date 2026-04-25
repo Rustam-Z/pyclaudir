@@ -46,6 +46,15 @@ TYPING_REFRESH_SECONDS = 5
 #: dismissal until this many seconds have elapsed since typing started.
 MIN_TYPING_VISIBLE_SECONDS = 1
 
+#: How long after the last real user message the engine still considers
+#: itself "busy" for the purpose of firing reminders. Used by
+#: :meth:`Engine.is_busy`. The reminder loop checks this to defer
+#: firing (most importantly the daily self-reflection skill) so it
+#: doesn't preempt active conversations — the user types, the
+#: reminder loop sees recent activity, and pushes the fire by one
+#: poll cycle (60s) until things go quiet.
+REMINDER_QUIET_SECONDS = 5 * 60
+
 #: Async callable shape: ``await typing_action(chat_id)`` should fire one
 #: ``send_chat_action`` to that chat. Engine doesn't import telegram.
 TypingAction = Callable[[int], Awaitable[None]]
@@ -189,8 +198,11 @@ class Engine:
         #: Optional callback to send error messages directly via the bot
         #: when CC is down and the MCP path is unavailable.
         self._error_notify = error_notify
-        #: Chat IDs from the most recent batch. Used by error notification
-        #: so we know which chats were waiting when a failure occurs.
+        #: Chat IDs from the most recent batch whose users are actually
+        #: waiting on a reply. Synthetic reminders (``message_id == 0``)
+        #: are excluded — same filter as ``_active_triggers`` below — so
+        #: the progress watchdog and turn-start typing indicator skip
+        #: reminder-only turns where there is no human to notify.
         self._active_chats: set[int] = set()
         #: For each active chat, the most recent inbound ``message_id``
         #: in the current turn's batch. The progress watchdog uses this
@@ -232,6 +244,11 @@ class Engine:
         #: by a prior failure. Bounded by ``Config.tool_error_max_count``
         #: — same knob the tool-error circuit breaker uses.
         self._dropped_text_retries: int = 0
+        #: ``time.monotonic()`` of the last real user inbound (mid > 0).
+        #: 0.0 means "no user has ever messaged this process". Used by
+        #: :meth:`is_busy` to defer reminder firing during active
+        #: conversations.
+        self._last_user_inbound_at: float = 0.0
         self._stop = asyncio.Event()
 
     # ------------------------------------------------------------------
@@ -269,6 +286,9 @@ class Engine:
           inject path is used for *immediate* mid-turn delivery only when
           we're sure CC is mid-stream — see :meth:`_maybe_inject`.
         """
+        if msg.message_id > 0:
+            import time as _t
+            self._last_user_inbound_at = _t.monotonic()
         async with self._lock:
             self._pending.append(msg)
 
@@ -279,6 +299,24 @@ class Engine:
         if self._debounce_task and not self._debounce_task.done():
             self._debounce_task.cancel()
         self._debounce_task = asyncio.create_task(self._debounce_then_kick())
+
+    def is_busy(self) -> bool:
+        """True if the engine is mid-turn or a real user has been active
+        within the last :data:`REMINDER_QUIET_SECONDS`.
+
+        The reminder loop checks this before firing each due reminder so
+        long reminder turns (e.g. self-reflection) don't preempt
+        ongoing user conversations. A reminder that's "too overdue" can
+        bypass this — see the loop in ``__main__._reminder_loop``.
+        """
+        import time as _t
+        if self._is_processing.is_set():
+            return True
+        if self._pending:
+            return True
+        if self._last_user_inbound_at == 0.0:
+            return False
+        return _t.monotonic() - self._last_user_inbound_at < REMINDER_QUIET_SECONDS
 
     async def _debounce_then_kick(self) -> None:
         try:
@@ -294,8 +332,10 @@ class Engine:
             batch = self._pending
             self._pending = []
             self._is_processing.set()
-        self._active_chats = {m.chat_id for m in batch}
-        # Latest real message_id per chat (skip synthetic mid=0 reminders).
+        # Skip synthetic reminders (mid=0) — no human waiting on them, so
+        # the progress watchdog and turn-start typing indicator should
+        # both be silent for reminder-only turns.
+        self._active_chats = {m.chat_id for m in batch if m.message_id > 0}
         self._active_triggers = {
             m.chat_id: m.message_id for m in batch if m.message_id > 0
         }
