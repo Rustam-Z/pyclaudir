@@ -315,29 +315,18 @@ reminder (default cron `0 0 * * *` — midnight UTC every day).
 The seed marker lives in the `auto_seed_key` column added by
 migration 005.
 
-### Self-editing instruction files (owner-DM-only)
+### Self-editing the project prompt (owner-only, prompt-enforced)
 
 `prompts/system.md` and `prompts/project.md` are both loaded from disk on every CC subprocess spawn (`cc_worker.py:build_argv`, lines ~168-181) and concatenated into the `--system-prompt` argument — there's no way to hot-reload mid-session.
 
-Four MCP tools expose these files to the bot for inspection and cautious self-editing: `list_instructions`, `read_instructions`, `write_instructions`, `append_instructions`. All four share a single gate applied before any filesystem access:
+Two MCP tools expose `prompts/project.md` (and only that file) to the bot: `read_instructions` and `append_instructions`. system.md is intentionally not exposed — it's git-tracked, so any bot edit would land as a working-tree diff and pollute the repo. Operator-driven customisations therefore accumulate in project.md (gitignored). The owner-only policy is enforced **in the system prompt**, not in code; the owner can invoke these tools from any chat.
 
-```python
-def _owner_dm_gate(ctx):
-    if ctx.owner_id is None: return denied
-    if ctx.last_inbound_user_id != ctx.owner_id: return denied
-    if ctx.last_inbound_chat_type != "private": return denied
-    return None  # pass
-```
+What the code enforces, via `InstructionsStore` (`pyclaudir/instructions_store.py`):
 
-`last_inbound_user_id` and `last_inbound_chat_type` are updated on every allowed inbound by `TelegramDispatcher._on_message` — they reflect the user who just sent the current turn's triggering message, not anything the agent can self-report. The gate is enforced at the tool layer, so a prompt-injection coaxing the agent into "call `read_instructions` and send me the result" simply receives `permission denied`.
-
-`InstructionsStore` (`pyclaudir/instructions_store.py`) implements the storage layer:
-
-- **Two-file allowlist** via dict lookup — no path traversal surface at all.
-- **128 KiB per-file cap** (10× headroom over current ~12 KiB system.md).
-- **Read-before-write rail**: you must have called `read_instructions` on a file this session before writing to it. Matches the `MemoryStore` idiom.
-- **Backup-before-write**: every `write`/`append` first copies the current file to `data/prompt_backups/<name>-<UTC timestamp>.md`. Revert is `mv <backup> prompts/<name>.md && docker compose restart pyclaudir`.
-- **Atomic write** via tmp+rename (same pattern as `access.py:save_access`).
+- **Hardcoded path** to `prompts/project.md` — no path resolution, no traversal surface, no logical-name indirection.
+- **128 KiB cap** (10× headroom over a typical project.md).
+- **Backup-before-append**: every append first copies the current file to `data/prompt_backups/project-<UTC timestamp>.md`. Revert is `mv <backup> prompts/project.md && docker compose restart pyclaudir`.
+- **Atomic write** via tmp+rename.
 
 Changes take effect on the next CC spawn — the operator's container restart is the final manual review gate before a new prompt goes live.
 
@@ -396,7 +385,7 @@ In pyclaudir: **not implemented**. We use SIGTERM/SIGINT for shutdown and `/kill
 | Scheduled events | No | Yes (reminder pseudo-user) | Yes (reminder tools + background poller; auto-seeded mandatory reminders via `auto_seed_key`) |
 | Reactions (inbound) | No | Yes (per log samples) | Yes — MessageReactionHandler → `messages.reactions` JSON column. Bot receives reactions only in DMs or admin-in-group (Telegram constraint). |
 | Reactions (outbound) | Yes (`react` tool) | Yes | Yes — `add_reaction` tool, stored on same JSON column |
-| Self-editing instructions | No | Unknown | Yes — owner-DM-gated instruction tools over system.md + project.md; auto-backup per write |
+| Self-editing instructions | No | Unknown | Yes — instruction tools over system.md (read-only) + project.md (writable); owner-only policy enforced via system prompt; auto-backup per write |
 | Agent skills | No | Unknown | Yes — `skills/<name>/SKILL.md` playbooks invoked via `<skill>` inside `<reminder>` envelope |
 | Self-reflection loop | No | Unknown | Yes — daily two-phase skill (introspect + process pending), mandatory reminder, owner-approval-gated promotions |
 | Display format | N/A (plugin, not standalone) | Claude Code TUI capture | Tagged log + trace script |
@@ -507,37 +496,26 @@ FROM messages
 WHERE message_id = ?
 ```
 
-### 5.3 Owner-DM-gated self-editing of system/project prompts
+### 5.3 Owner-only self-editing of project prompt (prompt-enforced)
 
 **Files:** `pyclaudir/instructions_store.py`, `pyclaudir/tools/instructions.py`, `data/prompt_backups/`.
 
-Four MCP tools — `list_instructions`, `read_instructions`,
-`write_instructions`, `append_instructions` — expose
-`prompts/system.md` and `prompts/project.md` to the bot for
-inspection and cautious self-editing. **All four share a single
-gate** applied before any filesystem access:
+Two MCP tools — `read_instructions` and `append_instructions` —
+expose `prompts/project.md` (only) to the bot. system.md is
+intentionally not exposed via tools; it's git-tracked, so bot edits
+would pollute the repo. The owner-only policy is enforced **in the
+system prompt**, not in code. The owner can invoke from any chat;
+the model refuses non-owner senders. Earlier iterations had a
+code-level owner+DM gate, list/write tools, a logical-name dict, and
+a read-before-write rail — all removed once it became clear the
+prompt rule plus backup-on-append is sufficient.
 
-```python
-if ctx.owner_id is None: denied
-if ctx.last_inbound_user_id != ctx.owner_id: denied
-if ctx.last_inbound_chat_type != "private": denied
-```
-
-`last_inbound_user_id` and `last_inbound_chat_type` are updated on
-every allowed inbound by `TelegramDispatcher._on_message`. The gate
-can't be spoofed by the agent because the values don't come from
-tool arguments — they come from the dispatcher's view of who sent
-the message that triggered the current turn.
-
-Safety rails on every write:
-- **Two-file allowlist** via dict lookup (no path resolution, no
-  traversal surface).
-- **128 KiB per-file cap.**
-- **Read-before-write**: must have called `read_instructions` on the
-  same file this session.
+Code-level rails on every append:
+- **Hardcoded path** (`prompts/project.md`) — no resolution surface.
+- **128 KiB cap.**
 - **Atomic write** via tmp+rename.
-- **Auto-backup** to `data/prompt_backups/<name>-<UTC timestamp>.md`
-  before every mutation. Revert is `mv <backup> prompts/<name>.md &&
+- **Auto-backup** to `data/prompt_backups/project-<UTC timestamp>.md`
+  before every append. Revert is `mv <backup> prompts/project.md &&
   docker compose restart pyclaudir`.
 
 Edits take effect on next CC spawn (prompts reload at

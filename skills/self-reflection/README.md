@@ -12,9 +12,10 @@ Daily two-phase loop that drives the bot's own learning:
   `learnings.md` (both phase-A's fresh additions and anything
   written earlier via the on-correction rule), stress-tests each
   against 10-20 hypothetical scenarios, scores fit, and proposes
-  promote / refine / discard to the owner via DM. On explicit owner
-  approval, appends the rule to `prompts/project.md` via the
-  owner-DM-gated `append_instructions` tool.
+  promote / refine / discard to the owner. On explicit owner
+  approval, appends the rule to `prompts/project.md` via
+  `append_instructions` (owner-only by prompt policy; system.md is
+  not exposed via tools).
 
 Both phases run back-to-back in one invocation, triggered by a
 single auto-seeded recurring reminder (midnight UTC every day by

@@ -60,14 +60,6 @@ class ToolContext:
     instructions_store: "InstructionsStore | None" = None
     skills_store: "SkillsStore | None" = None
     heartbeat: Heartbeat = field(default_factory=Heartbeat)
-    #: Telegram user id of the bot owner. Used by instruction-edit tools
-    #: to verify the triggering inbound came from the operator.
-    owner_id: int | None = None
-    #: Updated by the dispatcher on every allowed inbound message. The
-    #: instruction-edit tools gate on these two fields. ``None`` at
-    #: startup until the first message arrives.
-    last_inbound_user_id: int | None = None
-    last_inbound_chat_type: str | None = None
     #: chat_id → display name. Populated by the dispatcher on every inbound
     #: message so outbound transcript lines can show the chat's title.
     chat_titles: dict[int, str] = field(default_factory=dict)

@@ -68,7 +68,6 @@ what's in your environment.
 | `PYCLAUDIR_CRASH_LIMIT` | no | `10` | how many crashes within `CRASH_WINDOW_SECONDS` count as "too many". When reached, the bot tells the owner and active chats, then exits — and something outside (systemd, docker) is expected to restart the whole bot. |
 | `PYCLAUDIR_CRASH_WINDOW_SECONDS` | no | `600` | the time window used for `CRASH_LIMIT`. Only crashes from the last X seconds are counted. |
 | `PYCLAUDIR_ENABLE_SUBAGENTS` | no | `false` | when `true`, the `Agent` tool is allowed and Claude is told it exists. When `false` (default), the tool is blocked and Claude is not told about it. Helper agents use a lot of tokens, so leave off unless you really need them. |
-| `PYCLAUDIR_PROJECT_PROMPT` | no | `prompts/project.md` | extra prompt file added after `system.md` |
 | `JIRA_URL` | no | — | Jira site URL (turns on mcp-atlassian) |
 | `JIRA_USERNAME` | no | — | Jira username |
 | `JIRA_API_TOKEN` | no | — | Jira API token |
@@ -404,8 +403,8 @@ The system prompt is assembled from two files:
    resistance. Ships with the repo.
 2. **`prompts/project.md`** — project-specific overlay (identity,
    integrations, custom instructions). Gitignored. Copy
-   `prompts/project.md.example` to get started. Override the path with
-   `PYCLAUDIR_PROJECT_PROMPT`.
+   `prompts/project.md.example` to get started. Path is hardcoded —
+   always at `prompts/project.md`.
 
 If `project.md` doesn't exist, only the base prompt is used.
 
@@ -729,19 +728,19 @@ is enforced by code, not by hope, and tested in
   a task will be slow — the model's own `send_message` suppresses
   the harness fallback because it updates
   `_replied_chats_this_turn`.
-- **Instruction tools are owner-DM-only.** The four tools
-  `list_instructions`, `read_instructions`, `write_instructions`,
-  `append_instructions` expose `prompts/system.md` and
-  `prompts/project.md` to the bot for inspection and (cautious)
-  self-editing. All four gate at the tool layer on
-  `last_inbound_user_id == PYCLAUDIR_OWNER_ID` **and** `chat_type ==
-  "private"`. Any other context — group chats, non-owner DMs, or
-  the initial pre-first-message state — returns `permission denied`
-  with no content leak. Every successful write copies the previous
-  content to `data/prompt_backups/<name>-<timestamp>.md` first;
-  revert is `mv <backup> prompts/<name>.md && docker compose
-  restart pyclaudir`. Edits take effect on the next CC spawn, not
-  mid-session, which gives the operator a natural review window.
+- **Instruction tools are owner-only (any chat).** Two tools —
+  `read_instructions` and `append_instructions` — expose
+  `prompts/project.md` (and only that file) to the bot. system.md is
+  git-tracked, so it's intentionally not exposed; all owner-driven
+  customisations accumulate in project.md, which is concatenated
+  after system.md to form the full prompt. No code-level permission
+  check exists — the owner-only rule is enforced by the system
+  prompt. Code rails that DO enforce: the file path is hardcoded,
+  the size cap (128 KiB), atomic write, and a timestamped backup
+  before every append. Revert is `mv <backup> prompts/project.md &&
+  docker compose restart pyclaudir`. Edits take effect on the next
+  CC spawn, not mid-session, which gives the operator a natural
+  review window.
 - **Skills are operator-curated playbooks.** Markdown files under
   `skills/<name>/SKILL.md` that describe multi-step agent workflows.
   Exposed read-only via `list_skills` / `read_skill`. A skill is
@@ -834,7 +833,7 @@ pyclaudir/
 │       ├── delete_message.py
 │       ├── add_reaction.py
 │       ├── memory.py           # list/read/write/append memory (read-before-write)
-│       ├── instructions.py     # list/read/write/append system.md + project.md (owner-DM only)
+│       ├── instructions.py     # read/append project.md (owner-only by prompt policy)
 │       ├── skills.py           # list/read agent skill playbooks under skills/
 │       ├── query_db.py
 │       └── reminder.py         # set/list/cancel reminders
@@ -855,7 +854,7 @@ pyclaudir/
     ├── test_reactions_update.py       # inbound + bot reactions fold into messages
     ├── test_rate_limits_dm_only.py    # DM-only, owner-exempt dispatcher-level limiter
     ├── test_instructions_store.py     # allowlist, size cap, read-before-write, backup
-    ├── test_instructions_tools.py     # owner-DM gate across list/read/write/append
+    ├── test_instructions_tools.py     # store rails + write-allowlist refusals at the tool layer
     ├── test_skills_store.py           # Agent Skills spec conformance + path hardening
     ├── test_skills_tools.py           # list_skills / read_skill surface
     ├── test_auto_seed_reminder.py     # mandatory self-reflection reminder + cancel gate

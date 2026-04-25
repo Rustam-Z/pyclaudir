@@ -151,7 +151,7 @@ async def _async_main() -> None:
     )
     project_root = Path(__file__).resolve().parent.parent
     instructions = InstructionsStore(
-        project_root=project_root,
+        project_md_path=project_root / "prompts" / "project.md",
         backup_dir=config.data_dir / "prompt_backups",
     )
     instructions.ensure_dirs()
@@ -175,7 +175,6 @@ async def _async_main() -> None:
         instructions_store=instructions,
         skills_store=skills,
         chat_titles=chat_titles,
-        owner_id=config.owner_id,
     )
 
     mcp = McpServer(ctx, db_logger=db_logger)
@@ -236,7 +235,7 @@ async def _async_main() -> None:
         binary=config.claude_code_bin,
         model=config.model,
         system_prompt_path=Path("prompts/system.md").resolve(),
-        project_prompt_path=Path(config.project_prompt_path).resolve(),
+        project_prompt_path=Path("prompts/project.md").resolve(),
         mcp_config_path=mcp_config_path,
         json_schema_path=schema_path,
         effort=config.effort,
@@ -351,7 +350,6 @@ async def _async_main() -> None:
         engine=None,
         chat_titles=chat_titles,
         rate_limiter=rate_limiter,
-        tool_ctx=ctx,
     )
 
     async def _typing(chat_id: int) -> None:

@@ -111,11 +111,6 @@ class Config:
     #: created automatically by ``ensure_dirs``.
     #: Env var: ``PYCLAUDIR_DATA_DIR`` (default ``"./data"``).
     data_dir: Path
-    #: Extra prompt file added on top of ``prompts/system.md``. Use it
-    #: to add project-specific instructions without changing the main
-    #: system prompt.
-    #: Env var: ``PYCLAUDIR_PROJECT_PROMPT`` (default ``"prompts/project.md"``).
-    project_prompt_path: str
     #: When the daily self-reflection task runs. Standard cron format,
     #: in UTC time.
     #: Env var: ``PYCLAUDIR_SELF_REFLECTION_CRON`` (default ``"0 0 * * *"``,
@@ -243,10 +238,6 @@ class Config:
             effort=_required("PYCLAUDIR_EFFORT"),
             claude_code_bin=_env("CLAUDE_CODE_BIN", "claude") or "claude",
             data_dir=Path(_env("PYCLAUDIR_DATA_DIR", "./data") or "./data").resolve(),
-            project_prompt_path=(
-                _env("PYCLAUDIR_PROJECT_PROMPT", "prompts/project.md")
-                or "prompts/project.md"
-            ),
             self_reflection_cron=(
                 _env("PYCLAUDIR_SELF_REFLECTION_CRON", "0 0 * * *") or "0 0 * * *"
             ),  
@@ -284,7 +275,6 @@ class Config:
             claude_code_bin="claude",
             data_dir=data_dir.resolve(),
             self_reflection_cron="0 0 * * *",
-            project_prompt_path="prompts/project.md",
             debounce_ms=1000,
             rate_limit_per_min=20,
             enable_subagents=False,

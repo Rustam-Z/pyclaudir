@@ -246,15 +246,14 @@ their decision directly.
 
 For each approved item (promote or refined-promote):
 
-1. Call `read_instructions("project")` — required by the read-before-
-   write rail on `append_instructions`. Skip this only if you've
-   already read project.md earlier in the same turn.
-2. Call `append_instructions("project", <rule text>)`. The rule text
-   should be a self-contained sentence or short paragraph the model
-   can follow without additional context. Prepend with a `\n- ` so it
-   appends cleanly under whatever section it lands in, or wrap it in
-   its own `## Learned rules` section if that section doesn't exist
-   yet (check first in the read).
+1. Optionally call `read_instructions()` first to see how project.md
+   is currently structured — useful for picking the right section to
+   append into.
+2. Call `append_instructions(<rule text>)`. The rule text should be a
+   self-contained sentence or short paragraph the model can follow
+   without additional context. Prepend with a `\n- ` so it appends
+   cleanly under whatever section it lands in, or wrap it in its own
+   `## Learned rules` section if that section doesn't exist yet.
 3. Update the corresponding `[pending]` marker in
    `data/memories/self/learnings.md` to `[promoted]` (or `[refined]`
    if the owner dictated narrower wording).
@@ -336,9 +335,9 @@ Then `stop`.
 
 ## Failure handling
 
-- **`append_instructions` returns "permission denied"** — something is
-  off with the owner-DM gate. Abort without touching markers. Post a
-  note to the owner describing the failure.
+- **`append_instructions` returns an error** (size cap, file missing,
+  etc.) — abort without touching markers and post a note to the owner
+  describing the failure.
 - **`write_memory` fails** (size cap, read-before-write) — abort that
   item only. Mark it with `[error]` so next run doesn't re-pick it up
   until the operator looks.
@@ -353,8 +352,6 @@ Then `stop`.
 - Do NOT skip the audit log. The `<date>.md` file is the evidence.
 - Do NOT promote more than one rule per `append_instructions` call.
   One rule, one append, one backup. Small diffs are easier to revert.
-- Do NOT touch `prompts/system.md` via this skill. v1 only promotes
-  to `project.md`. Hard boundaries in `system.md` stay operator-only.
 - Do NOT re-generate scenarios if you already have an audit log for
   the same lesson from a prior run — unless the rule's wording has
   changed or the owner explicitly asks for a re-test.
