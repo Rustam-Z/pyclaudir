@@ -6,8 +6,12 @@ services:
     volumes:
       # Persistent data: SQLite, memories, access.json, session_id, cc_logs
       - ./data:/app/data
-      # Project-specific system prompt (operator-managed)
-      - ./prompts/project.md:/app/prompts/project.md:ro
+      # Prompt files. Mounted as a directory (not a single-file mount)
+      # so the bot's `append_instructions` tool can rename(2)-replace
+      # project.md atomically — single-file bind mounts return EBUSY
+      # on rename. Writable so the bot can update project.md;
+      # system.md is git-tracked, and no tool targets it.
+      - ./prompts:/app/prompts
       # Skill playbooks — bind-mounted read-only so edits are live without
       # a rebuild. The image also has a copy baked in (Dockerfile), this
       # overlays it.

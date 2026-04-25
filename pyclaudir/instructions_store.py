@@ -13,6 +13,7 @@ backup before mutate.
 
 from __future__ import annotations
 
+import errno
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -60,9 +61,20 @@ class InstructionsStore:
                 f"append would exceed cap: {new_size} bytes > {MAX_INSTRUCTION_BYTES}"
             )
         backup = self._backup()
+        new_bytes = existing + encoded
         tmp = self._path.with_suffix(self._path.suffix + ".tmp")
-        tmp.write_bytes(existing + encoded)
-        tmp.replace(self._path)
+        tmp.write_bytes(new_bytes)
+        try:
+            tmp.replace(self._path)
+        except OSError as exc:
+            # Docker bind-mounted single files can't be replaced via
+            # rename(2) — the destination is a mount point, kernel
+            # returns EBUSY. Fall back to in-place truncate+write; the
+            # backup taken above covers crash-mid-write recovery.
+            if exc.errno != errno.EBUSY:
+                raise
+            self._path.write_bytes(new_bytes)
+            tmp.unlink(missing_ok=True)
         return new_size, backup
 
     def _backup(self) -> Path:

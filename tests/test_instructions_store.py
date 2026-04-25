@@ -72,3 +72,26 @@ def test_append_is_atomic_leaves_no_tmp(tmp_path: Path) -> None:
     store.append("more\n")
     leftovers = list(store.path.parent.glob("*.tmp"))
     assert leftovers == []
+
+
+def test_append_falls_back_when_rename_hits_ebusy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Docker bind-mounted single files reject rename with EBUSY; the
+    store should fall back to in-place truncate+write."""
+    import errno
+
+    store = _make_store(tmp_path)
+    original_replace = Path.replace
+
+    def replace_raising_ebusy(self: Path, target: Path) -> Path:
+        if target == store.path:
+            raise OSError(errno.EBUSY, "Device or resource busy")
+        return original_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", replace_raising_ebusy)
+    new_size, backup = store.append("line 2\n")
+    assert backup is not None
+    assert store.path.read_text() == "PROJECT v1\nline 2\n"
+    # Tmp must be cleaned up by the fallback path.
+    assert list(store.path.parent.glob("*.tmp")) == []
