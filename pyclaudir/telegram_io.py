@@ -419,11 +419,10 @@ class TelegramDispatcher:
             log.error("dispatcher received message before engine was attached")
             return
 
-        # Typing is no longer primed here. The engine fires it (via
-        # ``notify_model_engaged``) only after the model emits its first
-        # message-producing tool_use, so turns the model decides to ignore
-        # never show "Nodira is typing… [silence]". See the plan at
-        # ``~/.claude/plans/if-nodira-doesn-t-send-partitioned-castle.md``.
+        # Fire typing indicator NOW — before debounce + XML format + worker.send.
+        # Without this, the user waits silently for the whole hot path before
+        # Telegram renders "typing...". Fire-and-forget inside prime_typing.
+        self.engine.prime_typing(cm.chat_id)
         log.info(
             "hot-path stage=submit chat=%s msg=%s t_ms=%d",
             cm.chat_id, cm.message_id,

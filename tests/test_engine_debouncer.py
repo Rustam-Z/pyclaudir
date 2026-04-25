@@ -106,11 +106,9 @@ async def test_inject_used_when_processing() -> None:
 
 
 @pytest.mark.asyncio
-async def test_typing_indicator_fires_when_model_engages() -> None:
-    """Typing fires for every chat in the batch the moment the model
-    signals engagement (first message-producing tool_use). In production
-    the CC worker calls ``notify_model_engaged`` from its stdout
-    reader; here we call it directly to simulate that signal."""
+async def test_typing_indicator_fires_on_turn_start() -> None:
+    """The engine should call the typing_action callback for every chat
+    in the batch as soon as a turn begins."""
     worker = FakeWorker()
     typing_calls: list[int] = []
 
@@ -122,11 +120,7 @@ async def test_typing_indicator_fires_when_model_engages() -> None:
     try:
         await eng.submit(_msg("hi", mid=1))
         await asyncio.sleep(0.1)  # let debounce fire and turn start
-        # Pre-engagement: no typing yet (this is the new behavior).
-        assert typing_calls == []
-        # Model emits its first message-producing tool_use → typing fires.
-        eng.notify_model_engaged()
-        await asyncio.sleep(0.05)
+        # Typing fired at least once for chat -100
         assert -100 in typing_calls
     finally:
         await eng.stop()
@@ -149,9 +143,6 @@ async def test_typing_indicator_stops_when_turn_ends() -> None:
     try:
         await eng.submit(_msg("hi", mid=1))
         await asyncio.sleep(0.1)
-        # Simulate the model engaging so typing actually fires.
-        eng.notify_model_engaged()
-        await asyncio.sleep(0.05)
         initial = len(typing_calls)
         assert initial >= 1
 
@@ -176,8 +167,7 @@ async def test_typing_indicator_stops_when_turn_ends() -> None:
 
 @pytest.mark.asyncio
 async def test_typing_fires_for_every_chat_in_a_multi_chat_batch() -> None:
-    """If a single batch spans two chats, both get typing once the
-    model engages."""
+    """If a single batch spans two chats, both get typing."""
     worker = FakeWorker()
     typing_calls: list[int] = []
 
@@ -201,8 +191,6 @@ async def test_typing_fires_for_every_chat_in_a_multi_chat_batch() -> None:
         await eng.submit(m_a)
         await eng.submit(m_b)
         await asyncio.sleep(0.1)
-        eng.notify_model_engaged()
-        await asyncio.sleep(0.05)
         assert -100 in typing_calls
         assert -200 in typing_calls
     finally:
@@ -245,8 +233,6 @@ async def test_notify_chat_replied_stops_typing_after_min_visible_duration() -> 
     try:
         await eng.submit(_msg("hi", mid=1))
         await asyncio.sleep(0.1)
-        eng.notify_model_engaged()
-        await asyncio.sleep(0.05)
         assert len(typing_calls) >= 1
 
         # Send_message lands FAST (well under MIN_TYPING_VISIBLE_SECONDS)
@@ -286,8 +272,6 @@ async def test_notify_chat_replied_stops_immediately_when_already_visible_long_e
     await eng.start()
     try:
         await eng.submit(_msg("hi", mid=1))
-        await asyncio.sleep(0.05)
-        eng.notify_model_engaged()
         # Wait long enough that the min visible duration has passed
         await asyncio.sleep(MIN_TYPING_VISIBLE_SECONDS + 0.1)
         assert len(typing_calls) >= 1
@@ -328,8 +312,6 @@ async def test_notify_chat_replied_only_stops_the_named_chat() -> None:
         await eng.submit(m_a)
         await eng.submit(m_b)
         await asyncio.sleep(0.1)
-        eng.notify_model_engaged()
-        await asyncio.sleep(0.05)
         assert -100 in typing_calls
         assert -200 in typing_calls
 
@@ -367,8 +349,6 @@ async def test_typing_fires_on_two_consecutive_turns() -> None:
         # === turn 1 ===
         await eng.submit(_msg("first", mid=1))
         await asyncio.sleep(0.1)
-        eng.notify_model_engaged()
-        await asyncio.sleep(0.05)
         assert len(typing_calls) >= 1, "no typing on turn 1"
         turn1_calls = len(typing_calls)
 
@@ -391,8 +371,6 @@ async def test_typing_fires_on_two_consecutive_turns() -> None:
         # === turn 2 — the regression case ===
         await eng.submit(_msg("second", mid=2))
         await asyncio.sleep(0.1)
-        eng.notify_model_engaged()
-        await asyncio.sleep(0.05)
 
         # The new typing call MUST have fired
         turn2_new_calls = len(typing_calls) - turn1_calls
@@ -414,8 +392,6 @@ async def test_typing_fires_on_two_consecutive_turns() -> None:
         before_3 = len(typing_calls)
         await eng.submit(_msg("third", mid=3))
         await asyncio.sleep(0.1)
-        eng.notify_model_engaged()
-        await asyncio.sleep(0.05)
         assert len(typing_calls) - before_3 >= 1, "no typing on turn 3"
     finally:
         await eng.stop()
@@ -449,8 +425,6 @@ async def test_inject_after_notify_restarts_typing() -> None:
         # === turn 1 ===
         await eng.submit(_msg("first", mid=1))
         await asyncio.sleep(0.1)
-        eng.notify_model_engaged()
-        await asyncio.sleep(0.05)
         assert len(typing_calls) >= 1
         calls_after_initial = len(typing_calls)
 
@@ -482,115 +456,50 @@ async def test_inject_after_notify_restarts_typing() -> None:
         await eng.stop()
 
 
-# Removed: ``test_typing_completes_before_cc_send``. It enforced
-# typing-fires-before-worker.send to dodge a PTB connection-pool race.
-# That ordering no longer applies — typing now fires *after* worker.send,
-# specifically when the worker reports the model's first message-producing
-# tool_use. The race the test guarded against is gone.
-
-
 @pytest.mark.asyncio
-async def test_typing_does_not_fire_without_engagement() -> None:
-    """The headline UX fix: a turn that ends in StructuredOutput stop with
-    no message-producing tool_use must NEVER show typing. Otherwise the
-    user sees ``Nodira is typing… [silence]`` for messages the bot
-    decided to ignore (group peer chatter, m1470-style quote echoes).
+async def test_typing_completes_before_cc_send() -> None:
+    """The first typing call must complete BEFORE the user envelope reaches
+    the CC subprocess. Otherwise PTB's single connection pool can let the
+    later send_message HTTP POST race ahead of the typing POST, and the
+    user never sees typing because Telegram got the message first.
+
+    This is the deliberate trade we make: ~100-300ms of added latency once
+    per turn, in exchange for reliable typing visibility.
     """
-    from pyclaudir.cc_worker import TurnResult
-    from pyclaudir.models import ControlAction
-
     worker = FakeWorker()
-    typing_calls: list[int] = []
+    typing_completed = asyncio.Event()
+    send_called_at: list[float] = []
+    typing_completed_at: list[float] = []
 
-    async def fake_typing(chat_id: int) -> None:
-        typing_calls.append(chat_id)
+    import time
 
-    eng = Engine(worker, _CFG, debounce_ms=20, typing_action=fake_typing)
+    async def slow_typing(chat_id: int) -> None:
+        await asyncio.sleep(0.05)  # simulate 50ms HTTP round trip
+        typing_completed_at.append(time.monotonic())
+        typing_completed.set()
+
+    # Wrap the worker's send to record its timing
+    original_send = worker.send
+
+    async def timed_send(text: str) -> None:
+        send_called_at.append(time.monotonic())
+        await original_send(text)
+
+    worker.send = timed_send  # type: ignore[method-assign]
+
+    eng = Engine(worker, _CFG, debounce_ms=20, typing_action=slow_typing)
     await eng.start()
     try:
         await eng.submit(_msg("hi", mid=1))
-        await asyncio.sleep(0.1)  # debounce + turn kick
-
-        # Worker reports a clean stop with no tool_use blocks.
-        # Equivalent: model decided to stay silent.
-        worker.feed_result(TurnResult(
-            text_blocks=[],
-            control=ControlAction(action="stop", reason="no reply needed"),
-            dropped_text=False,
-        ))
-        await asyncio.sleep(0.1)
-
-        # Typing was NEVER fired.
-        assert typing_calls == [], (
-            f"typing fired without engagement signal: {typing_calls}"
+        await asyncio.wait_for(typing_completed.wait(), timeout=1.0)
+        await asyncio.sleep(0.05)
+        # Both should have happened
+        assert len(typing_completed_at) == 1
+        assert len(send_called_at) == 1
+        # Critical: typing finished BEFORE worker.send was called
+        assert typing_completed_at[0] <= send_called_at[0], (
+            f"worker.send fired before typing completed: "
+            f"typing={typing_completed_at[0]}, send={send_called_at[0]}"
         )
-        assert eng._typing_chats == set()
-        assert eng._typing_task is None or eng._typing_task.done()
-    finally:
-        await eng.stop()
-
-
-@pytest.mark.asyncio
-async def test_typing_fires_on_first_message_tool_use() -> None:
-    """The other half of the contract: when the model emits a
-    message-producing tool_use, ``notify_model_engaged`` is the engine
-    entry point that fires typing and starts the refresh loop.
-    Idempotent — a second call mid-turn is a no-op for already-firing
-    chats.
-    """
-    worker = FakeWorker()
-    typing_calls: list[int] = []
-
-    async def fake_typing(chat_id: int) -> None:
-        typing_calls.append(chat_id)
-
-    eng = Engine(worker, _CFG, debounce_ms=20, typing_action=fake_typing)
-    await eng.start()
-    try:
-        await eng.submit(_msg("hi", mid=1))
-        await asyncio.sleep(0.1)
-        # Pre-engagement: silent.
-        assert typing_calls == []
-        assert eng._typing_task is None or eng._typing_task.done()
-
-        # Model engages (worker would call this from its stdout reader).
-        eng.notify_model_engaged()
-        await asyncio.sleep(0.05)
-        assert -100 in typing_calls
-        assert -100 in eng._typing_chats
-        assert eng._typing_task is not None and not eng._typing_task.done()
-
-        # Idempotent — a second engaged signal in the same turn doesn't
-        # fire a duplicate typing call for an already-covered chat.
-        before = len(typing_calls)
-        eng.notify_model_engaged()
-        await asyncio.sleep(0.05)
-        # The refresh loop may have ticked once during the sleep, so
-        # we accept "no extra call beyond a refresh tick"; what we
-        # really care about is no *immediate* extra fire.
-        assert len(typing_calls) - before <= 1
-    finally:
-        await eng.stop()
-
-
-@pytest.mark.asyncio
-async def test_notify_model_engaged_no_active_chats_is_noop() -> None:
-    """If the engine isn't mid-turn, the worker shouldn't be calling
-    ``notify_model_engaged`` — but be defensive: it must not crash and
-    must not fire typing for whatever chat happened to be in
-    ``_typing_chats`` from a previous turn."""
-    worker = FakeWorker()
-    typing_calls: list[int] = []
-
-    async def fake_typing(chat_id: int) -> None:
-        typing_calls.append(chat_id)
-
-    eng = Engine(worker, _CFG, debounce_ms=20, typing_action=fake_typing)
-    await eng.start()
-    try:
-        # No submit, no active chats.
-        eng.notify_model_engaged()
-        await asyncio.sleep(0.05)
-        assert typing_calls == []
     finally:
         await eng.stop()
