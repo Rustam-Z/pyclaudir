@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import signal
 import tempfile
 from datetime import datetime, timezone
@@ -68,10 +67,6 @@ def _setup_logging() -> None:
     logging.getLogger("mcp.server.streamable_http_manager").setLevel(logging.WARNING)
 
 
-#: Cron expression for the daily self-reflection reminder.
-#: 17:00 UTC = 22:00 in Asia/Tashkent (UTC+5). Change the ENV var
-#: ``PYCLAUDIR_SELF_REFLECTION_CRON`` to override without editing code.
-_DEFAULT_SELF_REFLECTION_CRON = "0 17 * * *"
 _SELF_REFLECTION_KEY = "self-reflection-default"
 
 
@@ -94,9 +89,7 @@ async def _seed_default_reminders(db, config) -> None:
         )
         return
 
-    cron_expr = os.environ.get(
-        "PYCLAUDIR_SELF_REFLECTION_CRON", _DEFAULT_SELF_REFLECTION_CRON
-    )
+    cron_expr = config.self_reflection_cron
     # Compute the first trigger time from the cron expression if croniter
     # is available; otherwise default to "now" so the reminder loop will
     # pick it up immediately.
@@ -196,39 +189,37 @@ async def _async_main() -> None:
     # External MCP servers alongside our local one. The community
     # mcp-atlassian server (sooperset/mcp-atlassian) runs locally via
     # stdio and talks directly to the Jira REST API.
-    jira_url = os.environ.get("JIRA_URL", "")
-    jira_username = os.environ.get("JIRA_USERNAME", "")
-    jira_token = os.environ.get("JIRA_API_TOKEN", "")
     extra_mcp: dict = {}
-    if jira_url and jira_username and jira_token:
+    if config.jira_url and config.jira_username and config.jira_api_token:
         extra_mcp["mcp-atlassian"] = {
             "type": "stdio",
             "command": "mcp-atlassian",
             "args": [],
             "env": {
-                "JIRA_URL": jira_url,
-                "JIRA_USERNAME": jira_username,
-                "JIRA_API_TOKEN": jira_token,
+                "JIRA_URL": config.jira_url,
+                "JIRA_USERNAME": config.jira_username,
+                "JIRA_API_TOKEN": config.jira_api_token,
             },
         }
-        log.info("mcp-atlassian configured (jira=%s, user=%s)", jira_url, jira_username)
+        log.info(
+            "mcp-atlassian configured (jira=%s, user=%s)",
+            config.jira_url, config.jira_username,
+        )
     else:
         log.info("mcp-atlassian skipped (JIRA_URL / JIRA_USERNAME / JIRA_API_TOKEN not set)")
 
     # GitLab via @zereight/mcp-gitlab (read-only + MR comments).
-    gitlab_url = os.environ.get("GITLAB_URL", "")
-    gitlab_token = os.environ.get("GITLAB_TOKEN", "")
-    if gitlab_url and gitlab_token:
+    if config.gitlab_url and config.gitlab_token:
         extra_mcp["mcp-gitlab"] = {
             "type": "stdio",
             "command": "npx",
             "args": ["-y", "@zereight/mcp-gitlab"],
             "env": {
-                "GITLAB_PERSONAL_ACCESS_TOKEN": gitlab_token,
-                "GITLAB_API_URL": gitlab_url.rstrip("/") + "/api/v4",
+                "GITLAB_PERSONAL_ACCESS_TOKEN": config.gitlab_token,
+                "GITLAB_API_URL": config.gitlab_url.rstrip("/") + "/api/v4",
             },
         }
-        log.info("mcp-gitlab configured (url=%s)", gitlab_url)
+        log.info("mcp-gitlab configured (url=%s)", config.gitlab_url)
     else:
         log.info("mcp-gitlab skipped (GITLAB_URL / GITLAB_TOKEN not set)")
 
@@ -245,9 +236,7 @@ async def _async_main() -> None:
         binary=config.claude_code_bin,
         model=config.model,
         system_prompt_path=Path("prompts/system.md").resolve(),
-        project_prompt_path=Path(
-            os.environ.get("PYCLAUDIR_PROJECT_PROMPT", "prompts/project.md")
-        ).resolve(),
+        project_prompt_path=Path(config.project_prompt_path).resolve(),
         mcp_config_path=mcp_config_path,
         json_schema_path=schema_path,
         effort=config.effort,
@@ -347,7 +336,8 @@ async def _async_main() -> None:
     engine = None  # type: ignore[assignment]
 
     worker = CcWorker(
-        spec, heartbeat=ctx.heartbeat,
+        spec, config,
+        heartbeat=ctx.heartbeat,
         on_crash=_on_cc_crash, on_giveup=_on_cc_giveup,
     )
     await worker.start()
@@ -395,7 +385,7 @@ async def _async_main() -> None:
             log.warning("error notify failed for chat %s: %s", chat_id, exc)
 
     engine = Engine(
-        worker,
+        worker, config,
         debounce_ms=config.debounce_ms,
         db=db,
         typing_action=_typing,

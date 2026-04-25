@@ -1,20 +1,28 @@
 """Progress notification — tells users the bot is still working on long turns.
 
-Uses a shortened ``PYCLAUDIR_PROGRESS_NOTIFY_SECONDS`` so the tests run
-in tens of milliseconds, not a minute.
+Uses a shortened ``Engine._progress_notify_seconds`` (see
+``_short_progress_engine`` factory below) so the tests run in tens of
+milliseconds, not a minute. The knob normally flows from
+``Config.progress_notify_seconds`` (env var
+``PYCLAUDIR_PROGRESS_NOTIFY_SECONDS``).
 """
 
 from __future__ import annotations
 
 import asyncio
-import os
 from datetime import datetime, timezone
 
 import pytest
 
+from pathlib import Path
+
 from pyclaudir.cc_worker import TurnResult
+from pyclaudir.config import Config
 from pyclaudir.engine import Engine
 from pyclaudir.models import ChatMessage, ControlAction
+
+
+_CFG = Config.for_test(Path("/tmp"))
 
 
 def _msg(text: str, mid: int = 1, chat_id: int = -100) -> ChatMessage:
@@ -49,15 +57,22 @@ class FakeWorker:
         self._results.put_nowait(result)
 
 
-@pytest.fixture
-def short_progress_env():
-    os.environ["PYCLAUDIR_PROGRESS_NOTIFY_SECONDS"] = "0.05"
-    yield
-    del os.environ["PYCLAUDIR_PROGRESS_NOTIFY_SECONDS"]
+#: Tests pass this kwarg into ``Engine`` to shorten the progress
+#: watchdog timer. Equivalent to setting
+#: ``PYCLAUDIR_PROGRESS_NOTIFY_SECONDS=0.05`` but explicit at the
+#: construction site instead of mutating process-wide state.
+SHORT_PROGRESS = 0.05
+
+
+def _short_progress_engine(worker, **kwargs):
+    """Build an Engine with the progress watchdog shortened for tests."""
+    eng = Engine(worker, _CFG, debounce_ms=10, **kwargs)
+    eng._progress_notify_seconds = SHORT_PROGRESS
+    return eng
 
 
 @pytest.mark.asyncio
-async def test_progress_notification_fires_on_long_turn(short_progress_env) -> None:
+async def test_progress_notification_fires_on_long_turn() -> None:
     """Turn lasts longer than the progress threshold → user gets pinged."""
     worker = FakeWorker()
     notifications: list[tuple[int, str, int | None]] = []
@@ -67,7 +82,7 @@ async def test_progress_notification_fires_on_long_turn(short_progress_env) -> N
     ) -> None:
         notifications.append((chat_id, text, reply_to_message_id))
 
-    eng = Engine(worker, debounce_ms=10, error_notify=fake_error_notify)
+    eng = _short_progress_engine(worker, error_notify=fake_error_notify)
     await eng.start()
     try:
         await eng.submit(_msg("hello", mid=7, chat_id=-100))
@@ -92,9 +107,7 @@ async def test_progress_notification_fires_on_long_turn(short_progress_env) -> N
 
 
 @pytest.mark.asyncio
-async def test_progress_notification_suppressed_if_turn_finishes_fast(
-    short_progress_env,
-) -> None:
+async def test_progress_notification_suppressed_if_turn_finishes_fast() -> None:
     """Turn completes before the threshold → no progress notification."""
     worker = FakeWorker()
     notifications: list[tuple[int, str, int | None]] = []
@@ -104,7 +117,7 @@ async def test_progress_notification_suppressed_if_turn_finishes_fast(
     ) -> None:
         notifications.append((chat_id, text, reply_to_message_id))
 
-    eng = Engine(worker, debounce_ms=10, error_notify=fake_error_notify)
+    eng = _short_progress_engine(worker, error_notify=fake_error_notify)
     await eng.start()
     try:
         await eng.submit(_msg("hello", chat_id=-100))
@@ -122,9 +135,7 @@ async def test_progress_notification_suppressed_if_turn_finishes_fast(
 
 
 @pytest.mark.asyncio
-async def test_progress_notification_skips_replied_chats(
-    short_progress_env,
-) -> None:
+async def test_progress_notification_skips_replied_chats() -> None:
     """If a chat already saw a ``send_message`` reply this turn, skip it."""
     worker = FakeWorker()
     notifications: list[tuple[int, str, int | None]] = []
@@ -134,7 +145,7 @@ async def test_progress_notification_skips_replied_chats(
     ) -> None:
         notifications.append((chat_id, text, reply_to_message_id))
 
-    eng = Engine(worker, debounce_ms=10, error_notify=fake_error_notify)
+    eng = _short_progress_engine(worker, error_notify=fake_error_notify)
     await eng.start()
     try:
         await eng.submit(_msg("hi", chat_id=-100))
@@ -155,9 +166,7 @@ async def test_progress_notification_skips_replied_chats(
 
 
 @pytest.mark.asyncio
-async def test_progress_notification_threads_to_each_chats_own_trigger(
-    short_progress_env,
-) -> None:
+async def test_progress_notification_threads_to_each_chats_own_trigger() -> None:
     """Regression: when a turn batches messages from two chats, each
     unreplied chat must get a progress notice threaded to *its own*
     message_id. Previously we just sent to ``_active_chats`` with no
@@ -172,7 +181,7 @@ async def test_progress_notification_threads_to_each_chats_own_trigger(
     ) -> None:
         notifications.append((chat_id, text, reply_to_message_id))
 
-    eng = Engine(worker, debounce_ms=10, error_notify=fake_error_notify)
+    eng = _short_progress_engine(worker, error_notify=fake_error_notify)
     await eng.start()
     try:
         # Two inbound messages from two different chats coalesced by debounce.
@@ -200,9 +209,7 @@ async def test_progress_notification_threads_to_each_chats_own_trigger(
 
 
 @pytest.mark.asyncio
-async def test_progress_notification_no_reply_to_for_synthetic_reminder(
-    short_progress_env,
-) -> None:
+async def test_progress_notification_no_reply_to_for_synthetic_reminder() -> None:
     """Synthetic reminder messages have ``message_id=0``; we must not
     pass that as ``reply_to_message_id`` (Telegram would reject it).
     """
@@ -214,7 +221,7 @@ async def test_progress_notification_no_reply_to_for_synthetic_reminder(
     ) -> None:
         notifications.append((chat_id, text, reply_to_message_id))
 
-    eng = Engine(worker, debounce_ms=10, error_notify=fake_error_notify)
+    eng = _short_progress_engine(worker, error_notify=fake_error_notify)
     await eng.start()
     try:
         await eng.submit(_msg("<reminder>...</reminder>", mid=0, chat_id=-100))
@@ -233,7 +240,7 @@ async def test_progress_notification_no_reply_to_for_synthetic_reminder(
 
 
 @pytest.mark.asyncio
-async def test_progress_notification_per_turn_reset(short_progress_env) -> None:
+async def test_progress_notification_per_turn_reset() -> None:
     """``_replied_chats_this_turn`` is cleared between turns."""
     worker = FakeWorker()
     notifications: list[tuple[int, str, int | None]] = []
@@ -243,7 +250,7 @@ async def test_progress_notification_per_turn_reset(short_progress_env) -> None:
     ) -> None:
         notifications.append((chat_id, text, reply_to_message_id))
 
-    eng = Engine(worker, debounce_ms=10, error_notify=fake_error_notify)
+    eng = _short_progress_engine(worker, error_notify=fake_error_notify)
     await eng.start()
     try:
         # Turn 1: model replies, no progress notification.

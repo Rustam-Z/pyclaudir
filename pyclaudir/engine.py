@@ -23,6 +23,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Awaitable, Callable
 
 from .cc_failure_classifier import CcFailureClassification, classify_cc_failure
+from .config import Config
 from .db.messages import fetch_reply_chain
 from .models import ChatMessage
 
@@ -30,22 +31,10 @@ from .models import ChatMessage
 #: refresh slightly faster than that to avoid a visible gap.
 TYPING_REFRESH_SECONDS = 4.0
 
-#: If a turn hasn't produced a reply to a chat within this many seconds,
-#: send a "still working" message so the user knows the bot is alive.
-#: The typing indicator alone is too ambiguous on long turns. Fires at
-#: most once per chat per turn. Overridable via
-#: ``PYCLAUDIR_PROGRESS_NOTIFY_SECONDS``.
-PROGRESS_NOTIFY_SECONDS = 60.0
-
-#: How many consecutive ``dropped_text`` turns the engine will tolerate
-#: before giving up, notifying the user, and dropping the turn. Reuses
-#: the existing tool-error circuit-breaker threshold
-#: (:data:`CcWorker.TOOL_ERROR_MAX_COUNT`, default 3, overridable via
-#: ``PYCLAUDIR_TOOL_ERROR_MAX_COUNT``) so operators tune one knob, not
-#: two. Each drop means the model emitted text without calling
-#: ``send_message`` — without this cap a broken CC state (bad model
-#: name, missing API access, malformed structured output) loops forever
-#: with the user stuck staring at a typing indicator.
+# Failure-handling thresholds — progress-notify window and the dropped-
+# text retry cap — live on ``Config`` (see ``progress_notify_seconds`` /
+# ``tool_error_max_count``). The dropped-text cap reuses the tool-error
+# breaker threshold so operators tune one knob, not two.
 
 #: Telegram clients suppress very brief typing displays to avoid flicker —
 #: typing that's "live" for less than ~1 second often never visually
@@ -177,6 +166,7 @@ class Engine:
     def __init__(
         self,
         worker: "CcWorker",
+        config: Config,
         *,
         debounce_ms: int = 1000,
         db: "Database | None" = None,
@@ -186,6 +176,12 @@ class Engine:
         self._worker = worker
         self._debounce = debounce_ms / 1000.0
         self._db = db
+        # Cache hot-path knobs so the control loop and dropped-text
+        # handler don't dereference Config on every event. Tests can
+        # override (``eng._progress_notify_seconds = 0.05``) without
+        # rebuilding the Config.
+        self._tool_error_max_count: int = config.tool_error_max_count
+        self._progress_notify_seconds: float = config.progress_notify_seconds
         #: Optional callback that shows the "typing..." indicator in a
         #: Telegram chat. Wired by ``__main__.py`` to ``bot.send_chat_action``.
         self._typing_action = typing_action
@@ -232,9 +228,8 @@ class Engine:
         #: Reset on (a) a new user turn via ``_kick``, (b) any successful
         #: turn, and (c) after the cap is hit and the user has been
         #: notified — so their next follow-up message isn't pre-tainted
-        #: by a prior failure. Bounded by ``CcWorker.TOOL_ERROR_MAX_COUNT``
-        #: / ``PYCLAUDIR_TOOL_ERROR_MAX_COUNT`` — same knob the tool-error
-        #: circuit breaker uses.
+        #: by a prior failure. Bounded by ``Config.tool_error_max_count``
+        #: — same knob the tool-error circuit breaker uses.
         self._dropped_text_retries: int = 0
         self._stop = asyncio.Event()
 
@@ -591,28 +586,6 @@ class Engine:
             except Exception as exc:
                 log.warning("failed to send error notification to %s: %s", chat_id, exc)
 
-    @staticmethod
-    def _max_consecutive_failures() -> int:
-        """The shared ceiling on consecutive turn-level failures.
-
-        Used by both the tool-error circuit breaker (in :mod:`pyclaudir.cc_worker`)
-        and the dropped-text handler here. Reading the env var at call
-        time — rather than caching at import — keeps tests reproducible
-        when they monkeypatch the environment.
-        """
-        import os
-        from .cc_worker import CcWorker
-
-        try:
-            return int(
-                os.environ.get(
-                    "PYCLAUDIR_TOOL_ERROR_MAX_COUNT",
-                    CcWorker.TOOL_ERROR_MAX_COUNT,
-                )
-            )
-        except ValueError:
-            return CcWorker.TOOL_ERROR_MAX_COUNT
-
     async def _handle_dropped_text(self, result: "TurnResult") -> None:
         """Handle a turn that ended with text but no ``send_message`` call.
 
@@ -628,7 +601,7 @@ class Engine:
            block) is included so the user understands why.
         """
         self._dropped_text_retries += 1
-        max_retries = self._max_consecutive_failures()
+        max_retries = self._tool_error_max_count
 
         if self._dropped_text_retries < max_retries:
             # Recoverable — inject the corrective reminder and let the
@@ -746,18 +719,8 @@ class Engine:
                 # long-running turn (e.g. code review) queue in _pending
                 # and are dispatched only after this returns. See README
                 # "Known limitations — Single-turn blocking".
-                import os as _os
-                try:
-                    progress_delay = float(
-                        _os.environ.get(
-                            "PYCLAUDIR_PROGRESS_NOTIFY_SECONDS",
-                            PROGRESS_NOTIFY_SECONDS,
-                        )
-                    )
-                except ValueError:
-                    progress_delay = PROGRESS_NOTIFY_SECONDS
                 progress_task = asyncio.create_task(
-                    self._progress_notify_after(progress_delay),
+                    self._progress_notify_after(self._progress_notify_seconds),
                     name="pyclaudir-progress-notify",
                 )
                 try:

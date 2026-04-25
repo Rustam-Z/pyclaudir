@@ -1,19 +1,19 @@
 # pyclaudir
 
-Python harness for running a Telegram agent powered by a long-running
-Claude Code subprocess and a local MCP server.
+A Python program that runs a Telegram bot powered by Claude Code and a
+small local MCP server.
 
-`pyclaudir` is the Python distillation of the Rust *Claudir* architecture:
-the LLM lives inside a `claude --print --input-format stream-json` subprocess
-whose capabilities are pruned by `--allowedTools` / `--disallowedTools`.
-`Bash`, `Edit`, `Write`, `Read`, and `NotebookEdit` are hard-denied, so
-the agent can't execute shell commands, edit code, or read arbitrary
-files directly. Its primary surface is the tools in `pyclaudir/tools/`
-(exposed via a locally-hosted MCP server), plus `WebFetch` and
-`WebSearch`. `Agent` (subagent spawning) is available behind the
-`PYCLAUDIR_ENABLE_SUBAGENTS` flag, **off by default** — subagent turns
-burn a lot of tokens. See `pyclaudir/cc_worker.py` for the authoritative
-allow/deny lists.
+`pyclaudir` is the Python version of the Rust *Claudir* project. It runs
+Claude inside a long-lived `claude --print --input-format stream-json`
+process and limits what Claude can do with the `--allowedTools` and
+`--disallowedTools` flags. The dangerous built-in tools (`Bash`, `Edit`,
+`Write`, `Read`, `NotebookEdit`) are turned off, so the bot cannot run
+shell commands, edit your code, or read arbitrary files. Instead, the
+bot uses the small custom tools in `pyclaudir/tools/` (served by a local
+MCP server) plus `WebFetch` and `WebSearch`. The `Agent` tool (which
+lets Claude spawn helper agents) is off by default because helper agents
+use a lot of tokens; turn it on with `PYCLAUDIR_ENABLE_SUBAGENTS=true`.
+The full allow/deny list lives in `pyclaudir/cc_worker.py`.
 
 ## Quickstart
 
@@ -86,84 +86,99 @@ venv.
 
 ## Configuration
 
-All knobs live in environment variables (or `.env`):
+All settings come from environment variables (or a `.env` file). They
+are read once when the bot starts, in `pyclaudir/config.py`
+(`Config.from_env`). The rest of the code reads values from the
+`Config` object, never from `os.environ` directly. To add a new
+setting, add a field to `Config` instead of calling `os.environ.get`
+from somewhere else. Tests build a `Config.for_test(tmp_path)` and set
+values on it, so they don't depend on what's in your environment.
 
 | Variable | Required | Default | Notes |
 |---|---|---|---|
 | `TELEGRAM_BOT_TOKEN` | yes | — | from @BotFather |
 | `PYCLAUDIR_OWNER_ID` | yes | — | your numeric Telegram user id |
+| `PYCLAUDIR_MODEL` | yes | — | which Claude model to use (e.g. `claude-opus-4-6`); passed to `--model` |
+| `PYCLAUDIR_EFFORT` | yes | — | how hard Claude thinks; passed to `--effort` (one of `low`, `medium`, `high`, `max`) |
 | `PYCLAUDIR_DATA_DIR` | no | `./data` | SQLite, memories, access config, raw CC logs |
-| `PYCLAUDIR_MODEL` | no | `claude-opus-4-6` | passed to `--model` |
-| `PYCLAUDIR_EFFORT` | no | `high` | `--effort` flag: `low`, `medium`, `high`, `max` |
-| `PYCLAUDIR_DEBOUNCE_MS` | no | `0` | message coalescing window (0 = instant) |
-| `PYCLAUDIR_RATE_LIMIT_PER_MIN` | no | `20` | per-user inbound DM cap (owner exempt; groups not limited) |
-| `PYCLAUDIR_SELF_REFLECTION_CRON` | no | `0 17 * * *` | when the daily self-reflection skill fires (UTC cron). Default is 22:00 Tashkent. |
-| `PYCLAUDIR_LIVENESS_TIMEOUT_SECONDS` | no | `300` | wedge-detection threshold. If the CC subprocess is mid-turn with no activity for this long, it gets killed (supervisor respawns). |
-| `PYCLAUDIR_TOOL_ERROR_MAX_COUNT` | no | `3` | **Shared consecutive-failure cap** for two failure paths: (a) max `is_error=true` tool results in a single turn before the worker aborts the turn; (b) max consecutive turns ending with `dropped_text=True` (model emitted text without calling `send_message`) before the engine surfaces the CC diagnostic to the user. Prevents silent infinite loops when Claude is looping on a failing tool OR on a broken model-access / auth state. |
-| `PYCLAUDIR_TOOL_ERROR_WINDOW_SECONDS` | no | `30` | if a tool error arrives this many seconds or more after the first error of the turn, the breaker trips even below `MAX_COUNT`. |
-| `PYCLAUDIR_PROGRESS_NOTIFY_SECONDS` | no | `60` | if a turn hasn't sent a reply to a chat within this window, the harness posts "Still on it — one moment." as a Telegram **reply** to the user's triggering message. Suppressed for chats that already saw a reply this turn. |
-| `PYCLAUDIR_ENABLE_SUBAGENTS` | no | `false` | when `true`, the `Agent` tool is added to `--allowedTools` and the subagent docs are injected into the system prompt. When `false` (default), `Agent` is hard-denied and the docs are kept out entirely. Subagent turns are token-heavy — leave off unless you need them. |
-| `PYCLAUDIR_PROJECT_PROMPT` | no | `prompts/project.md` | path to project-specific prompt (concatenated after `system.md`) |
-| `CLAUDE_CODE_BIN` | no | `claude` | path to the CC CLI |
-| `JIRA_URL` | no | — | Jira site URL (enables mcp-atlassian) |
+| `CLAUDE_CODE_BIN` | no | `claude` | name or full path of the `claude` program |
+| `PYCLAUDIR_DEBOUNCE_MS` | no | `0` | wait this long after a message before sending it to Claude. Messages that arrive during the wait are bundled into one turn. `0` = send right away. |
+| `PYCLAUDIR_RATE_LIMIT_PER_MIN` | no | `20` | max DMs per minute from one user. The owner is not limited. Group chats are not limited. |
+| `PYCLAUDIR_SELF_REFLECTION_CRON` | no | `0 0 * * *` | when the daily self-reflection task runs (UTC cron). Default: midnight UTC. |
+| `PYCLAUDIR_LIVENESS_TIMEOUT_SECONDS` | no | `300` | if Claude is mid-turn and goes silent (no output, no tool activity) for this many seconds, the bot kills it and starts it again. |
+| `PYCLAUDIR_LIVENESS_POLL_SECONDS` | no | `30` | how often the watcher wakes up to check the timeout above. |
+| `PYCLAUDIR_TOOL_ERROR_MAX_COUNT` | no | `3` | how many tool errors trigger a stop. Used in two places: (a) failed tool calls in one turn — too many ends the turn; (b) turns where Claude wrote text but didn't call `send_message` — too many in a row makes the bot show the underlying error to the user. Stops the bot from looping forever on a broken tool or a broken model setup. |
+| `PYCLAUDIR_TOOL_ERROR_WINDOW_SECONDS` | no | `30` | if errors keep arriving for this many seconds after the first one in a turn, end the turn — even below the count above. |
+| `PYCLAUDIR_PROGRESS_NOTIFY_SECONDS` | no | `60` | if Claude hasn't sent anything to a chat after this many seconds, the bot posts "Still on it — one moment." as a reply to the user's original message. Skipped for chats that already got a reply this turn. |
+| `PYCLAUDIR_CRASH_BACKOFF_BASE` | no | `2` | seconds to wait before the first restart after Claude crashes. Doubles after each crash, up to `CRASH_BACKOFF_CAP`. |
+| `PYCLAUDIR_CRASH_BACKOFF_CAP` | no | `64` | maximum wait between restarts. Once the wait reaches this, it stops growing. |
+| `PYCLAUDIR_CRASH_LIMIT` | no | `10` | how many crashes within `CRASH_WINDOW_SECONDS` count as "too many". When reached, the bot tells the owner and active chats, then exits — and something outside (systemd, docker) is expected to restart the whole bot. |
+| `PYCLAUDIR_CRASH_WINDOW_SECONDS` | no | `600` | the time window used for `CRASH_LIMIT`. Only crashes from the last X seconds are counted. |
+| `PYCLAUDIR_ENABLE_SUBAGENTS` | no | `false` | when `true`, the `Agent` tool is allowed and Claude is told it exists. When `false` (default), the tool is blocked and Claude is not told about it. Helper agents use a lot of tokens, so leave off unless you really need them. |
+| `PYCLAUDIR_PROJECT_PROMPT` | no | `prompts/project.md` | extra prompt file added after `system.md` |
+| `JIRA_URL` | no | — | Jira site URL (turns on mcp-atlassian) |
 | `JIRA_USERNAME` | no | — | Jira username |
 | `JIRA_API_TOKEN` | no | — | Jira API token |
-| `GITLAB_URL` | no | — | GitLab instance URL (enables mcp-gitlab) |
+| `GITLAB_URL` | no | — | GitLab URL (turns on mcp-gitlab) |
 | `GITLAB_TOKEN` | no | — | GitLab personal access token |
 
-Group and DM access is managed via `data/access.json`, not env vars.
-See **Access control** below.
+Who can DM the bot or use it in groups is set in `data/access.json`,
+not in environment variables. See **Access control** below.
 
 ## How it works
 
-Four components run inside one Python process:
+Four parts run inside one Python process:
 
 ```
-Telegram dispatcher  →  Engine (debouncer/queue/inject)  →  CC worker  →  claude subprocess
-                                          │                                       │
-                                          ▼                                       ▼
-                                       SQLite                              MCP server (HTTP, localhost:0)
+Telegram listener  →  Engine (buffer + send/inject)  →  Claude worker  →  claude process
+                                  │                                              │
+                                  ▼                                              ▼
+                               SQLite                                   MCP server (HTTP, localhost:0)
 ```
 
-1. **Telegram dispatcher** (`pyclaudir/telegram_io.py`). PTB v21 with manual
-   lifecycle, polling. The handler does *only* two things: persist the
-   incoming message to SQLite, then enqueue it on the engine. Owner-only
-   `/kill`, `/health`, `/audit`, and the access commands short-circuit the engine.
-2. **Engine** (`pyclaudir/engine.py`). Owns the pending queue, the
-   1-second debounce timer, the processing flag, and the inject channel.
-   Coalesces bursts; if a message arrives while CC is mid-turn the engine
-   pushes it through `worker.inject()` so the running turn picks it up.
-   Detects "dropped text" (CC produced text without calling `send_message`)
-   and corrects by injecting an `<error>...</error>` block.
-3. **CC worker** (`pyclaudir/cc_worker.py`). Spawns and supervises the
-   `claude` subprocess. Reads stream-json events from stdout, captures
-   stderr for diagnostics, persists `session_id` so a restart resumes the
-   same conversation, and respawns on crash with exponential backoff
-   (2s → 64s, 10 crashes / 10 minutes = bail out).
-4. **MCP server** (`pyclaudir/mcp_server.py`). FastMCP bound to a random
-   port on `127.0.0.1`. Auto-discovers every `BaseTool` subclass in
-   `pyclaudir/tools/` and registers them. Writes a tiny JSON config file
-   pointing CC at the server via `--mcp-config`.
+1. **Telegram listener** (`pyclaudir/telegram_io.py`). Uses
+   python-telegram-bot v21 in polling mode. For each message it does
+   two things: save it to SQLite, then hand it to the engine.
+   Owner-only commands (`/kill`, `/health`, `/audit`, the access
+   commands) skip the engine and run directly.
+2. **Engine** (`pyclaudir/engine.py`). Holds the pending message buffer,
+   the debounce timer, the "currently busy" flag, and the inject path.
+   Bundles messages that arrive close together. If a new message comes
+   in while Claude is mid-reply, the engine sends it via
+   `worker.inject()` so the running turn picks it up. If a turn ends
+   with text but no `send_message` call (we call this "dropped text"),
+   the engine sends a corrective `<error>...</error>` block to nudge
+   Claude into using the tool.
+3. **Claude worker** (`pyclaudir/cc_worker.py`). Starts the `claude`
+   process and watches it. Reads stream-json events from stdout, saves
+   stderr for diagnostics, stores `session_id` so a restart can resume
+   the same conversation, and starts Claude again after a crash —
+   waiting longer each time (`CRASH_BACKOFF_BASE`=2s up to
+   `CRASH_BACKOFF_CAP`=64s, with a give-up after `CRASH_LIMIT`=10
+   crashes in `CRASH_WINDOW_SECONDS`=600s).
+4. **MCP server** (`pyclaudir/mcp_server.py`). A FastMCP server on a
+   random port on `127.0.0.1`. It finds every `BaseTool` subclass in
+   `pyclaudir/tools/` and registers it. It writes a small JSON config
+   file so Claude can connect via `--mcp-config`.
 
 ## Known limitations
 
-### Single-turn blocking
+### One turn at a time
 
-The engine processes **one CC turn at a time**. While the Claude subprocess
-is working on a long task (code review, multi-project GitLab search, complex
-Jira queries), the engine blocks on `worker.wait_for_result()`. Messages
-from other chats queue up in the pending buffer and are only dispatched
-after the current turn finishes.
+The engine handles **one Claude turn at a time**. While Claude is busy
+with a long task (a code review, a big GitLab search, a complex Jira
+query), the engine waits for it to finish. Messages from other chats
+sit in the buffer and only go through after the current turn ends.
 
-In practice this means a 3-minute code review for Chat A will delay
-responses to Chat B by up to 3 minutes. For single-user or low-traffic
-deployments this is fine. For high-traffic multi-chat setups, consider
-running separate pyclaudir instances per chat group.
+So a 3-minute code review for Chat A will delay replies to Chat B by
+up to 3 minutes. For one user or a small group, this is fine. For
+busy setups with many chats, run a separate pyclaudir for each chat
+group.
 
-The system prompt instructs the agent to send an immediate acknowledgment
-(e.g. "On it, reviewing now...") via `send_message` before starting long
-tasks, so users know their request was received even though the full
-response takes time.
+The system prompt tells the bot to send a quick "On it, reviewing
+now..." reply via `send_message` before it starts a long task, so
+users know the bot got their message even when the full reply takes
+time.
 
 ## Adding a new tool
 
@@ -259,26 +274,26 @@ A template is provided at `data/access.json.example`.
 
 ## Memory
 
-`data/memories/*.md` is the agent's working memory. It has four tools:
+`data/memories/*.md` is where the bot keeps its notes. It has four tools:
 
-- `list_memories` — see what files exist
-- `read_memory` — read a file (truncates at 64 KiB)
-- `write_memory` — create or overwrite a file (max 64 KiB per file)
-- `append_memory` — extend an existing file
+- `list_memories` — list the files
+- `read_memory` — read a file (cuts off at 64 KiB)
+- `write_memory` — create or overwrite a file (max 64 KiB)
+- `append_memory` — add text to an existing file
 
-Writes are guarded by a **read-before-write rule**: before overwriting or
-appending to a file that already exists, the agent must first read it in the
-same session. Brand-new files are exempt. The "read paths" set lives in
-the `MemoryStore` instance and resets on every restart, so a fresh process
-must re-read before mutating. This stops the agent from blindly destroying
-operator-curated notes whose contents it never observed.
+**Read before write.** To overwrite or append to a file that already
+exists, the bot has to read it first in the same session. Brand-new
+files are exempt. The list of "files I've read" is held in memory and
+clears every time the bot restarts, so a fresh start has to re-read
+before changing anything. This stops the bot from accidentally
+destroying notes you wrote but it never read.
 
-There is **no delete tool** by design. If the agent wants to "forget" something
-it has to overwrite the file. Actually removing files is an operator
-action — `rm data/memories/<file>` from the host.
+**No delete tool, on purpose.** If the bot wants to "forget" something,
+it has to overwrite the file. Actually deleting a file is up to you:
+`rm data/memories/<file>` on the host.
 
-You can also seed memory yourself by dropping markdown files into
-`data/memories/` while the agent is running. It'll discover them on the next
+You can also seed memory yourself by putting markdown files into
+`data/memories/` while the bot is running. It will see them on the next
 `list_memories` call.
 
 ### Learning — `self/learnings.md`
@@ -304,7 +319,7 @@ system prompt):
 ## Self-reflection skill
 
 A daily two-phase loop that drives self-improvement. Triggered by an
-auto-seeded recurring reminder (default 22:00 Tashkent / 17:00 UTC;
+auto-seeded recurring reminder (default midnight UTC every day;
 override with `PYCLAUDIR_SELF_REFLECTION_CRON`):
 
 - **Phase A — introspect.** Bot reads the last 24h of outbound
@@ -721,8 +736,9 @@ by code, not by hope, and tested in `tests/test_security_invariants.py`.
   user, and resets. Catches CC-native diagnostics (invalid model,
   auth failure, quota) that would otherwise loop silently.
 - **Crash-loop terminal notification.** When the crash budget
-  (`CRASH_LIMIT` = 10 crashes in `CRASH_WINDOW_SECONDS` = 10 min) is
-  exhausted, `CcWorker._supervise_loop` fires the `on_giveup`
+  (`Config.crash_limit` crashes in `Config.crash_window_seconds`,
+  defaults 10 / 600s) is exhausted, `CcWorker._supervise_loop` fires
+  the `on_giveup`
   callback *before* raising `CrashLoop` — so owner + any active
   chats get a clear "I'm shutting down, operator needs to
   intervene" message (classified where possible) instead of the

@@ -7,9 +7,15 @@ from datetime import datetime, timezone
 
 import pytest
 
+from pathlib import Path
+
 from pyclaudir.cc_worker import TurnResult
+from pyclaudir.config import Config
 from pyclaudir.engine import Engine
 from pyclaudir.models import ChatMessage, ControlAction
+
+
+_CFG = Config.for_test(Path("/tmp"))
 
 
 def _msg(text: str, mid: int) -> ChatMessage:
@@ -47,7 +53,7 @@ class FakeWorker:
 @pytest.mark.asyncio
 async def test_dropped_text_triggers_corrective_send() -> None:
     worker = FakeWorker()
-    eng = Engine(worker, debounce_ms=20)
+    eng = Engine(worker, _CFG, debounce_ms=20)
     await eng.start()
     try:
         # First inbound message → triggers a turn
@@ -79,12 +85,10 @@ async def test_dropped_text_retry_limit_notifies_user() -> None:
     the user sees what actually went wrong (e.g. a bad model name).
 
     Uses the *same* threshold as the tool-error circuit breaker
-    (``PYCLAUDIR_TOOL_ERROR_MAX_COUNT``, default 3) so operators tune one
-    knob for both failure modes.
+    (``Config.tool_error_max_count`` / ``PYCLAUDIR_TOOL_ERROR_MAX_COUNT``,
+    default 3) so operators tune one knob for both failure modes.
     """
-    from pyclaudir.cc_worker import CcWorker
-
-    max_retries = CcWorker.TOOL_ERROR_MAX_COUNT
+    max_retries = _CFG.tool_error_max_count
 
     worker = FakeWorker()
     notifications: list[tuple[int, str, int | None]] = []
@@ -92,7 +96,7 @@ async def test_dropped_text_retry_limit_notifies_user() -> None:
     async def capture_notify(chat_id: int, text: str, reply_to: int | None) -> None:
         notifications.append((chat_id, text, reply_to))
 
-    eng = Engine(worker, debounce_ms=20, error_notify=capture_notify)
+    eng = Engine(worker, _CFG, debounce_ms=20, error_notify=capture_notify)
     await eng.start()
     try:
         await eng.submit(_msg("hi", mid=1))
@@ -135,9 +139,7 @@ async def test_dropped_text_retry_limit_notifies_user() -> None:
 async def test_dropped_text_counter_resets_on_new_turn() -> None:
     """A successful turn (or a fresh user turn) must reset the drop
     counter so historical drops don't poison future turns."""
-    from pyclaudir.cc_worker import CcWorker
-
-    max_retries = CcWorker.TOOL_ERROR_MAX_COUNT
+    max_retries = _CFG.tool_error_max_count
     below_cap = max_retries - 1
 
     worker = FakeWorker()
@@ -146,7 +148,7 @@ async def test_dropped_text_counter_resets_on_new_turn() -> None:
     async def capture_notify(chat_id: int, text: str, reply_to: int | None) -> None:
         notifications.append((chat_id, text, reply_to))
 
-    eng = Engine(worker, debounce_ms=20, error_notify=capture_notify)
+    eng = Engine(worker, _CFG, debounce_ms=20, error_notify=capture_notify)
     await eng.start()
     try:
         await eng.submit(_msg("hi", mid=1))
@@ -186,7 +188,7 @@ async def test_dropped_text_counter_resets_on_new_turn() -> None:
 @pytest.mark.asyncio
 async def test_inject_drained_between_turns_when_pending() -> None:
     worker = FakeWorker()
-    eng = Engine(worker, debounce_ms=20)
+    eng = Engine(worker, _CFG, debounce_ms=20)
     await eng.start()
     try:
         await eng.submit(_msg("first", mid=1))

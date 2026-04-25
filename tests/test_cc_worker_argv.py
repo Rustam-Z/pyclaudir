@@ -19,6 +19,7 @@ from pyclaudir.cc_worker import (
     TurnResult,
     build_argv,
 )
+from pyclaudir.config import Config
 
 
 @pytest.fixture()
@@ -36,6 +37,11 @@ def spec(tmp_path: Path) -> CcSpawnSpec:
         mcp_config_path=mcp,
         json_schema_path=schema,
     )
+
+
+@pytest.fixture()
+def cfg(tmp_path: Path) -> Config:
+    return Config.for_test(tmp_path)
 
 
 def test_build_argv_includes_required_flags(spec: CcSpawnSpec) -> None:
@@ -108,8 +114,8 @@ def test_control_action_requires_reason_only_on_stop() -> None:
     ControlAction(action="heartbeat")
 
 
-def test_event_parser_handles_assistant_text(spec: CcSpawnSpec) -> None:
-    worker = CcWorker(spec)
+def test_event_parser_handles_assistant_text(spec: CcSpawnSpec, cfg: Config) -> None:
+    worker = CcWorker(spec, cfg)
     worker._current_turn = TurnResult()
     worker._handle_event({
         "type": "assistant",
@@ -118,14 +124,14 @@ def test_event_parser_handles_assistant_text(spec: CcSpawnSpec) -> None:
     assert worker._current_turn.text_blocks == ["hello"]
 
 
-def test_event_parser_captures_session_id(spec: CcSpawnSpec) -> None:
-    worker = CcWorker(spec)
+def test_event_parser_captures_session_id(spec: CcSpawnSpec, cfg: Config) -> None:
+    worker = CcWorker(spec, cfg)
     worker._handle_event({"type": "system", "subtype": "init", "session_id": "sid-1"})
     assert worker.session_id == "sid-1"
 
 
-def test_event_parser_completes_turn_with_control(spec: CcSpawnSpec) -> None:
-    worker = CcWorker(spec)
+def test_event_parser_completes_turn_with_control(spec: CcSpawnSpec, cfg: Config) -> None:
+    worker = CcWorker(spec, cfg)
     worker._current_turn = TurnResult()
     worker._handle_event({
         "type": "result",
@@ -138,8 +144,8 @@ def test_event_parser_completes_turn_with_control(spec: CcSpawnSpec) -> None:
     assert queued.dropped_text is False
 
 
-def test_event_parser_detects_dropped_text(spec: CcSpawnSpec) -> None:
-    worker = CcWorker(spec)
+def test_event_parser_detects_dropped_text(spec: CcSpawnSpec, cfg: Config) -> None:
+    worker = CcWorker(spec, cfg)
     worker._current_turn = TurnResult()
     worker._handle_event({
         "type": "assistant",
@@ -151,11 +157,11 @@ def test_event_parser_detects_dropped_text(spec: CcSpawnSpec) -> None:
     assert queued.control is None
 
 
-def test_event_parser_logs_tool_use(spec: CcSpawnSpec, caplog) -> None:
+def test_event_parser_logs_tool_use(spec: CcSpawnSpec, cfg: Config, caplog) -> None:
     import logging
 
     caplog.set_level(logging.INFO, logger="pyclaudir.cc")
-    worker = CcWorker(spec)
+    worker = CcWorker(spec, cfg)
     worker._current_turn = TurnResult()
     worker._handle_event({
         "type": "assistant",
@@ -174,11 +180,11 @@ def test_event_parser_logs_tool_use(spec: CcSpawnSpec, caplog) -> None:
     assert any("[CC.tool→]" in m and "send_message" in m for m in msgs)
 
 
-def test_event_parser_logs_tool_result(spec: CcSpawnSpec, caplog) -> None:
+def test_event_parser_logs_tool_result(spec: CcSpawnSpec, cfg: Config, caplog) -> None:
     import logging
 
     caplog.set_level(logging.INFO, logger="pyclaudir.cc")
-    worker = CcWorker(spec)
+    worker = CcWorker(spec, cfg)
     worker._current_turn = TurnResult()
     worker._handle_event({
         "type": "user",
@@ -197,11 +203,11 @@ def test_event_parser_logs_tool_result(spec: CcSpawnSpec, caplog) -> None:
     assert any("[CC.tool✓]" in m and "sent message_id=99" in m for m in msgs)
 
 
-def test_event_parser_logs_done_with_action(spec: CcSpawnSpec, caplog) -> None:
+def test_event_parser_logs_done_with_action(spec: CcSpawnSpec, cfg: Config, caplog) -> None:
     import logging
 
     caplog.set_level(logging.INFO, logger="pyclaudir.cc")
-    worker = CcWorker(spec)
+    worker = CcWorker(spec, cfg)
     worker._current_turn = TurnResult()
     worker._handle_event({
         "type": "result",
@@ -211,12 +217,12 @@ def test_event_parser_logs_done_with_action(spec: CcSpawnSpec, caplog) -> None:
     assert any("[CC.done]" in m and "action=stop" in m for m in msgs)
 
 
-def test_structured_output_parsed_from_tool_use(spec: CcSpawnSpec) -> None:
+def test_structured_output_parsed_from_tool_use(spec: CcSpawnSpec, cfg: Config) -> None:
     """Claudir confirmed: StructuredOutput arrives as a tool_use event,
     NOT in the result event's payload. This test pins the correct parsing
     path that was broken for the entire v1 release (always action=None).
     """
-    worker = CcWorker(spec)
+    worker = CcWorker(spec, cfg)
     worker._current_turn = TurnResult()
 
     # Step 1: the model calls StructuredOutput as a tool_use
@@ -267,8 +273,8 @@ def test_structured_output_parsed_from_tool_use(spec: CcSpawnSpec) -> None:
     assert queued.dropped_text is False
 
 
-def test_structured_output_sleep_action(spec: CcSpawnSpec) -> None:
-    worker = CcWorker(spec)
+def test_structured_output_sleep_action(spec: CcSpawnSpec, cfg: Config) -> None:
+    worker = CcWorker(spec, cfg)
     worker._current_turn = TurnResult()
     worker._handle_event({
         "type": "assistant",
@@ -292,7 +298,7 @@ def test_structured_output_sleep_action(spec: CcSpawnSpec) -> None:
     assert worker._current_turn.control.sleep_ms == 30000
 
 
-def test_on_giveup_fires_before_crashloop_raises(spec: CcSpawnSpec) -> None:
+def test_on_giveup_fires_before_crashloop_raises(spec: CcSpawnSpec, cfg: Config) -> None:
     """When the crash budget is exhausted the worker must fire
     ``on_giveup`` *before* raising :class:`CrashLoop`. Tests the contract
     directly by simulating the giveup branch of ``_supervise_loop``
@@ -308,17 +314,17 @@ def test_on_giveup_fires_before_crashloop_raises(spec: CcSpawnSpec) -> None:
     async def record_giveup(stderr_tail: list[str], count: int) -> None:
         calls.append((list(stderr_tail), count))
 
-    worker = CcWorker(spec, on_giveup=record_giveup)
+    worker = CcWorker(spec, cfg, on_giveup=record_giveup)
     worker._stderr_tail = ["unauthorized", "authentication failed"]
-    # Seed CRASH_LIMIT entries so the very next exit trips the ceiling.
+    # Seed `crash_limit` entries so the very next exit trips the ceiling.
     now = time.monotonic()
-    worker._crash_times = [now - i for i in range(CcWorker.CRASH_LIMIT - 1)]
+    worker._crash_times = [now - i for i in range(worker._crash_limit - 1)]
 
     async def run() -> None:
         # Reproduce the accounting + trip logic from _supervise_loop
         # without subprocess plumbing.
         worker._crash_times.append(now)
-        assert len(worker._crash_times) >= CcWorker.CRASH_LIMIT
+        assert len(worker._crash_times) >= worker._crash_limit
         if worker._on_giveup is not None:
             await worker._on_giveup(
                 list(worker._stderr_tail), len(worker._crash_times),
@@ -331,13 +337,13 @@ def test_on_giveup_fires_before_crashloop_raises(spec: CcSpawnSpec) -> None:
     assert len(calls) == 1
     stderr, count = calls[0]
     assert "unauthorized" in stderr
-    assert count == CcWorker.CRASH_LIMIT
+    assert count == worker._crash_limit
 
 
-def test_structured_output_with_text_blocks_is_not_dropped_text(spec: CcSpawnSpec) -> None:
+def test_structured_output_with_text_blocks_is_not_dropped_text(spec: CcSpawnSpec, cfg: Config) -> None:
     """If the model emits text AND calls StructuredOutput, dropped_text
     should be False because the turn ended cleanly with a control action."""
-    worker = CcWorker(spec)
+    worker = CcWorker(spec, cfg)
     worker._current_turn = TurnResult()
     # Model emits some thinking text
     worker._handle_event({

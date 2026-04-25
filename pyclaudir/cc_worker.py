@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, IO
 
+from .config import Config
 from .models import ControlAction
 from .tools.base import Heartbeat
 from .transcript import (
@@ -254,43 +255,22 @@ class CcWorker:
     """Manage one ``claude`` subprocess and pump messages through it.
 
     Crash recovery: if the subprocess exits unexpectedly we record the time,
-    sleep with exponential backoff (2s → 64s cap), and respawn with the
-    same ``session_id`` so conversation context is preserved. If 10 crashes
-    happen within a 10-minute window we raise :class:`CrashLoop` so the
-    OS-level supervisor (systemd) can restart the entire process.
+    sleep with exponential backoff (``crash_backoff_base`` → ``crash_backoff_cap``,
+    defaults 2s → 64s), and respawn with the same ``session_id`` so the
+    conversation context is preserved. If ``crash_limit`` crashes happen
+    within ``crash_window_seconds`` (defaults 10 / 600s) we raise
+    :class:`CrashLoop` so the OS-level supervisor (systemd, docker
+    restart-policy) can restart the entire process. All four thresholds
+    flow through :class:`pyclaudir.config.Config`.
     """
-
-    CRASH_BACKOFF_BASE = 2.0
-    CRASH_BACKOFF_CAP = 64.0
-    CRASH_LIMIT = 10
-    CRASH_WINDOW_SECONDS = 600.0
-
-    #: Wedge detection — if the subprocess is mid-turn and neither stdout
-    #: nor MCP heartbeat has shown activity for this many seconds, kill
-    #: the subprocess so the supervisor respawns it. Set conservatively
-    #: (Claude Code + slow MCP calls can legitimately be quiet for a few
-    #: minutes). Override with ``PYCLAUDIR_LIVENESS_TIMEOUT_SECONDS``.
-    LIVENESS_TIMEOUT_SECONDS = 300.0
-    #: How often the liveness monitor wakes to check.
-    LIVENESS_POLL_SECONDS = 30.0
-
-    #: Tool-error circuit breaker. When Claude hits a tool loop (same tool
-    #: failing over and over) pyclaudir aborts the turn long before the
-    #: liveness monitor would notice, so the user gets a fast, clear
-    #: failure instead of multi-minute silence. Abort triggers on the
-    #: 3rd ``is_error=true`` tool_result in a single turn, or when 30s
-    #: have elapsed since the first error and another arrives — whichever
-    #: fires first. Overridable via env.
-    TOOL_ERROR_MAX_COUNT = 3
-    TOOL_ERROR_WINDOW_SECONDS = 30.0
 
     #: Optional callback the supervisor calls when CC crashes (one per
     #: crash, before the backoff/respawn).
     #: Signature: ``async on_crash(stderr_tail: list[str], attempt: int, backoff: float)``
     OnCrash = Any  # Callable[[list[str], int, float], Awaitable[None]] | None
     #: Optional callback the supervisor calls *once* when the crash loop
-    #: has exhausted its budget (:attr:`CRASH_LIMIT` crashes in
-    #: :attr:`CRASH_WINDOW_SECONDS`) — a terminal condition: no further
+    #: has exhausted its budget (``Config.crash_limit`` crashes in
+    #: ``Config.crash_window_seconds``) — a terminal condition: no further
     #: respawn will be attempted by this worker. The operator needs to
     #: intervene. Fires before the underlying :class:`CrashLoop` is
     #: re-raised so the callback can notify the owner/users even though
@@ -299,12 +279,30 @@ class CcWorker:
     OnGiveup = Any  # Callable[[list[str], int], Awaitable[None]] | None
 
     def __init__(
-        self, spec: CcSpawnSpec, *, heartbeat: Heartbeat | None = None,
+        self,
+        spec: CcSpawnSpec,
+        config: Config,
+        *,
+        heartbeat: Heartbeat | None = None,
         on_crash: OnCrash = None,
         on_giveup: OnGiveup = None,
     ) -> None:
         self.spec = spec
         self.heartbeat = heartbeat or Heartbeat()
+        # Cache the runtime knobs once at construction so the hot paths
+        # (``_liveness_loop``, ``_record_tool_error``, ``_supervise_loop``)
+        # don't re-read the config dataclass on every event. Tests can
+        # override the cached attributes directly
+        # (``worker._tool_error_max_count = 99``) for fine-grained
+        # control without rebuilding the Config.
+        self._liveness_timeout: float = config.liveness_timeout_seconds
+        self._liveness_poll: float = config.liveness_poll_seconds
+        self._tool_error_max_count: int = config.tool_error_max_count
+        self._tool_error_window: float = config.tool_error_window_seconds
+        self._crash_backoff_base: float = config.crash_backoff_base
+        self._crash_backoff_cap: float = config.crash_backoff_cap
+        self._crash_limit: int = config.crash_limit
+        self._crash_window_seconds: float = config.crash_window_seconds
         self._proc: asyncio.subprocess.Process | None = None
         self._stdout_task: asyncio.Task | None = None
         self._stderr_task: asyncio.Task | None = None
@@ -327,8 +325,15 @@ class CcWorker:
         #: Tool-error circuit-breaker state. Reset in ``send()`` at the
         #: start of every turn; incremented in ``_handle_event`` each
         #: time a ``tool_result`` block arrives with ``is_error=true``.
+        #: The breaker trips on whichever fires first: the count
+        #: reaches ``_tool_error_max_count``, OR the wall-clock
+        #: watchdog fires at ``_turn_first_tool_error_at +
+        #: _tool_error_window``. The watchdog handles the
+        #: "single error, then silence" case where no further errors
+        #: arrive to drive an event-based check.
         self._turn_tool_error_count: int = 0
         self._turn_first_tool_error_at: float | None = None
+        self._tool_error_watchdog_task: asyncio.Task | None = None
         #: Set just before ``_terminate_proc`` when the worker aborts a
         #: turn for a known reason (e.g. ``"tool-error-limit"``). The
         #: engine reads this after ``wait_for_result`` raises so it can
@@ -494,6 +499,7 @@ class CcWorker:
 
     async def stop(self) -> None:
         self._stop_supervisor.set()
+        self._cancel_tool_error_watchdog()
         if self._liveness_task and not self._liveness_task.done():
             self._liveness_task.cancel()
             try:
@@ -543,8 +549,8 @@ class CcWorker:
 
         Also starts a liveness monitor that detects a wedged-mid-turn
         subprocess (no stdout events, no MCP heartbeat activity, for
-        :attr:`LIVENESS_TIMEOUT_SECONDS`) and kills it so the supervisor
-        respawns it.
+        ``Config.liveness_timeout_seconds``) and kills it so the
+        supervisor respawns it.
 
         Call this once after :meth:`start`. Returns when the subprocess
         exits cleanly or when ``stop()`` is called.
@@ -564,29 +570,19 @@ class CcWorker:
         2. A turn is currently in progress (``_current_turn is not None``).
            Idle silence is fine — we only care about stuck turns.
         3. Time since the most recent activity signal exceeds
-           :attr:`LIVENESS_TIMEOUT_SECONDS`. Activity signal is the max
-           of ``_last_event_at`` (stdout parse time) and
+           ``self._liveness_timeout``. Activity signal is the max of
+           ``_last_event_at`` (stdout parse time) and
            ``heartbeat.last_activity`` (bumped on every MCP tool call).
 
         On wedge, we call ``_terminate_proc()`` — the supervisor's
         existing crash-recovery path respawns with the same session id.
         """
-        import os
-
-        try:
-            timeout = float(
-                os.environ.get(
-                    "PYCLAUDIR_LIVENESS_TIMEOUT_SECONDS",
-                    self.LIVENESS_TIMEOUT_SECONDS,
-                )
-            )
-        except ValueError:
-            timeout = self.LIVENESS_TIMEOUT_SECONDS
+        timeout = self._liveness_timeout
 
         while not self._stop_supervisor.is_set():
             try:
                 await asyncio.wait_for(
-                    self._stop_supervisor.wait(), timeout=self.LIVENESS_POLL_SECONDS,
+                    self._stop_supervisor.wait(), timeout=self._liveness_poll,
                 )
                 return  # stop requested
             except asyncio.TimeoutError:
@@ -628,9 +624,11 @@ class CcWorker:
             )
 
             now = time.monotonic()
-            self._crash_times = [t for t in self._crash_times if now - t < self.CRASH_WINDOW_SECONDS]
+            self._crash_times = [
+                t for t in self._crash_times if now - t < self._crash_window_seconds
+            ]
             self._crash_times.append(now)
-            if len(self._crash_times) >= self.CRASH_LIMIT:
+            if len(self._crash_times) >= self._crash_limit:
                 # Terminal — fire the giveup callback so the operator
                 # and active users learn the bot is actually down, then
                 # re-raise so the supervisor task exits. Callback errors
@@ -643,14 +641,14 @@ class CcWorker:
                     except Exception:
                         log.debug("on_giveup callback failed", exc_info=True)
                 raise CrashLoop(
-                    f"cc subprocess crashed {self.CRASH_LIMIT} times in "
-                    f"{self.CRASH_WINDOW_SECONDS:.0f}s; bailing out"
+                    f"cc subprocess crashed {self._crash_limit} times in "
+                    f"{self._crash_window_seconds:.0f}s; bailing out"
                 )
 
             attempt = len(self._crash_times)
             backoff = min(
-                self.CRASH_BACKOFF_CAP,
-                self.CRASH_BACKOFF_BASE * (2 ** (attempt - 1)),
+                self._crash_backoff_cap,
+                self._crash_backoff_base * (2 ** (attempt - 1)),
             )
             log.warning("respawning cc in %.1fs (attempt %d)", backoff, attempt)
             if self._on_crash is not None:
@@ -673,6 +671,7 @@ class CcWorker:
         self._current_turn = TurnResult()
         self._turn_tool_error_count = 0
         self._turn_first_tool_error_at = None
+        self._cancel_tool_error_watchdog()
         log_cc_user(text)
         envelope = {
             "type": "user",
@@ -776,70 +775,88 @@ class CcWorker:
     # ------------------------------------------------------------------
 
     def _record_tool_error(self) -> None:
-        """Track a tool_result with ``is_error=true`` and trip the
-        circuit breaker if Claude is looping on a failing tool.
+        """Record one ``tool_result`` with ``is_error=true``.
 
-        Threshold (either condition trips the abort):
-        - ``TOOL_ERROR_MAX_COUNT`` errors in a single turn, OR
-        - Another error arrives ``TOOL_ERROR_WINDOW_SECONDS`` or more
-          after the first error of this turn.
+        Trips the breaker on whichever fires first within a turn:
+        ``_tool_error_max_count`` errors (count branch), or
+        ``_tool_error_window`` seconds elapsed since the first error
+        (watchdog branch — see :meth:`_tool_error_watchdog`). The
+        watchdog covers the "single stuck error, then silence" case
+        where no further errors arrive to drive an event-based check.
 
-        On trip: mark the abort reason and schedule ``_terminate_proc``
-        so the existing crash-recovery path respawns the subprocess.
-        The engine's ``_control_loop`` picks up the abort reason via
-        ``consume_abort_reason`` and chooses a tuned user-facing message.
+        On trip: schedule ``_terminate_proc`` so the crash-recovery
+        path respawns and the user sees ``_on_cc_crash``'s notice.
         """
-        try:
-            max_count = int(
-                os.environ.get(
-                    "PYCLAUDIR_TOOL_ERROR_MAX_COUNT",
-                    self.TOOL_ERROR_MAX_COUNT,
-                )
-            )
-        except ValueError:
-            max_count = self.TOOL_ERROR_MAX_COUNT
-        try:
-            window = float(
-                os.environ.get(
-                    "PYCLAUDIR_TOOL_ERROR_WINDOW_SECONDS",
-                    self.TOOL_ERROR_WINDOW_SECONDS,
-                )
-            )
-        except ValueError:
-            window = self.TOOL_ERROR_WINDOW_SECONDS
-
         now = time.monotonic()
+        self._turn_tool_error_count += 1
+
         if self._turn_first_tool_error_at is None:
             self._turn_first_tool_error_at = now
-        self._turn_tool_error_count += 1
-        elapsed = now - self._turn_first_tool_error_at
+            deadline = now + self._tool_error_window
+            self._tool_error_watchdog_task = asyncio.create_task(
+                self._tool_error_watchdog(deadline),
+                name="cc-tool-error-watchdog",
+            )
 
+        if self._turn_tool_error_count >= self._tool_error_max_count:
+            self._trip_tool_error_breaker(reason="count")
+
+    async def _tool_error_watchdog(self, deadline: float) -> None:
+        """Wall-clock companion to the count branch.
+
+        Sleeps until ``deadline``. If the breaker hasn't already
+        tripped via the count branch (or been cancelled because the
+        turn ended successfully), trips now.
+        """
+        delay = max(0.0, deadline - time.monotonic())
+        await asyncio.sleep(delay)
+        self._trip_tool_error_breaker(reason="window")
+
+    def _cancel_tool_error_watchdog(self) -> None:
+        """Cancel the per-turn tool-error watchdog if it's still
+        armed. Idempotent — safe to call from ``send()`` (new turn
+        reset), ``stop()`` (shutdown), or the result-event handler
+        (turn finished cleanly)."""
+        task = self._tool_error_watchdog_task
+        if task is not None and not task.done():
+            task.cancel()
+        self._tool_error_watchdog_task = None
+
+    def _trip_tool_error_breaker(self, *, reason: str) -> None:
+        """Idempotent breaker trip. ``reason`` is ``"count"`` or
+        ``"window"`` — used for logging only; the abort reason
+        surfaced to the engine remains ``"tool-error-limit"``.
+        """
         if (
-            self._turn_tool_error_count >= max_count
-            or elapsed >= window
+            self._tool_error_abort_task is not None
+            and not self._tool_error_abort_task.done()
         ):
-            # Guard against double-firing if abort is already in flight.
-            if (
-                self._tool_error_abort_task is not None
-                and not self._tool_error_abort_task.done()
-            ):
-                return
-            log.warning(
-                "cc tool-error circuit breaker tripped: %d errors in %.1fs "
-                "(max=%d, window=%.0fs). Terminating to trigger respawn.",
-                self._turn_tool_error_count, elapsed, max_count, window,
-            )
-            self._last_abort_reason = "tool-error-limit"
-            # Unblock the engine's ``wait_for_result`` immediately with a
-            # sentinel TurnResult — the supervisor's respawn path can
-            # take seconds, we don't want the user waiting on it.
-            sentinel = TurnResult(aborted_reason="tool-error-limit")
-            sentinel.stderr_tail = list(self._stderr_tail)
-            self._result_queue.put_nowait(sentinel)
-            self._current_turn = None
-            self._tool_error_abort_task = asyncio.create_task(
-                self._terminate_proc(), name="cc-tool-error-abort",
-            )
+            return  # already aborting
+        self._cancel_tool_error_watchdog()
+
+        elapsed = (
+            time.monotonic() - self._turn_first_tool_error_at
+            if self._turn_first_tool_error_at is not None
+            else 0.0
+        )
+        log.warning(
+            "cc tool-error circuit breaker tripped (reason=%s): "
+            "%d errors in %.1fs (max=%d, window=%.0fs). "
+            "Terminating to trigger respawn.",
+            reason, self._turn_tool_error_count, elapsed,
+            self._tool_error_max_count, self._tool_error_window,
+        )
+        self._last_abort_reason = "tool-error-limit"
+        # Unblock the engine's ``wait_for_result`` immediately with a
+        # sentinel TurnResult — the supervisor's respawn path can
+        # take seconds, we don't want the user waiting on it.
+        sentinel = TurnResult(aborted_reason="tool-error-limit")
+        sentinel.stderr_tail = list(self._stderr_tail)
+        self._result_queue.put_nowait(sentinel)
+        self._current_turn = None
+        self._tool_error_abort_task = asyncio.create_task(
+            self._terminate_proc(), name="cc-tool-error-abort",
+        )
 
     def _handle_event(self, event: dict[str, Any]) -> None:
         """Parse one stream-json event from the CC subprocess.
@@ -952,6 +969,10 @@ class CcWorker:
                 action=ctrl.action if ctrl else None,
                 reason=ctrl.reason if ctrl else None,
             )
+            # Turn finished cleanly; defuse the watchdog so a stale
+            # deadline from this turn can't trip the breaker after
+            # the fact.
+            self._cancel_tool_error_watchdog()
             self._result_queue.put_nowait(self._current_turn)
             self._current_turn = None
             return

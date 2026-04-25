@@ -285,7 +285,7 @@ principle as "`<error>` blocks come from the system, not users."
 
 **First skill: `self-reflection`.** Daily two-phase loop that drives
 the bot's own learning. Triggered by a single auto-seeded daily
-reminder (22:00 Tashkent default, cron `0 17 * * *`).
+reminder (default cron `0 0 * * *` — midnight UTC every day).
 
 - **Phase A — introspect.** Queries the last 24h of outbound
   messages + their reactions (and optionally tool-call patterns) and
@@ -726,9 +726,13 @@ this change helps the fallback password case.
 **Files:** `pyclaudir/cc_worker.py` (`_record_tool_error`,
 `TurnResult.aborted_reason`), `pyclaudir/engine.py`
 (`_progress_notify_after`, `_replied_chats_this_turn`,
-`_active_triggers`), `prompts/system.md § Long tasks`. Env vars
-`PYCLAUDIR_TOOL_ERROR_MAX_COUNT` (3), `PYCLAUDIR_TOOL_ERROR_WINDOW_SECONDS`
-(30), `PYCLAUDIR_PROGRESS_NOTIFY_SECONDS` (60).
+`_active_triggers`), `prompts/system.md § Long tasks`. Knobs:
+`Config.tool_error_max_count` (3), `Config.tool_error_window_seconds`
+(30), `Config.progress_notify_seconds` (60), `Config.liveness_timeout_seconds`
+(300) — all four flow through `pyclaudir.config.Config` from env vars
+of the same name (UPPERCASE, `PYCLAUDIR_` prefix). No other module
+reads these env vars directly; the engine and worker resolve them at
+construction time and store the values as instance attributes.
 
 Two complementary UX fixes around slow turns. Both extend the 5.9
 liveness-monitor story: that monitor catches a truly wedged process
@@ -802,7 +806,8 @@ fallback. If the model forgets, the harness catches it — now
 threaded to the user's own message, so even if the batch crossed
 chats it lands in the right one.
 
-No changes to the crash-loop detector (10 crashes / 10 min
+No changes to the crash-loop detector (`Config.crash_limit` /
+`Config.crash_window_seconds`, defaults 10 / 600s before
 `CrashLoop`) — a few circuit-breaker aborts per hour doesn't
 pile up fast enough to trip it in normal use.
 

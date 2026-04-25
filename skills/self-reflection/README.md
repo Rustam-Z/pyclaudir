@@ -17,8 +17,9 @@ Daily two-phase loop that drives the bot's own learning:
   owner-DM-gated `append_instructions` tool.
 
 Both phases run back-to-back in one invocation, triggered by a
-single auto-seeded recurring reminder (22:00 Tashkent / 17:00 UTC
-by default). The reminder is mandatory — attempts to cancel it are
+single auto-seeded recurring reminder (midnight UTC every day by
+default — `PYCLAUDIR_SELF_REFLECTION_CRON` overrides). The reminder
+is mandatory — attempts to cancel it are
 refused at the tool layer, and if it ever goes missing (manual SQL,
 DB corruption, etc.) the startup hook re-seeds it. Learning does
 not stop.

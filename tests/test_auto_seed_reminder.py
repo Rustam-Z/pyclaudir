@@ -44,7 +44,7 @@ async def test_first_startup_seeds_self_reflection(tmp_path: Path) -> None:
         assert r["chat_id"] == 42
         assert r["user_id"] == -1
         assert r["text"] == '<skill name="self-reflection">run</skill>'
-        assert r["cron_expr"] == "0 17 * * *"
+        assert r["cron_expr"] == "0 0 * * *"
         assert r["status"] == "pending"
     finally:
         await db.close()

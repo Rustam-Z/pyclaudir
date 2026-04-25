@@ -123,9 +123,15 @@ def test_heartbeat_advances_on_beat() -> None:
 
 
 def test_crash_backoff_math() -> None:
-    """Verify the backoff formula and 10-crashes-in-10-min cap."""
-    base = CcWorker.CRASH_BACKOFF_BASE
-    cap = CcWorker.CRASH_BACKOFF_CAP
+    """Verify the backoff formula and 10-crashes-in-10-min cap.
+
+    Reads the defaults from ``Config`` rather than the worker, since the
+    worker no longer carries class-level constants — Config is the
+    single source of truth for these knobs.
+    """
+    cfg = Config.for_test(Path("/tmp"))
+    base = cfg.crash_backoff_base
+    cap = cfg.crash_backoff_cap
     for attempt in range(1, 11):
         backoff = min(cap, base * (2 ** (attempt - 1)))
         assert backoff <= cap
@@ -133,5 +139,5 @@ def test_crash_backoff_math() -> None:
             assert backoff == base * (2 ** (attempt - 1))
         else:
             assert backoff == cap
-    assert CcWorker.CRASH_LIMIT == 10
-    assert CcWorker.CRASH_WINDOW_SECONDS == 600.0
+    assert cfg.crash_limit == 10
+    assert cfg.crash_window_seconds == 600.0

@@ -7,8 +7,17 @@ from datetime import datetime, timezone
 
 import pytest
 
+from pathlib import Path
+
+from pyclaudir.config import Config
 from pyclaudir.engine import Engine, format_messages_as_xml
 from pyclaudir.models import ChatMessage
+
+
+#: Test Config constant. Engine doesn't touch the filesystem (the worker
+#: does), so a placeholder ``data_dir`` is fine. Per-test knob overrides
+#: go on the engine instance (``eng._progress_notify_seconds = 0.05``).
+_CFG = Config.for_test(Path("/tmp"))
 
 
 def _msg(text: str, mid: int = 1) -> ChatMessage:
@@ -62,7 +71,7 @@ class FakeWorker:
 @pytest.mark.asyncio
 async def test_debouncer_coalesces_burst() -> None:
     worker = FakeWorker()
-    eng = Engine(worker, debounce_ms=50)
+    eng = Engine(worker, _CFG, debounce_ms=50)
     await eng.start()
     try:
         for i in range(5):
@@ -81,7 +90,7 @@ async def test_debouncer_coalesces_burst() -> None:
 @pytest.mark.asyncio
 async def test_inject_used_when_processing() -> None:
     worker = FakeWorker()
-    eng = Engine(worker, debounce_ms=50)
+    eng = Engine(worker, _CFG, debounce_ms=50)
     await eng.start()
     try:
         await eng.submit(_msg("first", mid=1))
@@ -106,7 +115,7 @@ async def test_typing_indicator_fires_on_turn_start() -> None:
     async def fake_typing(chat_id: int) -> None:
         typing_calls.append(chat_id)
 
-    eng = Engine(worker, debounce_ms=20, typing_action=fake_typing)
+    eng = Engine(worker, _CFG, debounce_ms=20, typing_action=fake_typing)
     await eng.start()
     try:
         await eng.submit(_msg("hi", mid=1))
@@ -129,7 +138,7 @@ async def test_typing_indicator_stops_when_turn_ends() -> None:
     async def fake_typing(chat_id: int) -> None:
         typing_calls.append(chat_id)
 
-    eng = Engine(worker, debounce_ms=20, typing_action=fake_typing)
+    eng = Engine(worker, _CFG, debounce_ms=20, typing_action=fake_typing)
     await eng.start()
     try:
         await eng.submit(_msg("hi", mid=1))
@@ -165,7 +174,7 @@ async def test_typing_fires_for_every_chat_in_a_multi_chat_batch() -> None:
     async def fake_typing(chat_id: int) -> None:
         typing_calls.append(chat_id)
 
-    eng = Engine(worker, debounce_ms=20, typing_action=fake_typing)
+    eng = Engine(worker, _CFG, debounce_ms=20, typing_action=fake_typing)
     await eng.start()
     try:
         # Two messages from different chats arrive within the debounce window
@@ -192,7 +201,7 @@ async def test_typing_fires_for_every_chat_in_a_multi_chat_batch() -> None:
 async def test_no_typing_action_is_safe() -> None:
     """Engine without typing_action should still work — old default."""
     worker = FakeWorker()
-    eng = Engine(worker, debounce_ms=20, typing_action=None)
+    eng = Engine(worker, _CFG, debounce_ms=20, typing_action=None)
     await eng.start()
     try:
         await eng.submit(_msg("hi", mid=1))
@@ -219,7 +228,7 @@ async def test_notify_chat_replied_stops_typing_after_min_visible_duration() -> 
     async def fake_typing(chat_id: int) -> None:
         typing_calls.append(chat_id)
 
-    eng = Engine(worker, debounce_ms=20, typing_action=fake_typing)
+    eng = Engine(worker, _CFG, debounce_ms=20, typing_action=fake_typing)
     await eng.start()
     try:
         await eng.submit(_msg("hi", mid=1))
@@ -259,7 +268,7 @@ async def test_notify_chat_replied_stops_immediately_when_already_visible_long_e
     async def fake_typing(chat_id: int) -> None:
         typing_calls.append(chat_id)
 
-    eng = Engine(worker, debounce_ms=20, typing_action=fake_typing)
+    eng = Engine(worker, _CFG, debounce_ms=20, typing_action=fake_typing)
     await eng.start()
     try:
         await eng.submit(_msg("hi", mid=1))
@@ -287,7 +296,7 @@ async def test_notify_chat_replied_only_stops_the_named_chat() -> None:
     async def fake_typing(chat_id: int) -> None:
         typing_calls.append(chat_id)
 
-    eng = Engine(worker, debounce_ms=20, typing_action=fake_typing)
+    eng = Engine(worker, _CFG, debounce_ms=20, typing_action=fake_typing)
     await eng.start()
     try:
         m_a = ChatMessage(
@@ -334,7 +343,7 @@ async def test_typing_fires_on_two_consecutive_turns() -> None:
     async def fake_typing(chat_id: int) -> None:
         typing_calls.append(chat_id)
 
-    eng = Engine(worker, debounce_ms=20, typing_action=fake_typing)
+    eng = Engine(worker, _CFG, debounce_ms=20, typing_action=fake_typing)
     await eng.start()
     try:
         # === turn 1 ===
@@ -410,7 +419,7 @@ async def test_inject_after_notify_restarts_typing() -> None:
     async def fake_typing(chat_id: int) -> None:
         typing_calls.append(chat_id)
 
-    eng = Engine(worker, debounce_ms=20, typing_action=fake_typing)
+    eng = Engine(worker, _CFG, debounce_ms=20, typing_action=fake_typing)
     await eng.start()
     try:
         # === turn 1 ===
@@ -478,7 +487,7 @@ async def test_typing_completes_before_cc_send() -> None:
 
     worker.send = timed_send  # type: ignore[method-assign]
 
-    eng = Engine(worker, debounce_ms=20, typing_action=slow_typing)
+    eng = Engine(worker, _CFG, debounce_ms=20, typing_action=slow_typing)
     await eng.start()
     try:
         await eng.submit(_msg("hi", mid=1))

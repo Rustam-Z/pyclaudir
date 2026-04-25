@@ -18,6 +18,7 @@ import pytest
 
 from pyclaudir.cc_schema import schema_json
 from pyclaudir.cc_worker import CcSpawnSpec, CcWorker, TurnResult
+from pyclaudir.config import Config
 
 
 def _spec(tmp_path: Path, *, with_logs: bool, session_id: str | None = None) -> CcSpawnSpec:
@@ -39,7 +40,7 @@ def _spec(tmp_path: Path, *, with_logs: bool, session_id: str | None = None) -> 
 
 
 def test_capture_disabled_is_noop(tmp_path: Path) -> None:
-    worker = CcWorker(_spec(tmp_path, with_logs=False))
+    worker = CcWorker(_spec(tmp_path, with_logs=False), Config.for_test(tmp_path))
     worker._open_raw_logs()
     assert worker._stream_log is None
     assert worker._stderr_log is None
@@ -50,7 +51,7 @@ def test_capture_disabled_is_noop(tmp_path: Path) -> None:
 
 
 def test_capture_pending_then_renamed_on_init(tmp_path: Path) -> None:
-    worker = CcWorker(_spec(tmp_path, with_logs=True))
+    worker = CcWorker(_spec(tmp_path, with_logs=True), Config.for_test(tmp_path))
     worker._open_raw_logs()
     assert worker._stream_log is not None
     assert worker._stream_log_path is not None
@@ -89,7 +90,10 @@ def test_capture_pending_then_renamed_on_init(tmp_path: Path) -> None:
 
 
 def test_capture_with_known_session_id_uses_final_name(tmp_path: Path) -> None:
-    worker = CcWorker(_spec(tmp_path, with_logs=True, session_id="resumed-sid"))
+    worker = CcWorker(
+        _spec(tmp_path, with_logs=True, session_id="resumed-sid"),
+        Config.for_test(tmp_path),
+    )
     worker._open_raw_logs()
     assert worker._stream_log_path is not None
     assert worker._stream_log_path.name == "resumed-sid.stream.jsonl"
@@ -101,7 +105,10 @@ def test_capture_with_known_session_id_uses_final_name(tmp_path: Path) -> None:
 
 def test_capture_preserves_malformed_lines(tmp_path: Path) -> None:
     """Even non-JSON garbage gets written — we capture before parsing."""
-    worker = CcWorker(_spec(tmp_path, with_logs=True, session_id="sid"))
+    worker = CcWorker(
+        _spec(tmp_path, with_logs=True, session_id="sid"),
+        Config.for_test(tmp_path),
+    )
     worker._open_raw_logs()
     worker._write_stream_line(b"this is not json\n")
     worker._write_stream_line(b'{"valid":true}\n')
@@ -114,12 +121,13 @@ def test_capture_preserves_malformed_lines(tmp_path: Path) -> None:
 def test_capture_appends_across_reopen(tmp_path: Path) -> None:
     """Two starts on the same session id append, not overwrite."""
     spec = _spec(tmp_path, with_logs=True, session_id="sticky")
-    w1 = CcWorker(spec)
+    cfg = Config.for_test(tmp_path)
+    w1 = CcWorker(spec, cfg)
     w1._open_raw_logs()
     w1._write_stream_line(b'{"first":true}\n')
     w1._close_raw_logs()
 
-    w2 = CcWorker(spec)
+    w2 = CcWorker(spec, cfg)
     w2._open_raw_logs()
     w2._write_stream_line(b'{"second":true}\n')
     w2._close_raw_logs()
@@ -134,15 +142,16 @@ def test_capture_appends_when_pending_renames_to_existing(tmp_path: Path) -> Non
     session id. The pending file from the new run should drop and we should
     keep appending to the existing one.
     """
+    cfg = Config.for_test(tmp_path)
     spec_a = _spec(tmp_path, with_logs=True, session_id="prev")
-    a = CcWorker(spec_a)
+    a = CcWorker(spec_a, cfg)
     a._open_raw_logs()
     a._write_stream_line(b'{"old":true}\n')
     a._close_raw_logs()
 
     # New worker doesn't know session id at start time
     spec_b = _spec(tmp_path, with_logs=True, session_id=None)
-    b = CcWorker(spec_b)
+    b = CcWorker(spec_b, cfg)
     b._open_raw_logs()
     pending_name = b._stream_log_path.name if b._stream_log_path else ""
     assert pending_name.startswith("pending-")
