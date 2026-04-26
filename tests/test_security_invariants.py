@@ -19,6 +19,7 @@ from pyclaudir.cc_worker import (
     CODE_TOOLS,
     DEFAULT_DISALLOWED_TOOLS,
     FORBIDDEN_FLAG,
+    GITHUB_TOOLS,
     GITLAB_TOOLS,
     JIRA_TOOLS,
     CcSpawnSpec,
@@ -93,6 +94,8 @@ def test_invariant_1_argv_default_locks_down_dangerous_tools(fake_spec: CcSpawnS
         assert jira not in allowed_value, f"{jira} leaked into default allowlist"
     for gitlab in GITLAB_TOOLS:
         assert gitlab not in allowed_value, f"{gitlab} leaked into default allowlist"
+    for github in GITHUB_TOOLS:
+        assert github not in allowed_value, f"{github} leaked into default allowlist"
     # No Confluence / JSM / Bitbucket / ProForma ever.
     for blocked in ("confluence", "Confluence", "Compass", "bitbucket",
                     "service_desk", "proforma"):
@@ -188,9 +191,25 @@ def test_invariant_1_argv_gitlab_enabled(fake_spec: CcSpawnSpec) -> None:
     allowed_value, _deny, _sp = _split_argv(argv)
 
     assert "mcp__mcp-gitlab" in allowed_value
-    # No Jira leak.
+    # No Jira / GitHub leak.
     for jira in JIRA_TOOLS:
         assert jira not in allowed_value
+    for github in GITHUB_TOOLS:
+        assert github not in allowed_value
+
+
+def test_invariant_1_argv_github_enabled(fake_spec: CcSpawnSpec) -> None:
+    """enable_github adds the mcp__github prefix to the allowlist."""
+    import dataclasses
+    spec_on = dataclasses.replace(fake_spec, enable_github=True)
+    argv = build_argv(spec_on)
+    allowed_value, _deny, _sp = _split_argv(argv)
+
+    assert "mcp__github" in allowed_value
+    # No Jira / GitLab leak.
+    for jira in JIRA_TOOLS:
+        assert jira not in allowed_value
+    assert "mcp__mcp-gitlab" not in allowed_value
 
 
 # ---------------------------------------------------------------------------

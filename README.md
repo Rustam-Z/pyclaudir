@@ -86,6 +86,7 @@ You need Python 3.11+ and the Claude Code CLI (`claude --version`).
 | Code editing | `Edit`, `Write`, `Read`, `NotebookEdit`, `Glob`, `Grep`, `LSP` | `PYCLAUDIR_ENABLE_CODE=true` |
 | Jira | 36 `mcp-atlassian` Jira tools | when `JIRA_*` env vars are set |
 | GitLab | `mcp__mcp-gitlab` (full GitLab MCP surface) | when `GITLAB_*` env vars are set |
+| GitHub | `mcp__github` (full GitHub MCP surface) | when `GITHUB_PERSONAL_ACCESS_TOKEN` is set |
 
 Per-tool descriptions: [docs/tools.md](docs/tools.md).
 
@@ -134,6 +135,7 @@ All settings come from environment variables (or `.env`). Full list in
 | `PYCLAUDIR_ENABLE_CODE` | no | off — `Edit` / `Write` / `Read` / `NotebookEdit` / `Glob` / `Grep` / `LSP` |
 | `JIRA_URL` + `JIRA_USERNAME` + `JIRA_API_TOKEN` | no | turn on Jira via [mcp-atlassian](https://github.com/sooperset/mcp-atlassian) |
 | `GITLAB_URL` + `GITLAB_TOKEN` | no | turn on GitLab via [@zereight/mcp-gitlab](https://www.npmjs.com/package/@zereight/mcp-gitlab) |
+| `GITHUB_PERSONAL_ACCESS_TOKEN` | no | turn on GitHub via [@modelcontextprotocol/server-github](https://www.npmjs.com/package/@modelcontextprotocol/server-github); set `GITHUB_HOST` for Enterprise |
 
 Access policy lives in `data/access.json` (hot-reloaded). DM policies:
 `owner_only` (default), `allowlist`, `open`. Group chats must be in

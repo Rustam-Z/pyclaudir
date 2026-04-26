@@ -145,6 +145,13 @@ GITLAB_TOOLS: tuple[str, ...] = (
     "mcp__mcp-gitlab",
 )
 
+#: GitHub tools from the official ``github-mcp-server``. Like mcp-gitlab
+#: it's a single-vendor server so a blanket prefix match is safe.
+#: Driven by the presence of ``GITHUB_PERSONAL_ACCESS_TOKEN`` in env.
+GITHUB_TOOLS: tuple[str, ...] = (
+    "mcp__github",
+)
+
 #: Tools unlocked when ``enable_bash`` is True.
 BASH_TOOLS: tuple[str, ...] = ("Bash", "PowerShell", "Monitor")
 
@@ -199,6 +206,10 @@ class CcSpawnSpec:
     #: ``--allowedTools``. Driven by the presence of ``GITLAB_URL`` +
     #: ``GITLAB_TOKEN`` in ``__main__``.
     enable_gitlab: bool = False
+    #: When True, the ``mcp__github`` prefix is added to
+    #: ``--allowedTools``. Driven by the presence of
+    #: ``GITHUB_PERSONAL_ACCESS_TOKEN`` in ``__main__``.
+    enable_github: bool = False
 
 
 @dataclass
@@ -278,6 +289,8 @@ def build_argv(spec: CcSpawnSpec) -> list[str]:
         allowed_extras.extend(JIRA_TOOLS)
     if spec.enable_gitlab:
         allowed_extras.extend(GITLAB_TOOLS)
+    if spec.enable_github:
+        allowed_extras.extend(GITHUB_TOOLS)
 
     allowed_tools = BASE_ALLOWED_TOOLS + tuple(allowed_extras)
     disallowed_tools = tuple(disallowed_extras)
@@ -440,6 +453,7 @@ class CcWorker:
                 ("code", self.spec.enable_code),
                 ("jira", self.spec.enable_jira),
                 ("gitlab", self.spec.enable_gitlab),
+                ("github", self.spec.enable_github),
                 ("subagents", self.spec.enable_subagents),
             ) if on
         ]

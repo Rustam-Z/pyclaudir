@@ -222,6 +222,28 @@ async def _async_main() -> None:
     else:
         log.info("mcp-gitlab skipped (GITLAB_URL / GITLAB_TOKEN not set)")
 
+    # GitHub via @modelcontextprotocol/server-github. Token-only by
+    # default (MCP server talks to github.com); set GITHUB_HOST in the
+    # operator's env for GitHub Enterprise.
+    if config.github_token:
+        github_env: dict[str, str] = {
+            "GITHUB_PERSONAL_ACCESS_TOKEN": config.github_token,
+        }
+        if config.github_host:
+            github_env["GITHUB_HOST"] = config.github_host
+        extra_mcp["github"] = {
+            "type": "stdio",
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-github"],
+            "env": github_env,
+        }
+        log.info(
+            "mcp-github configured (host=%s)",
+            config.github_host or "github.com",
+        )
+    else:
+        log.info("mcp-github skipped (GITHUB_PERSONAL_ACCESS_TOKEN not set)")
+
     mcp_config_path = mcp.write_mcp_config(tmpdir / "mcp.json", extra_servers=extra_mcp)
     log.info("mcp config written to %s", mcp_config_path)
 
@@ -239,6 +261,7 @@ async def _async_main() -> None:
         config.jira_url and config.jira_username and config.jira_api_token
     )
     enable_gitlab = bool(config.gitlab_url and config.gitlab_token)
+    enable_github = bool(config.github_token)
 
     spec = CcSpawnSpec(
         binary=config.claude_code_bin,
@@ -256,6 +279,7 @@ async def _async_main() -> None:
         enable_code=config.enable_code,
         enable_jira=enable_jira,
         enable_gitlab=enable_gitlab,
+        enable_github=enable_github,
     )
     from .cc_failure_classifier import classify_cc_failure
 

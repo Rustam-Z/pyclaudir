@@ -153,6 +153,54 @@ Jira server, mcp-gitlab is GitLab-only — the prefix match is safe.
 For the canonical GitLab tool list see upstream
 <https://github.com/zereight/mcp-gitlab>.
 
+### GitHub — derived from `GITHUB_PERSONAL_ACCESS_TOKEN`
+
+When the token is set, the `github` MCP server spawns (via `npx -y
+@modelcontextprotocol/server-github`) *and* the `mcp__github` prefix
+is added to `--allowedTools`. Single-vendor server, blanket prefix
+match is safe.
+
+GitHub.com is the default. For GitHub Enterprise, set `GITHUB_HOST`
+(e.g. `github.example.com`) and the spawn passes it through.
+
+**How to generate the token (fine-grained PAT — recommended):**
+
+1. Go to <https://github.com/settings/tokens?type=beta>.
+2. **Token name:** `pyclaudir` (or your bot's name).
+3. **Expiration:** 90 days (max for fine-grained). Set a calendar
+   reminder to rotate.
+4. **Resource owner:** your account, or the org if the bot acts on
+   org repos.
+5. **Repository access:** "Only select repositories" → pick exactly
+   the repos the bot should touch. Never "All repositories" unless
+   that's truly what you want.
+6. **Repository permissions** — grant only what the bot needs:
+   - `Contents` — Read & write (read code, push branches, commit)
+   - `Issues` — Read & write (file bug tickets from chat)
+   - `Pull requests` — Read & write (open PRs, comment)
+   - `Metadata` — Read (mandatory; auto-granted)
+   - `Actions` — Read & write (only if the bot should trigger or
+     read CI)
+   - Everything else: "No access"
+7. Click **Generate token**. Copy the `github_pat_...` string — you
+   won't see it again.
+8. Paste into `.env` as `GITHUB_PERSONAL_ACCESS_TOKEN=github_pat_...`
+   and restart: `docker compose up -d --force-recreate`.
+
+**Avoid classic PATs.** They grant scopes per-org with no per-repo
+limit, so a leaked classic token has a much bigger blast radius. The
+`?type=beta` URL above gets you the fine-grained kind.
+
+**GitHub Enterprise:** generate the PAT on your Enterprise instance
+and also set `GITHUB_HOST=github.your-company.com` in `.env`.
+
+**Swapping the MCP server.** If you'd rather use the official Go-based
+[`github/github-mcp-server`](https://github.com/github/github-mcp-server)
+instead of the npm package, swap the `command` / `args` block in
+`pyclaudir/__main__.py`'s GitHub MCP config — the rest of the
+plumbing (allowlist, env passthrough, the `enable_github` derivation
+from token presence) stays as-is.
+
 ---
 
 ## How to enable / disable

@@ -226,6 +226,14 @@ class Config:
     #: Env vars: ``GITLAB_URL`` / ``GITLAB_TOKEN``.
     gitlab_url: str
     gitlab_token: str
+    #: GitHub personal access token (used by the GitHub MCP server).
+    #: Empty turns GitHub off. GitHub.com is assumed.
+    #: Env var: ``GITHUB_PERSONAL_ACCESS_TOKEN``.
+    github_token: str
+    #: Optional GitHub Enterprise host (e.g. ``github.example.com``).
+    #: Empty for github.com. Passed through to the MCP server's spawn
+    #: environment. Env var: ``GITHUB_HOST``.
+    github_host: str
 
     # Derived paths
     db_path: Path = field(init=False)
@@ -272,6 +280,8 @@ class Config:
             jira_api_token=_env("JIRA_API_TOKEN", "") or "",
             gitlab_url=_env("GITLAB_URL", "") or "",
             gitlab_token=_env("GITLAB_TOKEN", "") or "",
+            github_token=_env("GITHUB_PERSONAL_ACCESS_TOKEN", "") or "",
+            github_host=_env("GITHUB_HOST", "") or "",
         )
 
     @classmethod
@@ -308,6 +318,8 @@ class Config:
             jira_api_token="",
             gitlab_url="",
             gitlab_token="",
+            github_token="",
+            github_host="",
         )
 
     def ensure_dirs(self) -> None:
