@@ -13,6 +13,7 @@ debugging, or auditing.
 - [Adding a new tool](#adding-a-new-tool)
 - [Access control](#access-control)
 - [Memory](#memory)
+- [Rendered visuals](#rendered-visuals)
 - [Self-reflection skill](#self-reflection-skill)
 - [Agent skills](#agent-skills)
 - [Reminders](#reminders)
@@ -230,12 +231,14 @@ A template is provided at `data/access.json.example`.
 
 ## Memory
 
-`data/memories/*.md` is where the bot keeps its notes. It has four tools:
+`data/memories/*.md` is where the bot keeps its notes. It has five tools:
 
 - `list_memories` — list the files
 - `read_memory` — read a file (cuts off at 64 KiB)
 - `write_memory` — create or overwrite a file (max 64 KiB)
 - `append_memory` — add text to an existing file
+- `send_memory_document` — send a memory file to a chat as a Telegram
+  document (path-locked to `data/memories/`, optional caption + reply-to)
 
 **Read before write.** To overwrite or append to a file that already
 exists, the bot has to read it first in the same session. Brand-new files
@@ -270,6 +273,29 @@ prompt):
 - **`**Proposed rule:**` line** accompanies every `[pending]` entry so
   the skill knows what rule text to consider. Without it, the skill asks
   the operator to re-file the entry.
+
+## Rendered visuals
+
+Two tools turn structured data into a Telegram photo:
+
+- `render_html(html, width?=800, height?=600, title?)` — runs the HTML
+  through headless Chromium (Playwright) with **all outbound network
+  blocked at the route layer**, takes a full-page PNG, saves it under
+  `data/renders/<utc-stamp>-<slug>-<rand>.png`, returns the relative
+  path. Inline any CSS/JS the page needs (Chart.js, D3, fonts) — the
+  browser can't fetch.
+- `send_photo(chat_id, path, caption?, reply_to_message_id?)` — sends
+  a file from `data/renders/` as an inline Telegram photo. Path-locked
+  to the renders root with the same hardening as `read_memory`.
+
+The agent's `render_html` calls follow the house style in
+[`skills/render-style/`](../skills/render-style/) — three skeletons
+(dashboard, timeline, architecture diagram) the agent reads via
+`read_skill render-style` before composing HTML. Tokens are dark-navy
+with semantic colors (green/blue/red/amber/purple/cyan/gray).
+
+Playwright + Chromium are pre-installed in the Docker image. For local
+runs: `uv sync && uv run playwright install chromium`.
 
 ## Self-reflection skill
 
@@ -806,14 +832,21 @@ pyclaudir/
 │   ├── project.md              # project-specific overlay (gitignored)
 │   └── project.md.example      # template for project.md
 ├── skills/                     # agent skills (playbooks, shipped)
-│   └── self-reflection/        # daily reflection loop; triggered via a reminder
-│       ├── SKILL.md            #   the playbook the bot reads + follows
-│       └── README.md           #   short operator-facing doc
+│   ├── README.md               #   directory index + skill-mode notes
+│   ├── self-reflection/        # invoked-mode: daily reflection loop
+│   │   ├── SKILL.md            #     playbook the bot reads + follows
+│   │   └── README.md
+│   └── render-style/           # reference-mode: render_html style guide
+│       ├── SKILL.md            #     tokens + 3 HTML skeletons
+│       └── README.md
 ├── data/                       # gitignored
 │   ├── pyclaudir.db            # SQLite (messages, users, tool_calls, ...)
 │   ├── access.json             # DM policy + allowed users/chats (hot-reloaded)
 │   ├── session_id              # CC session id for --resume
 │   ├── memories/               # the agent's working memory
+│   ├── attachments/            # inbound photos/docs the dispatcher saves
+│   ├── renders/                # outbound PNGs from render_html
+│   ├── prompt_backups/         # auto-backups before append_instructions writes
 │   └── cc_logs/                # raw CC stdout/stderr capture
 ├── scripts/
 │   ├── sync-memories.sh        # rsync helper for server ↔ local sync
@@ -829,7 +862,12 @@ pyclaudir/
 │   ├── cc_schema.py            # ControlAction JSON schema (flat — see §5.15)
 │   ├── cc_failure_classifier.py # CC stderr/text → user-facing message map
 │   ├── mcp_server.py           # FastMCP host + tool auto-discovery
-│   ├── memory_store.py         # path-hardened read-only file store
+│   ├── memory_store.py         # path-hardened markdown store
+│   ├── attachments_store.py    # path-hardened read of data/attachments/
+│   ├── render_store.py         # writable PNG store under data/renders/
+│   ├── instructions_store.py   # path-hardened read+append of project.md
+│   ├── skills_store.py         # path-hardened read of skills/
+│   ├── secrets_scrubber.py     # redacts tokens before persistence
 │   ├── rate_limiter.py
 │   ├── transcript.py           # [RX]/[TX]/[CC.*] log helpers
 │   ├── models.py
@@ -847,9 +885,14 @@ pyclaudir/
 │       ├── create_poll.py
 │       ├── stop_poll.py
 │       ├── read_attachment.py  # read a Telegram photo/doc by path under data/attachments/
+│       ├── send_memory_document.py # send a memory file as a Telegram document
+│       ├── render_html.py      # HTML → PNG via headless Chromium (network blocked)
+│       ├── send_photo.py       # send a render as an inline Telegram photo
 │       ├── memory.py           # list/read/write/append memory (read-before-write)
 │       ├── instructions.py     # read/append project.md (owner-only by prompt policy)
 │       ├── skills.py           # list/read agent skill playbooks under skills/
+│       ├── create_poll.py      # send poll / quiz
+│       ├── stop_poll.py
 │       ├── query_db.py
 │       └── reminder.py         # set/list/cancel reminders
 └── tests/

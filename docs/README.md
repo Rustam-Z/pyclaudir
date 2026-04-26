@@ -1,8 +1,6 @@
-# pyclaudir docs
+# docs/
 
-Index of what's in this folder. The top-level [README](../README.md) is
-the high-level intro; everything below is for people (and agents) who
-need to go deeper.
+The top-level [README](../README.md) is the high-level intro; everything below is for people (and agents) who need to go deeper.
 
 ## Files
 

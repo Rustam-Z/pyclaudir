@@ -141,7 +141,13 @@ The `data/` directory is created automatically on first run. It contains:
 - `data/pyclaudir.db` — SQLite database (messages, users, reminders,
   tool call logs) — starts fresh on new servers
 - `data/session_id` — Claude Code session ID for conversation continuity
+- `data/attachments/` — inbound photos/docs the dispatcher saved
+- `data/renders/` — outbound PNGs from `render_html`
 - `data/cc_logs/` — raw Claude Code subprocess logs
+
+Headless Chromium for `render_html` is pre-installed in the Docker
+image (`playwright install --with-deps chromium`) — no per-host
+provisioning step needed.
 
 **First deployment:** nothing to do — the bot creates everything.
 

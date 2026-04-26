@@ -164,33 +164,29 @@ Details: [docs/documentation.md](docs/documentation.md).
 
 ## Extending
 
-**Add a tool — one file, no other code changes:**
+Almost every axis of the bot is pluggable without touching the core:
 
-```python
-# pyclaudir/tools/echo.py
-from pydantic import BaseModel, Field
-from pyclaudir.tools.base import BaseTool, ToolResult
-
-
-class EchoArgs(BaseModel):
-    text: str = Field(description="What to echo back.")
-
-
-class EchoTool(BaseTool):
-    name = "echo"
-    description = "Echo a string back to the caller."
-    args_model = EchoArgs
-
-    async def run(self, args: EchoArgs) -> ToolResult:
-        return ToolResult(content=args.text)
-```
-
-Restart the bot. The tool is live.
-
-**Add a skill** — drop a playbook at `skills/<name>/SKILL.md`
-(see [Agent Skills spec](https://agentskills.io/specification)). The
-bot reads it on demand. The first one is `self-reflection`, a daily
-loop that proposes new rules from observed mistakes.
+- **Add a built-in tool.** Drop a `BaseTool` subclass into
+  [pyclaudir/tools/](pyclaudir/tools/) — one file, Pydantic args
+  model, async `run`. The local MCP server auto-discovers it on
+  restart. No registry edits, no wiring.
+- **Plug in an external MCP server.** Jira, GitLab, and GitHub are
+  already wired this way — flip an env var and the community MCP
+  server is spawned alongside ours and merged into the agent's tool
+  surface. Any stdio MCP server (Notion, Linear, Slack, Postgres,
+  Playwright, your own) drops in the same way. Pattern lives in
+  [pyclaudir/__main__.py](pyclaudir/__main__.py).
+- **Add a skill.** Drop a playbook at `skills/<name>/SKILL.md` (see
+  [Agent Skills spec](https://agentskills.io/specification)) and the
+  bot reads it on demand. Two ship today: `self-reflection` (daily
+  learning loop) and `render-style` (house style for `render_html`).
+- **Reshape the persona.** Name, voice, language, house rules,
+  default behaviours — all live in `prompts/project.md`. Edit and
+  restart; no code change.
+- **Run a fleet.** One process is one bot. Want a per-team bot,
+  per-project bot, work/personal split? Run multiple instances with
+  different `.env` files and `PYCLAUDIR_DATA_DIR` paths — they share
+  nothing.
 
 **Observability** — live tagged log (`[RX]` / `[TX]` / `[CC.tool→]`),
 session replay (`uv run python -m pyclaudir.scripts.trace --follow`),
@@ -229,7 +225,7 @@ Enforced in code:
 
 Issues and PRs welcome. Three rules before you start:
 
-- **Run the suite** — `uv run python -m pytest -q`. 312 tests today;
+- **Run the suite** — `uv run python -m pytest -q`. 342 tests today;
   keep them green.
 - **Persona-agnostic code.** Don't hardcode bot names, owner-specific
   strings, or chat ids in `pyclaudir/`. Persona lives in
@@ -253,7 +249,7 @@ MIT. See [LICENSE](LICENSE).
 pyclaudir/
 ├── prompts/        system.md (shipped) + project.md (yours)
 ├── skills/         operator-curated playbooks
-├── data/           gitignored — SQLite, memories, session id, CC logs
+├── data/           gitignored — SQLite, memories, attachments, renders, CC logs
 ├── scripts/        sync + maintenance helpers
 ├── pyclaudir/
 │   ├── __main__.py        entrypoint
