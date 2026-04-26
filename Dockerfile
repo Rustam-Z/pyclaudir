@@ -38,6 +38,11 @@ ENV PATH="/app/.venv/bin:$PATH"
 
 WORKDIR /app
 
+# Headless Chromium for the render_html tool. Playwright bundles its own
+# browser binary under /root/.cache/ms-playwright; --with-deps installs
+# the shared libs Chrome needs (atk, nss, libdrm, etc.).
+RUN /app/.venv/bin/playwright install --with-deps chromium
+
 # Copy application source, prompts, and skill playbooks
 COPY pyclaudir/ pyclaudir/
 COPY prompts/system.md prompts/system.md

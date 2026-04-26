@@ -19,6 +19,7 @@ dependencies = [
     "croniter>=2.0",
     "pyyaml>=6.0",
     "pypdf>=5.0",
+    "playwright>=1.40",
 ]
 
 [project.optional-dependencies]

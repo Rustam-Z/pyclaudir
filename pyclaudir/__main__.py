@@ -34,6 +34,7 @@ from .db.reminders import (
 )
 from .engine import Engine
 from .attachments_store import AttachmentStore
+from .render_store import RenderStore
 from .instructions_store import InstructionsStore
 from .mcp_server import McpServer
 from .memory_store import MemoryStore
@@ -159,6 +160,8 @@ async def _async_main() -> None:
     skills = SkillsStore(root=project_root / "skills")
     skills.ensure_root()
     attachments = AttachmentStore(config.attachments_dir)
+    renders = RenderStore(config.renders_dir)
+    renders.ensure_root()
 
     # Seed the default self-reflection reminder if the operator hasn't
     # already seen one (even a cancelled row counts — we respect prior
@@ -177,6 +180,7 @@ async def _async_main() -> None:
         instructions_store=instructions,
         skills_store=skills,
         attachment_store=attachments,
+        render_store=renders,
         chat_titles=chat_titles,
     )
 

@@ -247,6 +247,7 @@ class Config:
     cc_logs_dir: Path = field(init=False)
     access_path: Path = field(init=False)
     attachments_dir: Path = field(init=False)
+    renders_dir: Path = field(init=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "db_path", self.data_dir / "pyclaudir.db")
@@ -255,6 +256,7 @@ class Config:
         object.__setattr__(self, "cc_logs_dir", self.data_dir / "cc_logs")
         object.__setattr__(self, "access_path", self.data_dir / "access.json")
         object.__setattr__(self, "attachments_dir", self.data_dir / "attachments")
+        object.__setattr__(self, "renders_dir", self.data_dir / "renders")
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -336,3 +338,4 @@ class Config:
         self.memories_dir.mkdir(parents=True, exist_ok=True)
         self.cc_logs_dir.mkdir(parents=True, exist_ok=True)
         self.attachments_dir.mkdir(parents=True, exist_ok=True)
+        self.renders_dir.mkdir(parents=True, exist_ok=True)

@@ -24,6 +24,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..db.database import Database
     from ..instructions_store import InstructionsStore
     from ..memory_store import MemoryStore
+    from ..render_store import RenderStore
     from ..skills_store import SkillsStore
 
 
@@ -61,6 +62,7 @@ class ToolContext:
     instructions_store: "InstructionsStore | None" = None
     skills_store: "SkillsStore | None" = None
     attachment_store: "AttachmentStore | None" = None
+    render_store: "RenderStore | None" = None
     heartbeat: Heartbeat = field(default_factory=Heartbeat)
     #: chat_id → display name. Populated by the dispatcher on every inbound
     #: message so outbound transcript lines can show the chat's title.
