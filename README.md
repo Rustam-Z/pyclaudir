@@ -69,7 +69,7 @@ You need Python 3.11+ and the Claude Code CLI (`claude --version`).
 
 | Capability | Tools | On by default? |
 |---|---|---|
-| Telegram messaging | `send_message`, `reply_to_message`, `edit_message`, `delete_message`, `add_reaction` | yes |
+| Telegram messaging | `send_message`, `reply_to_message`, `edit_message`, `delete_message`, `add_reaction`, `create_poll`, `stop_poll` | yes |
 | Memory (markdown files in `data/memories/`) | `list_memories`, `read_memory`, `write_memory`, `append_memory` | yes |
 | Reminders (one-shot + cron) | `set_reminder`, `list_reminders`, `cancel_reminder` | yes |
 | Read its own message history | `query_db` (read-only SELECT, 100-row cap) | yes |

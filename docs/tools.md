@@ -27,6 +27,8 @@ server. Auto-discovered from `pyclaudir/tools/*.py` (each tool is a
 | `edit_message` | Edit one of the bot's previous messages. No push notification — good for in-progress updates on long tasks. |
 | `delete_message` | Delete a bot message. Use sparingly. |
 | `add_reaction` | React to a message with an emoji. Prefer over "ok"/"👍" replies in groups. |
+| `create_poll` | Send a poll. Supports regular/quiz, multi-answer, anonymity toggle, auto-close (`open_period` or `close_date`), and reply-to. |
+| `stop_poll` | Close a live poll early and return final tallies. |
 
 ### Memory (`data/memories/`)
 

@@ -844,6 +844,8 @@ pyclaudir/
 │       ├── edit_message.py
 │       ├── delete_message.py
 │       ├── add_reaction.py
+│       ├── create_poll.py
+│       ├── stop_poll.py
 │       ├── memory.py           # list/read/write/append memory (read-before-write)
 │       ├── instructions.py     # read/append project.md (owner-only by prompt policy)
 │       ├── skills.py           # list/read agent skill playbooks under skills/
