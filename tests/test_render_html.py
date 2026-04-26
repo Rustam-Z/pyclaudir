@@ -71,7 +71,7 @@ async def test_render_html_happy_path_mocked(
 ) -> None:
     captured: dict = {}
 
-    async def _fake_render(html: str, width: int, height: int, out_path: Path) -> None:
+    async def _fake_render(html: str, width: int, height: int, out_path: Path, **_kw) -> None:
         captured["html"] = html
         captured["width"] = width
         captured["height"] = height
@@ -102,7 +102,7 @@ async def test_render_html_passes_through_dimensions(
 ) -> None:
     seen: dict = {}
 
-    async def _fake(html, width, height, out_path):
+    async def _fake(html, width, height, out_path, **_kw):
         seen["width"] = width
         seen["height"] = height
         out_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"y" * 50)
@@ -143,7 +143,7 @@ async def test_render_html_handles_render_failure(
 async def test_render_html_handles_empty_output(
     store: RenderStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    async def _empty(html, width, height, out_path):
+    async def _empty(html, width, height, out_path, **_kw):
         out_path.write_bytes(b"")  # zero-byte file
 
     monkeypatch.setattr(render_html_mod, "_render_to_png", _empty)

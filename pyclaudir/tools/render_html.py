@@ -74,7 +74,15 @@ class RenderHtmlArgs(BaseModel):
     )
 
 
-async def _render_to_png(html: str, width: int, height: int, out_path: Path) -> None:
+async def _render_to_png(
+    html: str,
+    width: int,
+    height: int,
+    out_path: Path,
+    *,
+    allowed_hosts: tuple[str, ...] | None = None,
+    wait_until: str = "domcontentloaded",
+) -> None:
     """Drive playwright to render ``html`` → ``out_path``.
 
     Pulled out so tests can monkey-patch a fake without spinning up a
@@ -91,8 +99,19 @@ async def _render_to_png(html: str, width: int, height: int, out_path: Path) -> 
        task is cancelled — the ``finally`` still fires — and the
        ``async with async_playwright()`` __aexit__ tears down the driver
        subprocess, which kills any surviving children.
+
+    ``allowed_hosts`` is **internal** — not exposed via any tool arg.
+    Default ``None`` blocks all outbound traffic. ``render_latex`` passes
+    a narrow tuple (e.g. ``("cdn.jsdelivr.net",)``) so KaTeX can load.
+    Anything not in the list is still aborted; ``data:``/``about:`` URLs
+    are always allowed (they don't hit the network).
+
+    ``wait_until`` defaults to ``"domcontentloaded"`` for fully-inline
+    pages. Set to ``"networkidle"`` when external assets need to load
+    + run before screenshot (e.g. KaTeX rendering).
     """
     from playwright.async_api import async_playwright  # local import — heavy
+    from urllib.parse import urlparse
 
     async def _do() -> None:
         async with async_playwright() as p:
@@ -104,13 +123,25 @@ async def _render_to_png(html: str, width: int, height: int, out_path: Path) -> 
                 )
                 page = await ctx.new_page()
 
-                async def _abort(route):  # block ALL outbound traffic
-                    await route.abort()
+                async def _route(route):
+                    if allowed_hosts is None:
+                        await route.abort()
+                        return
+                    url = route.request.url
+                    scheme = url.split(":", 1)[0].lower()
+                    if scheme in ("data", "about", "blob"):
+                        await route.continue_()
+                        return
+                    host = urlparse(url).hostname or ""
+                    if host in allowed_hosts:
+                        await route.continue_()
+                    else:
+                        await route.abort()
 
-                await page.route("**/*", _abort)
+                await page.route("**/*", _route)
                 await page.set_content(
                     html,
-                    wait_until="domcontentloaded",
+                    wait_until=wait_until,
                     timeout=_RENDER_TIMEOUT_MS,
                 )
                 await page.screenshot(path=str(out_path), full_page=True)
@@ -158,13 +189,33 @@ class RenderHtmlTool(BaseTool):
     args_model = RenderHtmlArgs
 
     async def run(self, args: RenderHtmlArgs) -> ToolResult:
+        return await self._run(args)
+
+    async def _run(
+        self,
+        args: RenderHtmlArgs,
+        *,
+        allowed_hosts: tuple[str, ...] | None = None,
+        wait_until: str = "domcontentloaded",
+    ) -> ToolResult:
+        """Internal entry point — companion tools (``render_latex``) call
+        this directly to opt into a narrow CDN allow-list. Not exposed to
+        the agent via the public ``args_model``.
+        """
         store = self.ctx.render_store
         if store is None:
             return ToolResult(content="render store unavailable", is_error=True)
 
         out_path = store.allocate(args.title)
         try:
-            await _render_to_png(args.html, args.width, args.height, out_path)
+            await _render_to_png(
+                args.html,
+                args.width,
+                args.height,
+                out_path,
+                allowed_hosts=allowed_hosts,
+                wait_until=wait_until,
+            )
         except ImportError as exc:
             return ToolResult(
                 content=(

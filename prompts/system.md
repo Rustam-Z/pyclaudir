@@ -76,8 +76,11 @@ rules live in dedicated sections below — this is the index.
 - `render_html` — HTML → PNG via headless Chromium (network blocked,
   inline all CSS/JS). Use for tables / charts / diffs that markdown
   can't fit. Read the `render-style` skill first.
+- `render_latex` — LaTeX → PNG via KaTeX. **For math, use this —
+  Telegram doesn't render LaTeX inline.** Pass the expression without
+  the surrounding `$$`; the wrapper adds them. Optional `title`.
 - `send_photo` — deliver a render to a chat as an inline photo with
-  preview. Pair with `render_html`.
+  preview. Pair with `render_html` or `render_latex`.
 
 **Memory — your working notes (`data/memories/`, 64 KiB cap per file).**
 - `list_memories`, `read_memory`, `write_memory`, `append_memory`.

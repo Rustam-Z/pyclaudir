@@ -1,10 +1,9 @@
 # pyclaudir
 
-**Your personal AI agent. In telegram. With your rules.**
+**Run personal AI agent in Telegram. With your rules.**
 
-This is agent, dropped straight into your Telegram, running on your machine.
 It DMs you. Sits in your group chats. Takes notes in plain markdown files you actually own. Schedules reminders. 
-Reads back what you said last Tuesday. Name it, pick a voice, set a language — all in `prompts/project.md`. Configure it once. Ship it. It's yours.
+Name it, pick a voice, set a language — all in `prompts/project.md`. Configure it once. Ship it. It's yours.
 
 Out of the box it's clean: messaging in DM & group chats, memory, reminders & scheduled tasks, web access, security.
 Want shell access? Code editing? Subagents? GitLab? GitHub? Jira? One env var each. Off until you flip them. Full list in [docs/tools.md](docs/tools.md).
@@ -86,27 +85,27 @@ If you have Windows machine, then use docker compose.
 > reference, and the systems pyclaudir descends from. Start at
 > [docs/README.md](docs/README.md).
 
-## What's inside
+## What pyclaudir can do
 
-| Capability | Tools | On by default? |
-|---|---|---|
-| Telegram messaging | `send_message`, `reply_to_message`, `edit_message`, `delete_message`, `add_reaction`, `create_poll`, `stop_poll` | yes |
-| Inbound attachments (photos + documents) | `read_attachment` (path-scoped to `data/attachments/`) | yes |
-| Rendered visuals (tables, charts, diffs) | `render_html` (headless Chromium → PNG, network blocked), `send_photo` | yes |
-| Memory (markdown files in `data/memories/`) | `list_memories`, `read_memory`, `write_memory`, `append_memory`, `send_memory_document` | yes |
-| Reminders (one-shot + cron) | `set_reminder`, `list_reminders`, `cancel_reminder` | yes |
-| Read its own message history | `query_db` (read-only SELECT, 100-row cap) | yes |
-| Self-edit project prompt | `read_instructions`, `append_instructions` (owner-only) | yes |
-| Web | `WebFetch`, `WebSearch` (private/internal URLs refused) | yes |
-| Skills (operator-curated playbooks) | `list_skills`, `read_skill` | yes |
-| Subagents | `Agent` | `PYCLAUDIR_ENABLE_SUBAGENTS=true` |
-| Shell | `Bash`, `PowerShell`, `Monitor` | `PYCLAUDIR_ENABLE_BASH=true` |
-| Code editing | `Edit`, `Write`, `Read`, `NotebookEdit`, `Glob`, `Grep`, `LSP` | `PYCLAUDIR_ENABLE_CODE=true` |
-| Jira | 36 `mcp-atlassian` Jira tools | when `JIRA_*` env vars are set |
-| GitLab | `mcp__mcp-gitlab` (full GitLab MCP surface) | when `GITLAB_*` env vars are set |
-| GitHub | `mcp__github` (full GitHub MCP surface) | when `GITHUB_PERSONAL_ACCESS_TOKEN` is set |
+**communication:** send / reply / edit / delete text, emoji reactions, polls (regular + quiz, multi-answer, auto-close).
 
-Per-tool descriptions: [docs/tools.md](docs/tools.md).
+**media:** render HTML to PNG (tables, charts, diffs — Chart.js / D3 inline) and LaTeX to PNG (math via KaTeX), send back as inline photos. Read inbound photos (vision), text-like docs (md / txt / log / csv / json / yaml / code …), and PDFs (extracted text with `--- page N ---` markers).
+
+**memory:** persistent markdown files under `data/memories/` (list / read / write / append / send-as-document), 64 KiB per file, read-before-write rail, survives restarts. Per-user / per-group / journal layout.
+
+**search & history:** web search and web fetch (no internal / RFC1918 URLs). Read-only SQL SELECTs on the chat database (`messages`, `users`, `reminders`, ≤100 rows). Multi-hop reply-chain expansion.
+
+**scheduling:** one-shot + cron-recurring reminders. Auto-seeded daily self-reflection skill that promotes corrections into durable rules with owner approval.
+
+**self-edit:** append rules to `prompts/project.md` (owner-only); shipped `system.md` is git-tracked and not exposed.
+
+**skills:** read operator-curated playbooks under `skills/` — `render-style` (house style for renders), `self-reflection` (learning loop). Reference skills are read on initiative; invoked skills require a real `<reminder>` envelope.
+
+**opt-in:** shell (`Bash` / `PowerShell` / `Monitor`), code editing (`Edit` / `Write` / `Read` / `NotebookEdit` / `Glob` / `Grep` / `LSP`), subagents (`Agent`), and Jira / GitLab / GitHub MCP surfaces — each gated behind an env var, off by default.
+
+**what can't do:** generate images. Send voice messages, GIFs, animations, stickers. Read voice / video / video notes / stickers (they arrive empty — ask for a screenshot or description). Moderate (mute / ban / kick / unban / member lists). Make phone calls or watch videos.
+
+Per-tool descriptions and the env-var matrix for the opt-in groups: [docs/tools.md](docs/tools.md).
 
 ## Architecture
 
