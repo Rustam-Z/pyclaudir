@@ -10,7 +10,8 @@ Out of the box it's clean: messaging in DM & group chats, memory, reminders & sc
 Want shell access? Code editing? Subagents? GitLab? GitHub? Jira? One env var each. Off until you flip them. Full list in [docs/tools.md](docs/tools.md).
 
 **One process, no magic.** A Python harness that listens Telegram, runs `claude` as a subprocess (via a local MCP server), and posts the reply back. 
-You control who can talk to it (just you, or group chats, or anyone). Runs on your laptop or any small VPS.
+You control who can talk to it (just you, or group chats, or anyone). 
+Runs on your laptop or any small VPS. Can be used with your existing Claude Code subscription.
 
 ## What you can do with it
 
