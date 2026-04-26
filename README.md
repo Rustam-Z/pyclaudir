@@ -1,22 +1,16 @@
 # pyclaudir
 
-**Your Telegram. Your Claude. Your rules.**
+**Your personal AI agent. In telegram. With your rules.**
 
-Claude, dropped straight into your Telegram, running on your machine.
-It DMs you. Sits in your group chats. Takes notes in plain markdown
-files you actually own. Schedules reminders. Reads back what you said
-last Tuesday. Name it, pick a voice, set a language — all in
-`prompts/project.md`. Configure it once. Ship it. It's yours.
+This is agent, dropped straight into your Telegram, running on your machine.
+It DMs you. Sits in your group chats. Takes notes in plain markdown files you actually own. Schedules reminders. 
+Reads back what you said last Tuesday. Name it, pick a voice, set a language — all in `prompts/project.md`. Configure it once. Ship it. It's yours.
 
-Out of the box it's clean: messaging, notes, reminders, read-only web.
-Want shell access? Code editing? Subagents? Jira? GitLab? GitHub? One
-env var each. Off until you flip them. Full list in
-[docs/tools.md](docs/tools.md).
+Out of the box it's clean: messaging in DM & group chats, memory, reminders & scheduled tasks, web access, security.
+Want shell access? Code editing? Subagents? GitLab? GitHub? Jira? One env var each. Off until you flip them. Full list in [docs/tools.md](docs/tools.md).
 
-**One process, no magic.** A Python program listens to Telegram, runs
-`claude` as a subprocess (via a local MCP server), and posts the reply
-back. You control who can talk to it (just you, or group chats, or anyone).
-Runs on your laptop or any small VPS.
+**One process, no magic.** A Python harness that listens Telegram, runs `claude` as a subprocess (via a local MCP server), and posts the reply back. 
+You control who can talk to it (just you, or group chats, or anyone). Runs on your laptop or any small VPS.
 
 ## What you can do with it
 
