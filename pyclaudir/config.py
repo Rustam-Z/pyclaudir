@@ -132,6 +132,18 @@ class Config:
     #: tool is blocked and Claude isn't even told it exists.
     #: Env var: ``PYCLAUDIR_ENABLE_SUBAGENTS`` (default ``False``).
     enable_subagents: bool
+    #: Whether Claude can run shell commands (Bash, PowerShell, Monitor).
+    #: Off by default. Off means those tools are added to
+    #: ``--disallowedTools`` so Claude refuses to invoke them. See
+    #: ``docs/tools.md``.
+    #: Env var: ``PYCLAUDIR_ENABLE_BASH`` (default ``False``).
+    enable_bash: bool
+    #: Whether Claude can read or write files outside ``data/memories/``
+    #: (Edit, Write, Read, NotebookEdit, Glob, Grep, LSP). Off by default.
+    #: Useful for forks that want the bot to do code work; the regular
+    #: Telegram-assistant deployment leaves this off.
+    #: Env var: ``PYCLAUDIR_ENABLE_CODE`` (default ``False``).
+    enable_code: bool
 
     # ----- Settings for handling tool errors -----
     # These control what happens when Claude is still running fine, but
@@ -244,6 +256,8 @@ class Config:
             debounce_ms=_int("PYCLAUDIR_DEBOUNCE_MS", 0),
             rate_limit_per_min=_int("PYCLAUDIR_RATE_LIMIT_PER_MIN", 20),
             enable_subagents=_bool("PYCLAUDIR_ENABLE_SUBAGENTS", False),
+            enable_bash=_bool("PYCLAUDIR_ENABLE_BASH", False),
+            enable_code=_bool("PYCLAUDIR_ENABLE_CODE", False),
             tool_error_max_count=_int("PYCLAUDIR_TOOL_ERROR_MAX_COUNT", 3),
             tool_error_window_seconds=_float("PYCLAUDIR_TOOL_ERROR_WINDOW_SECONDS", 30.0),
             progress_notify_seconds=_float("PYCLAUDIR_PROGRESS_NOTIFY_SECONDS", 60.0),
@@ -278,6 +292,8 @@ class Config:
             debounce_ms=1000,
             rate_limit_per_min=20,
             enable_subagents=False,
+            enable_bash=False,
+            enable_code=False,
             tool_error_max_count=3,
             tool_error_window_seconds=30.0,
             progress_notify_seconds=60.0,

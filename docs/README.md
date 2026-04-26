@@ -16,6 +16,13 @@ the four monitoring windows (live log, session replay, raw wire log,
 SQLite), the complete security model with all invariants, the manual
 end-to-end checklist, and the full repo layout.
 
+### [tools.md](tools.md)
+The canonical list of every tool available to the bot — always-on
+pyclaudir built-ins, always-on Claude Code built-ins (web), and opt-in
+groups (subagents, shell, code, Jira, GitLab) with the env var that
+flips each. Read this when deciding what capabilities to grant for
+your deployment.
+
 ### [deployment.md](deployment.md)
 Step-by-step guide for deploying pyclaudir to a VPS (Hetzner,
 DigitalOcean, Contabo…) using Docker, plus a continuous-deployment
@@ -34,6 +41,7 @@ already been ruled out.
 | You want to… | Read |
 |---|---|
 | Run the bot locally | [../README.md](../README.md) |
-| Understand a specific env var, tool, or security rule | [documentation.md](documentation.md) |
+| Decide which tools to enable | [tools.md](tools.md) |
+| Understand a specific env var or security rule | [documentation.md](documentation.md) |
 | Deploy to a server | [deployment.md](deployment.md) |
 | Propose a structural / architectural change | [reference-architectures.md](reference-architectures.md) then [documentation.md](documentation.md) |

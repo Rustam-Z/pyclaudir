@@ -14,9 +14,13 @@ import pytest
 
 import pyclaudir
 from pyclaudir.cc_worker import (
-    ALLOWED_TOOLS,
-    DISALLOWED_TOOLS,
+    BASE_ALLOWED_TOOLS,
+    BASH_TOOLS,
+    CODE_TOOLS,
+    DEFAULT_DISALLOWED_TOOLS,
     FORBIDDEN_FLAG,
+    GITLAB_TOOLS,
+    JIRA_TOOLS,
     CcSpawnSpec,
     build_argv,
 )
@@ -50,63 +54,69 @@ def fake_spec(tmp_path: Path) -> CcSpawnSpec:
 # ---------------------------------------------------------------------------
 # Invariant 1: locked-down argv
 #
-# WebFetch and WebSearch were re-enabled by operator decision so the agent can
-# answer questions that need fresh information. They are explicitly on the
-# allowlist now. Bash/Edit/Write/Read/NotebookEdit remain hard-denied — those
-# would let the agent mutate the host or read arbitrary files, and there is no
-# operator scenario where it should be allowed to do that directly.
+# Defaults are conservative: only the base pyclaudir MCP surface plus
+# WebFetch/WebSearch is allowed. Every dangerous built-in (Bash and friends,
+# code-edit tools, navigation, subagents) is hard-denied unless an operator
+# flips the corresponding ``enable_*`` flag. Tools listed in *neither* allow
+# nor deny are implicitly reachable via ToolSearch — so the deny side has to
+# carry every gated tool, not just the historically-cared-about ones.
 #
-# Agent (subagent spawning) is gated behind the spec flag
-# ``enable_subagents`` (driven by PYCLAUDIR_ENABLE_SUBAGENTS, default off).
-# Subagent turns burn a lot of tokens so the safe default is off; when off
-# we hard-deny Agent at the argv layer (belt-and-braces, because unlisted
-# tools are otherwise implicitly reachable via ToolSearch) and strip the
-# subagent docs from the system prompt. Flipping the flag on is an
-# explicit operator decision.
+# The flags map to env vars in ``Config``:
+#   PYCLAUDIR_ENABLE_BASH      → Bash, PowerShell, Monitor
+#   PYCLAUDIR_ENABLE_CODE      → Edit, Write, Read, NotebookEdit, Glob, Grep, LSP
+#   PYCLAUDIR_ENABLE_SUBAGENTS → Agent
+#   (Jira / GitLab are derived from integration-credential presence)
 # ---------------------------------------------------------------------------
 
 
-def test_invariant_1_argv_has_allowlist_and_denylist(fake_spec: CcSpawnSpec) -> None:
+def _split_argv(argv: list[str]) -> tuple[str, str, str]:
+    """Return (allowedTools value, disallowedTools value, system-prompt value)."""
+    allowed_value = argv[argv.index("--allowedTools") + 1]
+    deny_value = argv[argv.index("--disallowedTools") + 1]
+    sp_value = argv[argv.index("--system-prompt") + 1]
+    return allowed_value, deny_value, sp_value
+
+
+def test_invariant_1_argv_default_locks_down_dangerous_tools(fake_spec: CcSpawnSpec) -> None:
+    """Default fake_spec has every ``enable_*`` flag off — argv must show
+    a tight allow list (base only) and deny *every* gated tool."""
     argv = build_argv(fake_spec)
-    assert "--allowedTools" in argv
-    allowed_idx = argv.index("--allowedTools") + 1
-    allowed_value = argv[allowed_idx]
+    allowed_value, deny_value, _sp = _split_argv(argv)
+
+    # Base allowlist is present.
     assert "mcp__pyclaudir" in allowed_value
-    # Jira tools explicitly allowed (community mcp-atlassian, jira_ prefix)
-    assert "mcp__mcp-atlassian__jira_create_issue" in allowed_value
-    assert "mcp__mcp-atlassian__jira_search" in allowed_value
-    assert "mcp__mcp-atlassian__jira_get_issue" in allowed_value
-    assert "mcp__mcp-atlassian__jira_transition_issue" in allowed_value
-    # Confluence, Compass, JSM, Bitbucket, ProForma must NOT be allowed
-    for blocked in (
-        "confluence", "Confluence", "Compass", "bitbucket",
-        "service_desk", "proforma",
-    ):
-        assert blocked not in allowed_value, f"{blocked} found in allowedTools"
-    # GitLab tools allowed via prefix (@zereight/mcp-gitlab — GitLab-only server,
-    # so a blanket prefix is safe unlike mcp-atlassian which mixes services).
-    assert "mcp__mcp-gitlab" in allowed_value
     assert "WebFetch" in allowed_value
     assert "WebSearch" in allowed_value
-    # Agent is off by default — must NOT be on the allowlist, MUST be on
-    # the denylist (belt-and-braces vs ToolSearch-driven rediscovery).
-    assert "Agent" not in allowed_value
 
-    assert "--disallowedTools" in argv
-    deny_idx = argv.index("--disallowedTools") + 1
-    deny_value = argv[deny_idx]
-    for forbidden in ("Bash", "Edit", "Write", "Read", "NotebookEdit", "Agent"):
+    # No integration tools by default.
+    for jira in JIRA_TOOLS:
+        assert jira not in allowed_value, f"{jira} leaked into default allowlist"
+    for gitlab in GITLAB_TOOLS:
+        assert gitlab not in allowed_value, f"{gitlab} leaked into default allowlist"
+    # No Confluence / JSM / Bitbucket / ProForma ever.
+    for blocked in ("confluence", "Confluence", "Compass", "bitbucket",
+                    "service_desk", "proforma"):
+        assert blocked not in allowed_value, f"{blocked} in allowedTools"
+
+    # Every gated tool denied by default.
+    for forbidden in ("Bash", "PowerShell", "Monitor",
+                      "Edit", "Write", "Read", "NotebookEdit",
+                      "Glob", "Grep", "LSP", "Agent"):
         assert forbidden in deny_value, f"{forbidden} missing from --disallowedTools"
+        assert forbidden not in allowed_value, f"{forbidden} in --allowedTools default"
+
+    # Web tools are never denied.
     assert "WebFetch" not in deny_value
     assert "WebSearch" not in deny_value
 
-    # Subagent docs must NOT be in the system prompt when the flag is off.
-    sp_idx = argv.index("--system-prompt") + 1
-    assert "# Subagents" not in argv[sp_idx]
-
-    # Effort flag must be present (Claudir-confirmed: high effort + extended
-    # thinking reduces round-trips and overall latency).
+    # Effort flag must be present.
     assert "--effort" in argv
+
+
+def test_invariant_1_argv_never_has_dangerously_skip(fake_spec: CcSpawnSpec) -> None:
+    argv = build_argv(fake_spec)
+    assert FORBIDDEN_FLAG not in argv
+    assert FORBIDDEN_FLAG not in " ".join(argv)
 
 
 def test_invariant_1_argv_subagents_enabled(fake_spec: CcSpawnSpec) -> None:
@@ -115,25 +125,72 @@ def test_invariant_1_argv_subagents_enabled(fake_spec: CcSpawnSpec) -> None:
     import dataclasses
     spec_on = dataclasses.replace(fake_spec, enable_subagents=True)
     argv = build_argv(spec_on)
-
-    allowed_value = argv[argv.index("--allowedTools") + 1]
-    deny_value = argv[argv.index("--disallowedTools") + 1]
-    system_prompt = argv[argv.index("--system-prompt") + 1]
+    allowed_value, deny_value, system_prompt = _split_argv(argv)
 
     assert "Agent" in allowed_value
     assert "Agent" not in deny_value
-    # The hard-deny five must still be denied even with subagents on.
-    for forbidden in ("Bash", "Edit", "Write", "Read", "NotebookEdit"):
-        assert forbidden in deny_value, f"{forbidden} missing from --disallowedTools"
-    # Docs appended.
+    # The other gated categories stay denied.
+    for forbidden in ("Bash", "Edit", "Write", "Read", "NotebookEdit",
+                      "PowerShell", "Monitor", "Glob", "Grep", "LSP"):
+        assert forbidden in deny_value
+    # Subagent docs appended.
     assert "# Subagents" in system_prompt
     assert "read-only" in system_prompt.lower()
 
 
-def test_invariant_1_argv_never_has_dangerously_skip(fake_spec: CcSpawnSpec) -> None:
-    argv = build_argv(fake_spec)
-    assert FORBIDDEN_FLAG not in argv
-    assert FORBIDDEN_FLAG not in " ".join(argv)
+def test_invariant_1_argv_bash_enabled(fake_spec: CcSpawnSpec) -> None:
+    """enable_bash unlocks Bash, PowerShell, Monitor — and only those."""
+    import dataclasses
+    spec_on = dataclasses.replace(fake_spec, enable_bash=True)
+    argv = build_argv(spec_on)
+    allowed_value, deny_value, _sp = _split_argv(argv)
+
+    for t in BASH_TOOLS:
+        assert t in allowed_value, f"{t} should be allowed with enable_bash=True"
+        assert t not in deny_value
+    # Code tools and Agent stay denied.
+    for forbidden in (*CODE_TOOLS, "Agent"):
+        assert forbidden in deny_value, f"{forbidden} should still be denied"
+
+
+def test_invariant_1_argv_code_enabled(fake_spec: CcSpawnSpec) -> None:
+    """enable_code unlocks Edit/Write/Read/NotebookEdit/Glob/Grep/LSP."""
+    import dataclasses
+    spec_on = dataclasses.replace(fake_spec, enable_code=True)
+    argv = build_argv(spec_on)
+    allowed_value, deny_value, _sp = _split_argv(argv)
+
+    for t in CODE_TOOLS:
+        assert t in allowed_value, f"{t} should be allowed with enable_code=True"
+        assert t not in deny_value
+    for forbidden in (*BASH_TOOLS, "Agent"):
+        assert forbidden in deny_value
+
+
+def test_invariant_1_argv_jira_enabled(fake_spec: CcSpawnSpec) -> None:
+    """enable_jira surfaces all 36 Jira tools from mcp-atlassian."""
+    import dataclasses
+    spec_on = dataclasses.replace(fake_spec, enable_jira=True)
+    argv = build_argv(spec_on)
+    allowed_value, _deny, _sp = _split_argv(argv)
+
+    for t in JIRA_TOOLS:
+        assert t in allowed_value, f"{t} missing with enable_jira=True"
+    # No GitLab leak.
+    assert "mcp__mcp-gitlab" not in allowed_value
+
+
+def test_invariant_1_argv_gitlab_enabled(fake_spec: CcSpawnSpec) -> None:
+    """enable_gitlab adds the mcp-gitlab prefix to the allowlist."""
+    import dataclasses
+    spec_on = dataclasses.replace(fake_spec, enable_gitlab=True)
+    argv = build_argv(spec_on)
+    allowed_value, _deny, _sp = _split_argv(argv)
+
+    assert "mcp__mcp-gitlab" in allowed_value
+    # No Jira leak.
+    for jira in JIRA_TOOLS:
+        assert jira not in allowed_value
 
 
 # ---------------------------------------------------------------------------

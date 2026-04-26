@@ -45,31 +45,55 @@ from .transcript import (
 log = logging.getLogger(__name__)
 
 
-#: The set of built-in tools we explicitly deny. Belt-and-braces with
+#: Built-in tools we explicitly deny by default. Belt-and-braces with
 #: ``--allowedTools`` so even if Claude Code's allowlist behaviour ever
-#: changes, every dangerous tool is still off.
+#: changes, every dangerous tool is still off. Tools listed neither in
+#: allow nor deny are implicitly reachable via ToolSearch — so this list
+#: needs to cover *every* sensitive built-in, not just the ones we
+#: previously cared about.
 #:
-#: ``WebFetch`` and ``WebSearch`` are *not* on this list — they were
-#: re-enabled by operator decision so the agent can answer questions that
-#: need fresh information. The trade is: it can now exfiltrate data via
-#: URL + read SSRF-able internal addresses if a user asks her nicely.
-#: We rely on her system prompt + Telegram-only output channel to keep
-#: that surface bounded.
-DISALLOWED_TOOLS: tuple[str, ...] = (
+#: ``WebFetch`` and ``WebSearch`` are *not* on this list — they're in
+#: ``BASE_ALLOWED_TOOLS`` because the bot needs fresh info. The trade is:
+#: data could be exfiltrated via URL or used to hit SSRF-able internal
+#: addresses if asked nicely. The system prompt's internal-URL refusal
+#: + Telegram-only output channel are the bounding mitigations.
+#:
+#: Each tool category here is unlocked by a corresponding ``enable_*``
+#: field on :class:`CcSpawnSpec`, driven by ``PYCLAUDIR_ENABLE_*`` env
+#: vars in ``Config``. See ``docs/tools.md``.
+DEFAULT_DISALLOWED_TOOLS: tuple[str, ...] = (
+    # Shell execution — unlocked by ``enable_bash``.
     "Bash",
+    "PowerShell",
+    "Monitor",
+    # Code work — unlocked by ``enable_code``.
     "Edit",
     "Write",
     "Read",
     "NotebookEdit",
+    "Glob",
+    "Grep",
+    "LSP",
+    # Subagents — unlocked by ``enable_subagents`` (existing flag).
+    # ``Agent`` is added here at ``build_argv`` time when the flag is off.
 )
 
-#: Allowed tools — pyclaudir MCP, community mcp-atlassian Jira tools,
-#: and web tools. Only Jira tools are allowed; Confluence, JSM, and
-#: ProForma tools are deliberately excluded.
-ALLOWED_TOOLS: tuple[str, ...] = (
+#: Always-allowed tools, regardless of any ``enable_*`` flag. These are
+#: the bot's core surface — the local pyclaudir MCP server (send_message,
+#: memory, reminders, etc.) and read-only web tools.
+BASE_ALLOWED_TOOLS: tuple[str, ...] = (
     "mcp__pyclaudir",
-    # Jira — community mcp-atlassian (sooperset/mcp-atlassian)
-    # The server prefixes all Jira tools with "jira_".
+    "WebFetch",
+    "WebSearch",
+)
+
+#: Jira tools from community mcp-atlassian (sooperset/mcp-atlassian).
+#: Only Jira is allowed; Confluence, JSM, and ProForma tools are
+#: deliberately excluded. Added to ``--allowedTools`` only when
+#: :class:`CcSpawnSpec.enable_jira` is True (which ``__main__`` derives
+#: from the presence of ``JIRA_URL`` + ``JIRA_USERNAME`` +
+#: ``JIRA_API_TOKEN`` in the environment).
+JIRA_TOOLS: tuple[str, ...] = (
     "mcp__mcp-atlassian__jira_search",
     "mcp__mcp-atlassian__jira_get_issue",
     "mcp__mcp-atlassian__jira_create_issue",
@@ -112,19 +136,21 @@ ALLOWED_TOOLS: tuple[str, ...] = (
     # Versions
     "mcp__mcp-atlassian__jira_create_version",
     "mcp__mcp-atlassian__jira_batch_create_versions",
-    # GitLab — @zereight/mcp-gitlab (all tools, prefix match like pyclaudir).
-    # Unlike mcp-atlassian (which bundles Jira+Confluence+Compass), mcp-gitlab
-    # is GitLab-only so a blanket prefix is safe.
+)
+
+#: GitLab tools from @zereight/mcp-gitlab. Unlike mcp-atlassian (which
+#: bundles Jira+Confluence+Compass), mcp-gitlab is GitLab-only so a
+#: blanket prefix match is safe.
+GITLAB_TOOLS: tuple[str, ...] = (
     "mcp__mcp-gitlab",
-    # Web
-    "WebFetch",
-    "WebSearch",
-    # NOTE: "Agent" (subagent spawning) is *not* in this static tuple.
-    # It is conditionally injected by ``build_argv`` when the spawn spec
-    # has ``enable_subagents=True`` (driven by PYCLAUDIR_ENABLE_SUBAGENTS).
-    # When disabled — the default — it is appended to ``--disallowedTools``
-    # instead, because Claude Code treats tools absent from both lists as
-    # implicitly reachable (the agent can find them via ToolSearch).
+)
+
+#: Tools unlocked when ``enable_bash`` is True.
+BASH_TOOLS: tuple[str, ...] = ("Bash", "PowerShell", "Monitor")
+
+#: Tools unlocked when ``enable_code`` is True.
+CODE_TOOLS: tuple[str, ...] = (
+    "Edit", "Write", "Read", "NotebookEdit", "Glob", "Grep", "LSP",
 )
 
 #: Forbidden flag — never pass this. ``build_argv`` enforces it at build
@@ -149,7 +175,7 @@ class CcSpawnSpec:
     #: When True, the ``Agent`` tool is added to ``--allowedTools`` and the
     #: subagent documentation (``subagents_prompt_path``) is appended to the
     #: system prompt. When False (default), ``Agent`` is added to
-    #: ``--disallowedTools`` and the docs file is not read — Nodira cannot
+    #: ``--disallowedTools`` and the docs file is not read — the bot cannot
     #: spawn subagents and doesn't even see the capability. Subagent turns
     #: are token-heavy; keep off unless you need them. Driven by
     #: ``PYCLAUDIR_ENABLE_SUBAGENTS``.
@@ -157,6 +183,22 @@ class CcSpawnSpec:
     #: Path to the subagent docs markdown. Read and appended to the system
     #: prompt iff ``enable_subagents`` is True. Ignored otherwise.
     subagents_prompt_path: Path | None = None
+    #: When True, ``Bash``, ``PowerShell``, ``Monitor`` move from the deny
+    #: list to the allow list. Driven by ``PYCLAUDIR_ENABLE_BASH``.
+    enable_bash: bool = False
+    #: When True, ``Edit``, ``Write``, ``Read``, ``NotebookEdit``, ``Glob``,
+    #: ``Grep``, ``LSP`` move from deny to allow. Driven by
+    #: ``PYCLAUDIR_ENABLE_CODE``.
+    enable_code: bool = False
+    #: When True, the 36 Jira tools from ``mcp-atlassian`` are added to
+    #: ``--allowedTools``. ``__main__`` derives this from the presence of
+    #: ``JIRA_URL`` + ``JIRA_USERNAME`` + ``JIRA_API_TOKEN`` — no separate
+    #: env var; if the integration is configured, its tools are advertised.
+    enable_jira: bool = False
+    #: When True, the ``mcp__mcp-gitlab`` prefix is added to
+    #: ``--allowedTools``. Driven by the presence of ``GITLAB_URL`` +
+    #: ``GITLAB_TOKEN`` in ``__main__``.
+    enable_gitlab: bool = False
 
 
 @dataclass
@@ -211,15 +253,34 @@ def build_argv(spec: CcSpawnSpec) -> list[str]:
     json_schema = spec.json_schema_path.read_text(encoding="utf-8")
     json.loads(json_schema)  # sanity check
 
-    # Subagent gating: when enabled, Agent goes in allow; when disabled,
-    # Agent goes in deny (belt-and-braces, because unlisted tools are
-    # still implicitly reachable via ToolSearch).
+    # Assemble allow/deny lists from the base sets plus whatever the
+    # ``enable_*`` flags unlock. Tools listed in *neither* allow nor deny
+    # are implicitly reachable via ToolSearch — so every gated tool must
+    # land in one or the other.
+    allowed_extras: list[str] = []
+    disallowed_extras: list[str] = list(DEFAULT_DISALLOWED_TOOLS)
+
+    def _unlock(tools: tuple[str, ...]) -> None:
+        for t in tools:
+            if t in disallowed_extras:
+                disallowed_extras.remove(t)
+            allowed_extras.append(t)
+
+    if spec.enable_bash:
+        _unlock(BASH_TOOLS)
+    if spec.enable_code:
+        _unlock(CODE_TOOLS)
     if spec.enable_subagents:
-        allowed_tools = ALLOWED_TOOLS + ("Agent",)
-        disallowed_tools = DISALLOWED_TOOLS
+        allowed_extras.append("Agent")
     else:
-        allowed_tools = ALLOWED_TOOLS
-        disallowed_tools = DISALLOWED_TOOLS + ("Agent",)
+        disallowed_extras.append("Agent")
+    if spec.enable_jira:
+        allowed_extras.extend(JIRA_TOOLS)
+    if spec.enable_gitlab:
+        allowed_extras.extend(GITLAB_TOOLS)
+
+    allowed_tools = BASE_ALLOWED_TOOLS + tuple(allowed_extras)
+    disallowed_tools = tuple(disallowed_extras)
 
     argv: list[str] = [
         spec.binary,
@@ -373,9 +434,18 @@ class CcWorker:
         assert FORBIDDEN_FLAG not in argv, (
             f"{FORBIDDEN_FLAG} found in argv at spawn time — refusing to start"
         )
+        enabled_features = [
+            f for f, on in (
+                ("bash", self.spec.enable_bash),
+                ("code", self.spec.enable_code),
+                ("jira", self.spec.enable_jira),
+                ("gitlab", self.spec.enable_gitlab),
+                ("subagents", self.spec.enable_subagents),
+            ) if on
+        ]
         log.info(
-            "spawning claude (model=%s, allowed=%s, disallowed=%s)",
-            self.spec.model, ALLOWED_TOOLS, DISALLOWED_TOOLS,
+            "spawning claude (model=%s, enabled=%s)",
+            self.spec.model, enabled_features or "[base only]",
         )
         self._open_raw_logs()
         self._proc = await asyncio.create_subprocess_exec(

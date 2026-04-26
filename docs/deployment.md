@@ -48,6 +48,25 @@ docker compose logs -f   # should see "pyclaudir is live"
 
 DM your bot on Telegram to confirm it replies.
 
+### Enabling capabilities
+
+The bot ships with a tight default surface — Telegram messaging,
+memory tools, reminders, and read-only web access only. Shell,
+code-editing, subagents, Jira, and GitLab are **all off by default**.
+Each group is unlocked by a single env var (or, for Jira/GitLab,
+the presence of credentials):
+
+```bash
+# In .env
+PYCLAUDIR_ENABLE_BASH=true        # Bash, PowerShell, Monitor
+PYCLAUDIR_ENABLE_CODE=true        # Edit, Write, Read, NotebookEdit, Glob, Grep, LSP
+PYCLAUDIR_ENABLE_SUBAGENTS=true   # Agent
+```
+
+For the per-tool list and trade-offs, see [tools.md](tools.md).
+Restart the container after toggling: `docker compose up -d
+--force-recreate`.
+
 ## Update workflow
 
 ### Manual (SSH)

@@ -27,14 +27,18 @@ debugging, or auditing.
 
 pyclaudir runs Claude inside a long-lived
 `claude --print --input-format stream-json` process and limits what Claude
-can do with the `--allowedTools` and `--disallowedTools` flags. The
-dangerous built-in tools (`Bash`, `Edit`, `Write`, `Read`, `NotebookEdit`)
-are turned off, so the bot cannot run shell commands, edit your code, or
-read arbitrary files. Instead the bot uses the small custom tools in
-`pyclaudir/tools/` (served by a local MCP server) plus `WebFetch` and
-`WebSearch`. The `Agent` tool (which lets Claude spawn helper agents) is
-off by default because helper agents use a lot of tokens; turn it on with
-`PYCLAUDIR_ENABLE_SUBAGENTS=true`. The full allow/deny list lives in
+can do with the `--allowedTools` and `--disallowedTools` flags. By
+default the bot has only its own MCP tools (in `pyclaudir/tools/`,
+served by a local MCP server) plus `WebFetch` and `WebSearch`. Every
+dangerous CC built-in is gated behind a single env var:
+`PYCLAUDIR_ENABLE_BASH=true` unlocks `Bash` / `PowerShell` / `Monitor`;
+`PYCLAUDIR_ENABLE_CODE=true` unlocks `Edit` / `Write` / `Read` /
+`NotebookEdit` / `Glob` / `Grep` / `LSP`;
+`PYCLAUDIR_ENABLE_SUBAGENTS=true` unlocks `Agent`. Jira and GitLab
+tools are advertised when their credentials are set (`JIRA_URL` etc.,
+`GITLAB_URL` etc.) — no separate enable flag. The full allow/deny
+list and the per-tool descriptions live in
+[tools.md](tools.md); the implementation is in
 `pyclaudir/cc_worker.py`.
 
 ## Full configuration
@@ -67,7 +71,9 @@ what's in your environment.
 | `PYCLAUDIR_CRASH_BACKOFF_CAP` | no | `64` | maximum wait between restarts. Once the wait reaches this, it stops growing. |
 | `PYCLAUDIR_CRASH_LIMIT` | no | `10` | how many crashes within `CRASH_WINDOW_SECONDS` count as "too many". When reached, the bot tells the owner and active chats, then exits — and something outside (systemd, docker) is expected to restart the whole bot. |
 | `PYCLAUDIR_CRASH_WINDOW_SECONDS` | no | `600` | the time window used for `CRASH_LIMIT`. Only crashes from the last X seconds are counted. |
-| `PYCLAUDIR_ENABLE_SUBAGENTS` | no | `false` | when `true`, the `Agent` tool is allowed and Claude is told it exists. When `false` (default), the tool is blocked and Claude is not told about it. Helper agents use a lot of tokens, so leave off unless you really need them. |
+| `PYCLAUDIR_ENABLE_SUBAGENTS` | no | `false` | when `true`, the `Agent` tool is allowed and Claude is told it exists. Helper agents use a lot of tokens, so leave off unless you really need them. |
+| `PYCLAUDIR_ENABLE_BASH` | no | `false` | when `true`, unlocks `Bash`, `PowerShell`, `Monitor`. Off by default. |
+| `PYCLAUDIR_ENABLE_CODE` | no | `false` | when `true`, unlocks `Edit`, `Write`, `Read`, `NotebookEdit`, `Glob`, `Grep`, `LSP`. Off by default — the standard Telegram-assistant deployment doesn't need code-edit tools. |
 | `JIRA_URL` | no | — | Jira site URL (turns on mcp-atlassian) |
 | `JIRA_USERNAME` | no | — | Jira username |
 | `JIRA_API_TOKEN` | no | — | Jira API token |
@@ -608,12 +614,18 @@ is enforced by code, not by hope, and tested in
 `tests/test_security_invariants.py`.
 
 - **No shell, no edits, no writes outside `memories/`, no general reads
-  outside `memories/`.** The CC subprocess is spawned with
-  `--allowedTools mcp__pyclaudir,WebFetch,WebSearch
-  --disallowedTools Bash,Edit,Write,Read,NotebookEdit
-  --strict-mcp-config`. The forbidden flag
+  outside `memories/`, no subagents — by default.** The CC subprocess
+  is spawned with `--allowedTools mcp__pyclaudir,WebFetch,WebSearch`
+  (the always-on base) and a deny list covering every gated tool:
+  `--disallowedTools Bash,PowerShell,Monitor,Edit,Write,Read,
+  NotebookEdit,Glob,Grep,LSP,Agent --strict-mcp-config`. Each gated
+  group flips on with a single env var
+  (`PYCLAUDIR_ENABLE_BASH`, `PYCLAUDIR_ENABLE_CODE`,
+  `PYCLAUDIR_ENABLE_SUBAGENTS`); Jira/GitLab tool advertisement is
+  derived from credential presence. The forbidden flag
   `--dangerously-skip-permissions` is *never* passed; both the argv
-  builder and the spawn-time assertion refuse it.
+  builder and the spawn-time assertion refuse it. See
+  [tools.md](tools.md) for the full per-tool list.
 - **Web access (read-only).** `WebFetch` and `WebSearch` are
   deliberately enabled so the agent can answer questions that need
   fresh information. This is a real trade-off — see the next bullet.

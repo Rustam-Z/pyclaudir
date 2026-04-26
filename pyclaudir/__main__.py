@@ -231,6 +231,15 @@ async def _async_main() -> None:
         session_id = config.session_id_path.read_text().strip() or None
         log.info("resuming cc session %s", session_id)
 
+    # Integration tool surfaces are derived from credential presence —
+    # the same predicates used above to decide whether to spawn the MCP
+    # server. Single source of truth: env-set creds → server runs AND
+    # tools are advertised in the allowlist.
+    enable_jira = bool(
+        config.jira_url and config.jira_username and config.jira_api_token
+    )
+    enable_gitlab = bool(config.gitlab_url and config.gitlab_token)
+
     spec = CcSpawnSpec(
         binary=config.claude_code_bin,
         model=config.model,
@@ -243,6 +252,10 @@ async def _async_main() -> None:
         cc_logs_dir=config.cc_logs_dir,
         enable_subagents=config.enable_subagents,
         subagents_prompt_path=Path("prompts/subagents.md").resolve(),
+        enable_bash=config.enable_bash,
+        enable_code=config.enable_code,
+        enable_jira=enable_jira,
+        enable_gitlab=enable_gitlab,
     )
     from .cc_failure_classifier import classify_cc_failure
 

@@ -635,8 +635,8 @@ class Engine:
         Two outcomes:
 
         1. **Below the shared failure cap** — inject an ``<error>`` into
-           Nodira's next turn reminding her to use ``send_message``, so
-           a recoverable slip (e.g. she started typing a plain answer)
+           the bot's next turn reminding it to use ``send_message``, so
+           a recoverable slip (e.g. it started typing a plain answer)
            self-corrects in one additional turn.
         2. **At or above the cap** — stop nagging the model, surface a
            user-facing message, and drop the turn. The best-available
