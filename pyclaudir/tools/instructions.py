@@ -7,6 +7,8 @@ the bot's perspective, and all customisations live in project.md.
 
 from __future__ import annotations
 
+import asyncio
+
 from pydantic import BaseModel, Field
 
 from .base import BaseTool, ToolContext, ToolResult
@@ -31,7 +33,8 @@ class ReadInstructionsTool(BaseTool):
         if store is None:
             return ToolResult(content="instructions store unavailable", is_error=True)
         try:
-            return ToolResult(content=store.read())
+            text = await asyncio.to_thread(store.read)
+            return ToolResult(content=text)
         except Exception as exc:
             return ToolResult(content=f"{type(exc).__name__}: {exc}", is_error=True)
 
@@ -61,7 +64,7 @@ class AppendInstructionsTool(BaseTool):
         if store is None:
             return ToolResult(content="instructions store unavailable", is_error=True)
         try:
-            new_size, backup = store.append(args.content)
+            new_size, backup = await asyncio.to_thread(store.append, args.content)
         except Exception as exc:
             return ToolResult(content=f"{type(exc).__name__}: {exc}", is_error=True)
         return ToolResult(

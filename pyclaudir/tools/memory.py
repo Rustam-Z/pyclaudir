@@ -15,6 +15,8 @@ remains an operator-only action.
 
 from __future__ import annotations
 
+import asyncio
+
 from pydantic import BaseModel, Field
 
 from .base import BaseTool, ToolResult
@@ -37,7 +39,7 @@ class ListMemoriesTool(BaseTool):
         store = self.ctx.memory_store
         if store is None:
             return ToolResult(content="", is_error=True)
-        files = store.list()
+        files = await asyncio.to_thread(store.list)
         if not files:
             return ToolResult(content="(no memory files)")
         lines = [f"{f.relative_path}\t{f.size_bytes}" for f in files]
@@ -67,7 +69,7 @@ class ReadMemoryTool(BaseTool):
         if store is None:
             return ToolResult(content="memory store unavailable", is_error=True)
         try:
-            text = store.read(args.path)
+            text = await asyncio.to_thread(store.read, args.path)
         except Exception as exc:
             return ToolResult(content=f"{type(exc).__name__}: {exc}", is_error=True)
         return ToolResult(content=text, data={"path": args.path})
@@ -101,7 +103,7 @@ class WriteMemoryTool(BaseTool):
         if store is None:
             return ToolResult(content="memory store unavailable", is_error=True)
         try:
-            written = store.write(args.path, args.content)
+            written = await asyncio.to_thread(store.write, args.path, args.content)
         except Exception as exc:
             return ToolResult(content=f"{type(exc).__name__}: {exc}", is_error=True)
         return ToolResult(
@@ -134,7 +136,7 @@ class AppendMemoryTool(BaseTool):
         if store is None:
             return ToolResult(content="memory store unavailable", is_error=True)
         try:
-            new_size = store.append(args.path, args.content)
+            new_size = await asyncio.to_thread(store.append, args.path, args.content)
         except Exception as exc:
             return ToolResult(content=f"{type(exc).__name__}: {exc}", is_error=True)
         return ToolResult(

@@ -12,6 +12,8 @@ bot calls ``read_skill("X")`` and executes the playbook's steps.
 
 from __future__ import annotations
 
+import asyncio
+
 from pydantic import BaseModel, Field
 
 from .base import BaseTool, ToolResult
@@ -39,7 +41,7 @@ class ListSkillsTool(BaseTool):
         store = self.ctx.skills_store
         if store is None:
             return ToolResult(content="skills store unavailable", is_error=True)
-        files = store.list()
+        files = await asyncio.to_thread(store.list)
         if not files:
             return ToolResult(content="(no skills)")
         lines = [f"- **{f.name}** — {f.description}" for f in files]
@@ -75,7 +77,7 @@ class ReadSkillTool(BaseTool):
         if store is None:
             return ToolResult(content="skills store unavailable", is_error=True)
         try:
-            text = store.read(args.name)
+            text = await asyncio.to_thread(store.read, args.name)
         except Exception as exc:
             return ToolResult(content=f"{type(exc).__name__}: {exc}", is_error=True)
         return ToolResult(content=text, data={"name": args.name})
