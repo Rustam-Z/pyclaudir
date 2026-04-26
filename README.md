@@ -10,8 +10,10 @@ Out of the box it's clean: messaging in DM & group chats, memory, reminders & sc
 Want shell access? Code editing? Subagents? GitLab? GitHub? Jira? One env var each. Off until you flip them. Full list in [docs/tools.md](docs/tools.md).
 
 **One process, no magic.** A Python harness that listens Telegram, runs `claude` as a subprocess (via a local MCP server), and posts the reply back. 
+Main work: message-as-stimulus loop, MCP tool host, persistent memory, multi-bot orchestration, harness logic.
 You control who can talk to it (just you, or group chats, or anyone). 
-Runs on your laptop or any small VPS. Can be used with your existing Claude Code subscription.
+Runs on your laptop or any small VPS. 
+Can be used with your existing Claude Code subscription.
 
 ## What you can do with it
 
@@ -36,6 +38,23 @@ Telegram, no extra dashboards to babysit.
 **Personal assistant.** Reminders, notes, daily check-ins. Persistent
 across sessions because everything writes to plain markdown files you
 actually own. *Always on.*
+
+### Try saying
+
+Concrete one-liners you can DM the bot today (assumes you named it
+`Nodira` in `prompts/project.md`):
+
+- *"@Nodira every weekday at 9am, read the last 24h of our team chat and DM me a 5-bullet status."* — uses `set_reminder` + `query_db` + `send_message`. Ships on by default.
+- *"@Nodira every Monday at 8am, pull top AI stories from Hacker News and TechCrunch and message me a briefing."* — `set_reminder` + `WebFetch` + `WebSearch`. Default tools.
+- *"@Nodira each evening at 9pm, ask me what I shipped today and append it to my journal."* — appends to `data/memories/journal.md` via `append_memory`. Default tools.
+- *"@Nodira remind me to take meds at 9pm daily, and nag me if I don't react with 👍 within 10 min."* — `set_reminder` + `add_reaction` + `query_db` to check the reaction.
+- *"@Nodira watch https://example.com/changelog hourly and ping me the moment a new entry mentions 'pricing'."* — cron `set_reminder` + `WebFetch`. Diff state lives in a memory file.
+- *"@Nodira every Friday at 5pm, review this week's git log on `~/code/myapp` and open a PR if the README has drifted."* — needs `PYCLAUDIR_ENABLE_BASH=true` and `PYCLAUDIR_ENABLE_CODE=true`, plus `GITHUB_PERSONAL_ACCESS_TOKEN` for the PR.
+- *"@Nodira every morning at 7am, DM me my Jira tickets due this week, grouped by project."* — needs `JIRA_*` env vars.
+- *"@Nodira poll the group on lunch spots — Ramen, Burrito, Salad — and message me the result at 11:45."* — `create_poll` + `set_reminder` + `stop_poll`. Default tools.
+
+The pattern: you describe the *outcome* in chat, the bot picks the
+tools and schedules itself. No YAML, no cron syntax to memorise.
 
 <!-- TODO: 30s GIF demo for the README header once we have one -->
 
@@ -70,6 +89,7 @@ You need Python 3.11+ and the Claude Code CLI (`claude --version`).
 | Capability | Tools | On by default? |
 |---|---|---|
 | Telegram messaging | `send_message`, `reply_to_message`, `edit_message`, `delete_message`, `add_reaction`, `create_poll`, `stop_poll` | yes |
+| Inbound attachments (photos + documents) | `read_attachment` (path-scoped to `data/attachments/`) | yes |
 | Memory (markdown files in `data/memories/`) | `list_memories`, `read_memory`, `write_memory`, `append_memory` | yes |
 | Reminders (one-shot + cron) | `set_reminder`, `list_reminders`, `cancel_reminder` | yes |
 | Read its own message history | `query_db` (read-only SELECT, 100-row cap) | yes |
@@ -134,7 +154,8 @@ All settings come from environment variables (or `.env`). Full list in
 
 Access policy lives in `data/access.json` (hot-reloaded). DM policies:
 `owner_only` (default), `allowlist`, `open`. Group chats must be in
-`allowed_chats`. Owner-only commands (silent for non-owners):
+`allowed_chats`. `allowlist` is only for exclusive users in `allowed_users`, not groups.
+Owner-only commands (silent for non-owners):
 `/access`, `/allow`, `/deny`, `/dmpolicy`, `/kill`, `/health`, `/audit`.
 Details: [docs/documentation.md](docs/documentation.md).
 

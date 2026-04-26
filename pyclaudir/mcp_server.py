@@ -25,6 +25,7 @@ from typing import Any
 
 import uvicorn
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.utilities.types import Image
 
 from . import tools as tools_pkg
 from .tools.base import BaseTool, ToolContext, ToolResult
@@ -77,9 +78,12 @@ def _make_wrapper(tool: BaseTool, db_logger):
                 annotation=finfo.annotation,
             )
         )
-    sig = inspect.Signature(parameters=params, return_annotation=str)
+    # No fixed return annotation — most tools return str, but read_attachment
+    # returns a FastMCP ``Image`` object for photos. Leaving this off lets
+    # FastMCP introspect the actual return value at call time.
+    sig = inspect.Signature(parameters=params)
 
-    async def wrapper(**kwargs: Any) -> str:
+    async def wrapper(**kwargs: Any) -> Any:
         start = time.perf_counter()
         err: str | None = None
         result: ToolResult | None = None
@@ -111,12 +115,14 @@ def _make_wrapper(tool: BaseTool, db_logger):
             # Raising here makes FastMCP report it as a tool error, which
             # Claude can see and react to.
             raise RuntimeError(result.content)
+        if result and result.image_path is not None:
+            return Image(path=str(result.image_path))
         return result.content if result else ""
 
     wrapper.__name__ = tool.name
     wrapper.__doc__ = tool.description
     wrapper.__signature__ = sig  # type: ignore[attr-defined]
-    wrapper.__annotations__ = {p.name: p.annotation for p in params} | {"return": str}
+    wrapper.__annotations__ = {p.name: p.annotation for p in params}
     return wrapper
 
 

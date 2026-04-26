@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from pydantic import BaseModel
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
+    from ..attachments_store import AttachmentStore
     from ..db.database import Database
     from ..instructions_store import InstructionsStore
     from ..memory_store import MemoryStore
@@ -59,6 +60,7 @@ class ToolContext:
     memory_store: "MemoryStore | None" = None
     instructions_store: "InstructionsStore | None" = None
     skills_store: "SkillsStore | None" = None
+    attachment_store: "AttachmentStore | None" = None
     heartbeat: Heartbeat = field(default_factory=Heartbeat)
     #: chat_id → display name. Populated by the dispatcher on every inbound
     #: message so outbound transcript lines can show the chat's title.
@@ -79,11 +81,17 @@ class ToolResult:
     optional structured payload for tools whose callers might want it (we
     don't use it yet, but it lets future tools return rich data without
     breaking the interface).
+
+    ``image_path``, when set, signals the MCP wrapper to deliver the file
+    at that absolute path as an MCP image content block (so Claude actually
+    *sees* it) instead of returning ``content`` as text. Used by
+    ``read_attachment`` to surface inbound photos.
     """
 
     content: str
     data: dict[str, Any] | None = None
     is_error: bool = False
+    image_path: Any = None  # pathlib.Path | None — left untyped to keep this module import-light
 
 
 class BaseTool(ABC):

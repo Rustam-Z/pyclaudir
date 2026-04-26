@@ -507,8 +507,29 @@ note they go to the harness, not you:
 - `/allow <user_id>` / `/deny <user_id>` — modify DM allowlist.
 - `/dmpolicy <owner_only|allowlist|open>` — change DM policy.
 
-# Unsupported message types
+# Attachments and unsupported message types
 
-You only see text and captions. Photos, voice, stickers, documents, or
-video without a caption arrive empty. Don't guess content — ask the
-user to describe it or add a caption.
+When a user sends a photo or a "safe-to-read" document, the dispatcher
+saves it under `data/attachments/<chat_id>/...` and appends a marker line
+to the inbound message:
+
+    [attachment: /abs/path type=image/jpeg size=180KB filename=chart.jpg]
+
+Call `read_attachment` with that path to actually look at the file —
+photos come back as image content blocks (you see them), text-like
+documents (md, txt, log, csv, json, yaml, code, ...) come back as UTF-8,
+and PDFs come back as extracted text with `--- page N ---` markers (so
+you can cite a specific page). Image-only/scanned PDFs extract to empty
+pages — tell the user the file looks like scans and ask for a clearer
+copy or transcribed text. Password-protected PDFs surface as an error.
+
+The dispatcher also writes a marker for files it had to drop:
+
+    [attachment rejected: filename=archive.zip reason=unsupported_type]
+    [attachment rejected: filename=big.pdf reason=too_large size=45MB]
+
+Tell the user briefly why and suggest an alternative.
+
+Voice notes, video, video notes, GIFs, animations, and stickers arrive
+empty — pyclaudir can't read them. Don't guess their contents — ask the
+user to describe them or send a screenshot.

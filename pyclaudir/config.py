@@ -144,6 +144,11 @@ class Config:
     #: Telegram-assistant deployment leaves this off.
     #: Env var: ``PYCLAUDIR_ENABLE_CODE`` (default ``False``).
     enable_code: bool
+    #: Per-file size cap (bytes) for inbound Telegram attachments. Files
+    #: larger than this are rejected without download. Photos and documents
+    #: both use this cap. 20 MB by default.
+    #: Env var: ``PYCLAUDIR_ATTACHMENT_MAX_BYTES`` (default 20_000_000).
+    attachment_max_bytes: int
 
     # ----- Settings for handling tool errors -----
     # These control what happens when Claude is still running fine, but
@@ -241,6 +246,7 @@ class Config:
     session_id_path: Path = field(init=False)
     cc_logs_dir: Path = field(init=False)
     access_path: Path = field(init=False)
+    attachments_dir: Path = field(init=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "db_path", self.data_dir / "pyclaudir.db")
@@ -248,6 +254,7 @@ class Config:
         object.__setattr__(self, "session_id_path", self.data_dir / "session_id")
         object.__setattr__(self, "cc_logs_dir", self.data_dir / "cc_logs")
         object.__setattr__(self, "access_path", self.data_dir / "access.json")
+        object.__setattr__(self, "attachments_dir", self.data_dir / "attachments")
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -266,6 +273,7 @@ class Config:
             enable_subagents=_bool("PYCLAUDIR_ENABLE_SUBAGENTS", False),
             enable_bash=_bool("PYCLAUDIR_ENABLE_BASH", False),
             enable_code=_bool("PYCLAUDIR_ENABLE_CODE", False),
+            attachment_max_bytes=_int("PYCLAUDIR_ATTACHMENT_MAX_BYTES", 20_000_000),
             tool_error_max_count=_int("PYCLAUDIR_TOOL_ERROR_MAX_COUNT", 3),
             tool_error_window_seconds=_float("PYCLAUDIR_TOOL_ERROR_WINDOW_SECONDS", 30.0),
             progress_notify_seconds=_float("PYCLAUDIR_PROGRESS_NOTIFY_SECONDS", 60.0),
@@ -304,6 +312,7 @@ class Config:
             enable_subagents=False,
             enable_bash=False,
             enable_code=False,
+            attachment_max_bytes=20_000_000,
             tool_error_max_count=3,
             tool_error_window_seconds=30.0,
             progress_notify_seconds=60.0,
@@ -326,3 +335,4 @@ class Config:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.memories_dir.mkdir(parents=True, exist_ok=True)
         self.cc_logs_dir.mkdir(parents=True, exist_ok=True)
+        self.attachments_dir.mkdir(parents=True, exist_ok=True)

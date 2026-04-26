@@ -33,6 +33,7 @@ from .db.reminders import (
     pending_with_auto_seed_key,
 )
 from .engine import Engine
+from .attachments_store import AttachmentStore
 from .instructions_store import InstructionsStore
 from .mcp_server import McpServer
 from .memory_store import MemoryStore
@@ -157,6 +158,7 @@ async def _async_main() -> None:
     instructions.ensure_dirs()
     skills = SkillsStore(root=project_root / "skills")
     skills.ensure_root()
+    attachments = AttachmentStore(config.attachments_dir)
 
     # Seed the default self-reflection reminder if the operator hasn't
     # already seen one (even a cancelled row counts — we respect prior
@@ -174,6 +176,7 @@ async def _async_main() -> None:
         memory_store=memory,
         instructions_store=instructions,
         skills_store=skills,
+        attachment_store=attachments,
         chat_titles=chat_titles,
     )
 

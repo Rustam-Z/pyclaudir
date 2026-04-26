@@ -67,6 +67,8 @@ def _make_update(*, user_id: int, chat_id: int, chat_type: str, message_id: int 
     msg.caption = None
     msg.date = datetime.now(timezone.utc)
     msg.reply_to_message = None
+    msg.photo = None
+    msg.document = None
 
     update = MagicMock()
     update.effective_message = msg

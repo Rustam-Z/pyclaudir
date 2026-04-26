@@ -846,6 +846,7 @@ pyclaudir/
 │       ├── add_reaction.py
 │       ├── create_poll.py
 │       ├── stop_poll.py
+│       ├── read_attachment.py  # read a Telegram photo/doc by path under data/attachments/
 │       ├── memory.py           # list/read/write/append memory (read-before-write)
 │       ├── instructions.py     # read/append project.md (owner-only by prompt policy)
 │       ├── skills.py           # list/read agent skill playbooks under skills/
