@@ -30,6 +30,7 @@ server. Auto-discovered from `pyclaudir/tools/*.py` (each tool is a
 | `create_poll` | Send a poll. Supports regular/quiz, multi-answer, anonymity toggle, auto-close (`open_period` or `close_date`), and reply-to. |
 | `stop_poll` | Close a live poll early and return final tallies. |
 | `read_attachment` | Read a photo or document the user sent. The dispatcher saves inbound attachments under `data/attachments/` and surfaces them as `[attachment: <path> ...]` markers — pass that path here. Images come back as image content blocks (you actually see them); text-like files (md/txt/log/csv/json/yaml/code) come back as UTF-8; PDFs are extracted via `pypdf` and returned as text with `--- page N ---` markers. Path traversal is rejected. GIFs/videos are unsupported. |
+| `send_memory_document` | Send a memory file (`data/memories/<path>`) to a chat as a downloadable document. Path-locked to the memories root with the same hardening as `read_memory`. Optional caption + reply-to. Use this when the user wants the file as an attachment instead of pasted text. |
 
 ### Memory (`data/memories/`)
 

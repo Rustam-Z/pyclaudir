@@ -92,7 +92,7 @@ If you have Windows machine, then use docker compose.
 |---|---|---|
 | Telegram messaging | `send_message`, `reply_to_message`, `edit_message`, `delete_message`, `add_reaction`, `create_poll`, `stop_poll` | yes |
 | Inbound attachments (photos + documents) | `read_attachment` (path-scoped to `data/attachments/`) | yes |
-| Memory (markdown files in `data/memories/`) | `list_memories`, `read_memory`, `write_memory`, `append_memory` | yes |
+| Memory (markdown files in `data/memories/`) | `list_memories`, `read_memory`, `write_memory`, `append_memory`, `send_memory_document` | yes |
 | Reminders (one-shot + cron) | `set_reminder`, `list_reminders`, `cancel_reminder` | yes |
 | Read its own message history | `query_db` (read-only SELECT, 100-row cap) | yes |
 | Self-edit project prompt | `read_instructions`, `append_instructions` (owner-only) | yes |
