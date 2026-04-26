@@ -8,16 +8,39 @@ from ..db.messages import add_bot_reaction
 from ..transcript import log_reaction
 from .base import BaseTool, ToolResult
 
+# Telegram's Bot API only accepts this fixed set of emojis for
+# ReactionTypeEmoji. Source:
+# https://core.telegram.org/bots/api#reactiontypeemoji
+SUPPORTED_REACTIONS: frozenset[str] = frozenset(
+    [
+        "👍", "👎", "❤", "🔥", "🥰", "👏", "😁", "🤔", "🤯", "😱",
+        "🤬", "😢", "🎉", "🤩", "🤮", "💩", "🙏", "👌", "🕊", "🤡",
+        "🥱", "🥴", "😍", "🐳", "❤‍🔥", "🌚", "🌭", "💯", "🤣", "⚡",
+        "🍌", "🏆", "💔", "🤨", "😐", "🍓", "🍾", "💋", "🖕", "😈",
+        "😴", "😭", "🤓", "👻", "👨‍💻", "👀", "🎃", "🙈", "😇", "😨",
+        "🤝", "✍", "🤗", "🫡", "🎅", "🎄", "☃", "💅", "🤪", "🗿",
+        "🆒", "💘", "🙉", "🦄", "😘", "💊", "🙊", "😎", "👾",
+        "🤷‍♂", "🤷", "🤷‍♀", "😡",
+    ]
+)
+
+_ALLOWLIST_DISPLAY = " ".join(sorted(SUPPORTED_REACTIONS))
+
 
 class AddReactionArgs(BaseModel):
     chat_id: int
     message_id: int
-    emoji: str = Field(description="A single emoji such as 👍 or ❤️.")
+    emoji: str = Field(
+        description=f"One of the Telegram-supported reaction emojis: {_ALLOWLIST_DISPLAY}."
+    )
 
 
 class AddReactionTool(BaseTool):
     name = "add_reaction"
-    description = "React to a Telegram message with a single emoji."
+    description = (
+        "React to a Telegram message with a single Telegram-supported emoji. "
+        f"Allowed emojis: {_ALLOWLIST_DISPLAY}."
+    )
     args_model = AddReactionArgs
 
     async def run(self, args: AddReactionArgs) -> ToolResult:
@@ -25,16 +48,26 @@ class AddReactionTool(BaseTool):
             return ToolResult(content="bot not configured", is_error=True)
         from telegram import ReactionTypeEmoji
 
+        emoji = args.emoji.replace("️", "")
+        if emoji not in SUPPORTED_REACTIONS:
+            return ToolResult(
+                content=(
+                    f"emoji {args.emoji!r} is not a Telegram-supported reaction. "
+                    f"Choose one of: {_ALLOWLIST_DISPLAY}"
+                ),
+                is_error=True,
+            )
+
         await self.ctx.bot.set_message_reaction(
             chat_id=args.chat_id,
             message_id=args.message_id,
-            reaction=[ReactionTypeEmoji(emoji=args.emoji)],
+            reaction=[ReactionTypeEmoji(emoji=emoji)],
         )
         log_reaction(
             chat_id=args.chat_id,
             chat_titles=self.ctx.chat_titles,
             message_id=args.message_id,
-            emoji=args.emoji,
+            emoji=emoji,
         )
         if self.ctx.database is not None:
             bot_id = 0
@@ -48,6 +81,6 @@ class AddReactionTool(BaseTool):
                 chat_id=args.chat_id,
                 message_id=args.message_id,
                 bot_user_id=bot_id,
-                emoji=args.emoji,
+                emoji=emoji,
             )
-        return ToolResult(content=f"reacted {args.emoji} to {args.message_id}")
+        return ToolResult(content=f"reacted {emoji} to {args.message_id}")
