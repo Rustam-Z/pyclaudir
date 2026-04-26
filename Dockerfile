@@ -15,9 +15,12 @@ RUN uv venv /app/.venv && \
 # Stage 2: Runtime
 FROM python:3.11-slim
 
-# Install Node.js (needed for Claude Code CLI + npx for GitLab MCP)
+# Install Node.js (needed for Claude Code CLI + npx for GitLab MCP) and
+# tini (a minimal init that reaps zombies — important since render_html
+# spawns Chromium as a subprocess; if Chromium gets orphaned we don't
+# want it lingering as a zombie under python-as-PID-1).
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl ca-certificates && \
+    apt-get install -y --no-install-recommends curl ca-certificates tini && \
     curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get install -y --no-install-recommends nodejs && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
@@ -51,4 +54,5 @@ COPY skills/ skills/
 # Data directory (mount as volume)
 VOLUME /app/data
 
+ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["python", "-m", "pyclaudir"]

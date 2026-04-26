@@ -225,7 +225,7 @@ Enforced in code:
 
 Issues and PRs welcome. Three rules before you start:
 
-- **Run the suite** — `uv run python -m pytest -q`. 342 tests today;
+- **Run the suite** — `uv run python -m pytest -q`. 346 tests today;
   keep them green.
 - **Persona-agnostic code.** Don't hardcode bot names, owner-specific
   strings, or chat ids in `pyclaudir/`. Persona lives in
