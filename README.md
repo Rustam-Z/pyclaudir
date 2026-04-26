@@ -42,7 +42,7 @@ actually own. *Always on.*
 ## Quickstart (3 minutes)
 
 ```bash
-git clone https://github.com/Rustam-Z/pyclaudir-agents && cd pyclaudir-agents
+git clone https://github.com/Rustam-Z/pyclaudir && cd pyclaudir
 
 cp .env.example .env && $EDITOR .env
 #   set TELEGRAM_BOT_TOKEN  (from @BotFather)
@@ -226,7 +226,7 @@ MIT. See [LICENSE](LICENSE).
 ## Layout
 
 ```
-pyclaudir-agents/
+pyclaudir/
 ├── prompts/        system.md (shipped) + project.md (yours)
 ├── skills/         operator-curated playbooks
 ├── data/           gitignored — SQLite, memories, session id, CC logs

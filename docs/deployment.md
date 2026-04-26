@@ -29,7 +29,7 @@ claude   # interactive login — creates ~/.claude/
 # Clone your private repo (SSH auth — add server's public key to GitHub first)
 #   On server: ssh-keygen -t ed25519 (if no key exists)
 #   Copy ~/.ssh/id_ed25519.pub → GitHub Settings → SSH keys
-git clone git@github.com:your-user/pyclaudir-agents.git ~/pyclaudir
+git clone git@github.com:your-user/pyclaudir.git ~/pyclaudir
 cd ~/pyclaudir
 
 # Configure
