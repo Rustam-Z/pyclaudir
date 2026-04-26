@@ -63,11 +63,12 @@ tools and schedules itself. No YAML, no cron syntax to memorise.
 ```bash
 git clone https://github.com/Rustam-Z/pyclaudir && cd pyclaudir
 
-cp .env.example .env && $EDITOR .env
+cp .env.example .env && nano .env
 #   set TELEGRAM_BOT_TOKEN  (from @BotFather)
 #   set PYCLAUDIR_OWNER_ID  (your numeric Telegram user id, from @userinfobot)
+#   update if necessary: PYCLAUDIR_MODEL and PYCLAUDIR_EFFORT
 
-cp prompts/project.md.example prompts/project.md && $EDITOR prompts/project.md
+cp prompts/project.md.example prompts/project.md && nano prompts/project.md
 #   set bot name, language, personality
 
 docker compose up -d --build
@@ -78,6 +79,7 @@ DM your bot. It replies.
 
 **No Docker?** `uv sync --extra dev && uv run python -m pyclaudir`.
 You need Python 3.11+ and the Claude Code CLI (`claude --version`).
+If you have Windows machine, then use docker compose. 
 
 > **This README is the high-level intro.** Deeper material lives in
 > [docs/](docs/) — full technical manual, deployment walkthrough, tools
