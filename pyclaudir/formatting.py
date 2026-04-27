@@ -16,8 +16,8 @@ def markdown_to_telegram_html(text: str) -> str:
     """Best-effort Markdown → Telegram HTML conversion.
 
     Handles: bold, italic, strikethrough, inline code, fenced code blocks,
-    inline links, and bare URLs.  Unsupported constructs (headings, lists,
-    images) are simplified to plain text equivalents.
+    inline links, bare URLs, and blockquotes.  Unsupported constructs
+    (headings, lists, images) are simplified to plain text equivalents.
     """
 
     # Step 1: extract fenced code blocks so inner content isn't processed
@@ -73,6 +73,21 @@ def markdown_to_telegram_html(text: str) -> str:
 
     # Step 6: strip markdown headings (### Title → Title)
     text = re.sub(r"^#{1,6}\s+", "", text, flags=re.MULTILINE)
+
+    # Step 6.5: blockquotes — group consecutive `&gt; `-prefixed lines.
+    # Done post-escape so the wrapper emits real HTML (not escaped) and so
+    # `>` inside fenced code (stashed in Step 1) is left alone.
+    def _wrap_blockquote(m: re.Match) -> str:
+        block = m.group(0).rstrip("\n")
+        inner = re.sub(r"^&gt;[ \t]?", "", block, flags=re.MULTILINE)
+        return f"<blockquote>{inner}</blockquote>\n"
+
+    text = re.sub(
+        r"(?:^&gt;[ \t]?[^\n]*(?:\n|$))+",
+        _wrap_blockquote,
+        text,
+        flags=re.MULTILINE,
+    )
 
     # Step 7: restore stashed code blocks and inline codes
     for idx, block in enumerate(code_blocks):

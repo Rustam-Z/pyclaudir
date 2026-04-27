@@ -86,3 +86,41 @@ def test_plain_text_unchanged():
 def test_underscore_in_words_not_italicized():
     result = markdown_to_telegram_html("some_variable_name")
     assert "<i>" not in result
+
+
+def test_blockquote_single_line():
+    assert markdown_to_telegram_html("> hi") == "<blockquote>hi</blockquote>\n"
+
+
+def test_blockquote_multi_line():
+    md = "> first\n> second"
+    assert markdown_to_telegram_html(md) == "<blockquote>first\nsecond</blockquote>\n"
+
+
+def test_blockquote_with_inline_formatting():
+    md = "> **bold** and [link](https://x)"
+    result = markdown_to_telegram_html(md)
+    assert result.startswith("<blockquote>")
+    assert "<b>bold</b>" in result
+    assert '<a href="https://x">link</a>' in result
+    assert result.rstrip("\n").endswith("</blockquote>")
+
+
+def test_blockquote_followed_by_text():
+    md = "> quoted\nplain tail"
+    result = markdown_to_telegram_html(md)
+    assert "<blockquote>quoted</blockquote>" in result
+    assert result.endswith("plain tail")
+
+
+def test_gt_inside_code_block_not_blockquoted():
+    md = "```\n> not a quote\n```"
+    result = markdown_to_telegram_html(md)
+    assert "<blockquote>" not in result
+    assert "&gt; not a quote" in result
+
+
+def test_plain_gt_not_at_line_start():
+    result = markdown_to_telegram_html("a > b")
+    assert result == "a &gt; b"
+    assert "<blockquote>" not in result
