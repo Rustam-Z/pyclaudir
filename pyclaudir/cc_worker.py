@@ -269,18 +269,17 @@ class CcWorker:
     """
 
     #: Optional callback the supervisor calls when CC crashes (one per
-    #: crash, before the backoff/respawn).
-    #: Signature: ``async on_crash(stderr_tail: list[str], attempt: int, backoff: float)``
-    OnCrash = Any  # Callable[[list[str], int, float], Awaitable[None]] | None
+    #: crash, before the backoff/respawn). Only fires for *unexpected*
+    #: exits — intentional terminations (tool-error breaker, liveness
+    #: watchdog) are recognised via ``_supervisor_abort_reason`` and
+    #: do not reach this callback.
+    #: Signature: ``async on_crash(attempt: int, backoff: float)``
+    OnCrash = Any  # Callable[[int, float], Awaitable[None]] | None
     #: Optional callback the supervisor calls *once* when the crash loop
-    #: has exhausted its budget (``Config.crash_limit`` crashes in
-    #: ``Config.crash_window_seconds``) — a terminal condition: no further
-    #: respawn will be attempted by this worker. The operator needs to
-    #: intervene. Fires before the underlying :class:`CrashLoop` is
-    #: re-raised so the callback can notify the owner/users even though
-    #: the worker is about to die.
-    #: Signature: ``async on_giveup(stderr_tail: list[str], crash_count: int)``
-    OnGiveup = Any  # Callable[[list[str], int], Awaitable[None]] | None
+    #: has exhausted its budget. Fires before :class:`CrashLoop` is
+    #: re-raised so the callback can notify the owner/users.
+    #: Signature: ``async on_giveup(crash_count: int)``
+    OnGiveup = Any  # Callable[[int], Awaitable[None]] | None
 
     def __init__(
         self,
@@ -340,9 +339,9 @@ class CcWorker:
         self._tool_error_watchdog_task: asyncio.Task | None = None
         #: Set just before ``_terminate_proc`` when the worker aborts a
         #: turn for a known reason (e.g. ``"tool-error-limit"``). The
-        #: engine reads this after ``wait_for_result`` raises so it can
-        #: tailor the user-facing message. One-shot: cleared on read.
-        self._last_abort_reason: str | None = None
+        #: supervisor reads-and-clears it to skip the crash callback
+        #: for self-inflicted exits.
+        self._supervisor_abort_reason: str | None = None
         self._tool_error_abort_task: asyncio.Task | None = None
         # Raw-capture state. We open with "pending-<ts>" names if we don't
         # know the session id at start time, then rename to "<sid>.*" once
@@ -359,17 +358,6 @@ class CcWorker:
     @property
     def is_running(self) -> bool:
         return self._proc is not None and self._proc.returncode is None
-
-    def consume_abort_reason(self) -> str | None:
-        """Return the reason for the most recent aborted turn, if any.
-
-        One-shot: the value is cleared after this read so the next turn
-        starts with a clean slate. The engine calls this after
-        ``wait_for_result`` raises, to pick the user-facing message.
-        """
-        reason = self._last_abort_reason
-        self._last_abort_reason = None
-        return reason
 
     async def start(self) -> None:
         argv = build_argv(self.spec)
@@ -616,8 +604,7 @@ class CcWorker:
                 "(timeout=%.0fs). Terminating to trigger respawn.",
                 silence, timeout,
             )
-            # Terminate. The supervisor's wait() will wake up and the
-            # crash-recovery path respawns automatically.
+            self._supervisor_abort_reason = "liveness-wedge"
             await self._terminate_proc()
 
     async def _supervise_loop(self) -> None:
@@ -631,6 +618,18 @@ class CcWorker:
             if self._stop_supervisor.is_set():
                 return
 
+            intentional = self._supervisor_abort_reason
+            self._supervisor_abort_reason = None
+            if intentional is not None:
+                log.info(
+                    "cc subprocess exited rc=%s on intentional %s — respawning",
+                    rc, intentional,
+                )
+                await asyncio.sleep(self._crash_backoff_base)
+                await self._terminate_proc()
+                await self.start()
+                continue
+
             log.warning(
                 "cc subprocess exited rc=%s; recent stderr=%s",
                 rc, self._stderr_tail[-5:],
@@ -642,15 +641,9 @@ class CcWorker:
             ]
             self._crash_times.append(now)
             if len(self._crash_times) >= self._crash_limit:
-                # Terminal — fire the giveup callback so the operator
-                # and active users learn the bot is actually down, then
-                # re-raise so the supervisor task exits. Callback errors
-                # are swallowed so a buggy callback can't mask CrashLoop.
                 if self._on_giveup is not None:
                     try:
-                        await self._on_giveup(
-                            list(self._stderr_tail), len(self._crash_times),
-                        )
+                        await self._on_giveup(len(self._crash_times))
                     except Exception:
                         log.debug("on_giveup callback failed", exc_info=True)
                 raise CrashLoop(
@@ -666,7 +659,7 @@ class CcWorker:
             log.warning("respawning cc in %.1fs (attempt %d)", backoff, attempt)
             if self._on_crash is not None:
                 try:
-                    await self._on_crash(list(self._stderr_tail), attempt, backoff)
+                    await self._on_crash(attempt, backoff)
                 except Exception:
                     log.debug("on_crash callback failed", exc_info=True)
             await asyncio.sleep(backoff)
@@ -732,12 +725,6 @@ class CcWorker:
             log.warning("inject failed: stdin closed; queueing for next turn")
             await self._inject_queue.put(text)
 
-    async def drain_inject_queue(self) -> list[str]:
-        """Pop everything queued during a stalled inject window."""
-        out: list[str] = []
-        while not self._inject_queue.empty():
-            out.append(self._inject_queue.get_nowait())
-        return out
 
     # ------------------------------------------------------------------
     # Background readers
@@ -776,8 +763,6 @@ class CcWorker:
                 self._stderr_tail.append(decoded)
                 self._stderr_tail = self._stderr_tail[-10:]
                 self._write_stderr_line(decoded)
-                if "rate limit" in decoded.lower() or "quota" in decoded.lower():
-                    log.warning("cc stderr: %s", decoded)
         except asyncio.CancelledError:
             raise
         except Exception:  # pragma: no cover
@@ -859,7 +844,7 @@ class CcWorker:
             reason, self._turn_tool_error_count, elapsed,
             self._tool_error_max_count, self._tool_error_window,
         )
-        self._last_abort_reason = "tool-error-limit"
+        self._supervisor_abort_reason = "tool-error-limit"
         # Unblock the engine's ``wait_for_result`` immediately with a
         # sentinel TurnResult — the supervisor's respawn path can
         # take seconds, we don't want the user waiting on it.

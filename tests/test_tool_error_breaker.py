@@ -109,7 +109,6 @@ async def test_count_branch_trips_on_third_error(worker: CcWorker) -> None:
     result = worker._result_queue.get_nowait()
     assert isinstance(result, TurnResult)
     assert result.aborted_reason == "tool-error-limit"
-    assert worker._last_abort_reason == "tool-error-limit"
 
 
 @pytest.mark.asyncio
@@ -131,7 +130,6 @@ async def test_watchdog_fires_alone_with_single_error(
 
     result = worker._result_queue.get_nowait()
     assert result.aborted_reason == "tool-error-limit"
-    assert worker._last_abort_reason == "tool-error-limit"
 
 
 @pytest.mark.asyncio
@@ -180,7 +178,6 @@ async def test_successful_turn_cancels_watchdog(
     # Wait past the original deadline; nothing should fire.
     await asyncio.sleep(0.1)
     assert not terminate_called.is_set()
-    assert worker._last_abort_reason is None
     # The result was queued, but it's the legitimate turn result, not
     # the breaker sentinel.
     queued = worker._result_queue.get_nowait()
@@ -279,8 +276,3 @@ async def test_send_resets_counters_and_cancels_watchdog(worker: CcWorker) -> No
     assert watchdog.cancelled() or watchdog.done()
 
 
-def test_consume_abort_reason_is_one_shot(tmp_path: Path) -> None:
-    w = CcWorker(_spec(tmp_path), Config.for_test(tmp_path))
-    w._last_abort_reason = "tool-error-limit"
-    assert w.consume_abort_reason() == "tool-error-limit"
-    assert w.consume_abort_reason() is None

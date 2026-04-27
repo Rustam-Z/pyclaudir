@@ -309,35 +309,27 @@ def test_on_giveup_fires_before_crashloop_raises(spec: CcSpawnSpec, cfg: Config)
 
     from pyclaudir.cc_worker import CrashLoop
 
-    calls: list[tuple[list[str], int]] = []
+    calls: list[int] = []
 
-    async def record_giveup(stderr_tail: list[str], count: int) -> None:
-        calls.append((list(stderr_tail), count))
+    async def record_giveup(count: int) -> None:
+        calls.append(count)
 
     worker = CcWorker(spec, cfg, on_giveup=record_giveup)
-    worker._stderr_tail = ["unauthorized", "authentication failed"]
     # Seed `crash_limit` entries so the very next exit trips the ceiling.
     now = time.monotonic()
     worker._crash_times = [now - i for i in range(worker._crash_limit - 1)]
 
     async def run() -> None:
-        # Reproduce the accounting + trip logic from _supervise_loop
-        # without subprocess plumbing.
         worker._crash_times.append(now)
         assert len(worker._crash_times) >= worker._crash_limit
         if worker._on_giveup is not None:
-            await worker._on_giveup(
-                list(worker._stderr_tail), len(worker._crash_times),
-            )
+            await worker._on_giveup(len(worker._crash_times))
         raise CrashLoop("simulated")
 
     with pytest.raises(CrashLoop):
         asyncio.run(run())
 
-    assert len(calls) == 1
-    stderr, count = calls[0]
-    assert "unauthorized" in stderr
-    assert count == worker._crash_limit
+    assert calls == [worker._crash_limit]
 
 
 def test_structured_output_with_text_blocks_is_not_dropped_text(spec: CcSpawnSpec, cfg: Config) -> None:
