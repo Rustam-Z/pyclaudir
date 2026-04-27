@@ -109,11 +109,21 @@ def _validate_skill_metadata(metadata: dict, expected_name: str) -> None:
 
 
 class SkillsStore:
-    def __init__(self, root: Path) -> None:
+    def __init__(
+        self,
+        root: Path,
+        *,
+        disabled: frozenset[str] = frozenset(),
+    ) -> None:
         #: ``resolve(strict=False)`` — root may not exist on a fresh clone
         #: of someone who hasn't seeded any skills. :meth:`ensure_root`
         #: creates the top-level dir.
         self._root = root.resolve()
+        #: Skill directory names hidden from :meth:`list` and
+        #: :meth:`read`. Sourced from ``plugins.json`` ``skills_disabled``.
+        #: Filtered out before the SKILL.md is even read, so a malformed
+        #: disabled skill never blocks the rest of the catalogue.
+        self._disabled = disabled
 
     @property
     def root(self) -> Path:
@@ -196,6 +206,8 @@ class SkillsStore:
                 continue
             if entry.name.startswith("."):
                 continue
+            if entry.name in self._disabled:
+                continue
             skill_md = entry / "SKILL.md"
             if not skill_md.is_file() or skill_md.is_symlink():
                 continue
@@ -227,6 +239,8 @@ class SkillsStore:
         skill raises :class:`SkillsError` rather than surfacing
         partial content.
         """
+        if name in self._disabled:
+            raise SkillsError(f"skill not found: {name}")
         path = self._resolve_skill_md(name)
         if not path.exists() or not path.is_file():
             raise SkillsError(f"skill not found: {name}")

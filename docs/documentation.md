@@ -30,17 +30,28 @@ pyclaudir runs Claude inside a long-lived
 `claude --print --input-format stream-json` process and limits what Claude
 can do with the `--allowedTools` and `--disallowedTools` flags. By
 default the bot has only its own MCP tools (in `pyclaudir/tools/`,
-served by a local MCP server) plus `WebFetch` and `WebSearch`. Every
-dangerous CC built-in is gated behind a single env var:
-`PYCLAUDIR_ENABLE_BASH=true` unlocks `Bash` / `PowerShell` / `Monitor`;
-`PYCLAUDIR_ENABLE_CODE=true` unlocks `Edit` / `Write` / `Read` /
-`NotebookEdit` / `Glob` / `Grep` / `LSP`;
-`PYCLAUDIR_ENABLE_SUBAGENTS=true` unlocks `Agent`. Jira and GitLab
-tools are advertised when their credentials are set (`JIRA_URL` etc.,
-`GITLAB_URL` etc.) — no separate enable flag. The full allow/deny
-list and the per-tool descriptions live in
-[tools.md](tools.md); the implementation is in
-`pyclaudir/cc_worker.py`.
+served by a local MCP server) plus `WebFetch` and `WebSearch`.
+
+The toggle source of truth is [`plugins.json`](../plugins.json) at
+the repo root:
+
+* `tool_groups` — flips for the dangerous CC built-ins. `bash`
+  unlocks `Bash` / `PowerShell` / `Monitor`; `code` unlocks `Edit` /
+  `Write` / `Read` / `NotebookEdit` / `Glob` / `Grep` / `LSP`;
+  `subagents` unlocks `Agent`.
+* `mcps` — list of external MCP servers to spawn. Jira, GitLab, and
+  GitHub ship in the default file, gated by `${VAR}` references that
+  pull credentials from `.env` (`JIRA_URL` etc., `GITLAB_URL` /
+  `GITLAB_TOKEN`, `GITHUB_PERSONAL_ACCESS_TOKEN`). Add an entry to
+  plug in any other stdio MCP server.
+* `builtin_tools_disabled` — names of pyclaudir built-in tools to
+  hide (e.g. `create_poll`, `render_html`). Filtered at MCP
+  registration time, never advertised to Claude.
+* `skills_disabled` — names of skill directories to hide.
+
+The full per-tool list and the schema reference live in
+[tools.md](tools.md); the loader is `pyclaudir/plugins.py`; the
+allow/deny argv is assembled in `pyclaudir/cc_worker.py`.
 
 ## Full configuration
 
@@ -51,6 +62,12 @@ The rest of the code reads values from the `Config` object, never from
 instead of calling `os.environ.get` from somewhere else. Tests build a
 `Config.for_test(tmp_path)` and set values on it, so they don't depend on
 what's in your environment.
+
+The one allowed exception is `pyclaudir/plugins.py` — it reads
+`os.environ` directly to substitute `${VAR}` references in
+`plugins.json` `mcps[].args` and `mcps[].env` values. That's how
+Jira / GitLab / GitHub credentials reach their MCP servers without
+being copied into a `Config` field.
 
 | Variable | Required | Default | Notes |
 |---|---|---|---|
@@ -72,14 +89,18 @@ what's in your environment.
 | `PYCLAUDIR_CRASH_BACKOFF_CAP` | no | `64` | maximum wait between restarts. Once the wait reaches this, it stops growing. |
 | `PYCLAUDIR_CRASH_LIMIT` | no | `10` | how many crashes within `CRASH_WINDOW_SECONDS` count as "too many". When reached, the bot tells the owner and active chats, then exits — and something outside (systemd, docker) is expected to restart the whole bot. |
 | `PYCLAUDIR_CRASH_WINDOW_SECONDS` | no | `600` | the time window used for `CRASH_LIMIT`. Only crashes from the last X seconds are counted. |
-| `PYCLAUDIR_ENABLE_SUBAGENTS` | no | `false` | when `true`, the `Agent` tool is allowed and Claude is told it exists. Helper agents use a lot of tokens, so leave off unless you really need them. |
-| `PYCLAUDIR_ENABLE_BASH` | no | `false` | when `true`, unlocks `Bash`, `PowerShell`, `Monitor`. Off by default. |
-| `PYCLAUDIR_ENABLE_CODE` | no | `false` | when `true`, unlocks `Edit`, `Write`, `Read`, `NotebookEdit`, `Glob`, `Grep`, `LSP`. Off by default — the standard Telegram-assistant deployment doesn't need code-edit tools. |
-| `JIRA_URL` | no | — | Jira site URL (turns on mcp-atlassian) |
-| `JIRA_USERNAME` | no | — | Jira username |
-| `JIRA_API_TOKEN` | no | — | Jira API token |
-| `GITLAB_URL` | no | — | GitLab URL (turns on mcp-gitlab) |
-| `GITLAB_TOKEN` | no | — | GitLab personal access token |
+External-service credentials referenced by the default `plugins.json`
+via `${VAR}`. Set these in `.env` to make the corresponding MCP
+spawn; clear them to silently skip its MCP at boot.
+
+| Variable | Required | Default | Notes |
+|---|---|---|---|
+| `JIRA_URL` | no | — | Jira site URL — referenced by the `mcp-atlassian` plugin entry |
+| `JIRA_USERNAME` | no | — | Jira username — same |
+| `JIRA_API_TOKEN` | no | — | Jira API token — same |
+| `GITLAB_URL` | no | — | GitLab URL — referenced by the `mcp-gitlab` plugin entry |
+| `GITLAB_TOKEN` | no | — | GitLab personal access token — same |
+| `GITHUB_PERSONAL_ACCESS_TOKEN` | no | — | GitHub PAT — referenced by the `github` plugin entry. For Enterprise, add `GITHUB_HOST` to the entry's `env` block in `plugins.json` and set it here too. |
 
 Who can DM the bot or use it in groups is set in `data/access.json`, not
 in environment variables. See [Access control](#access-control).
@@ -443,16 +464,31 @@ If `project.md` doesn't exist, only the base prompt is used.
 ## External MCP integrations
 
 pyclaudir can optionally connect to external MCP servers alongside its
-own:
+own. The default [`plugins.json`](../plugins.json) at the repo root
+ships three credential-gated entries:
 
 - **Jira** via [mcp-atlassian](https://github.com/sooperset/mcp-atlassian)
   — set `JIRA_URL`, `JIRA_USERNAME`, `JIRA_API_TOKEN` in `.env`.
 - **GitLab** via
   [@zereight/mcp-gitlab](https://www.npmjs.com/package/@zereight/mcp-gitlab)
   — set `GITLAB_URL`, `GITLAB_TOKEN` in `.env`.
+- **GitHub** via
+  [@modelcontextprotocol/server-github](https://www.npmjs.com/package/@modelcontextprotocol/server-github)
+  — set `GITHUB_PERSONAL_ACCESS_TOKEN` in `.env`. For Enterprise, add
+  `"GITHUB_HOST": "${GITHUB_HOST}"` to the entry's `env` block and set
+  `GITHUB_HOST` in `.env` too.
 
-These are stdio-based MCP servers spawned as child processes alongside
-the local pyclaudir MCP server.
+Each entry references its credentials with `${VAR}` interpolation;
+when any required var is empty, that MCP is silently skipped at boot
+(matching the pre-`plugins.json` "credentials missing → no spawn"
+semantics). To stop advertising an integration without removing
+credentials, flip `enabled: false` on its entry. To remove
+permanently, delete the entry.
+
+These are stdio-based MCP servers spawned as child processes
+alongside the local pyclaudir MCP server. Adding a fourth (Notion,
+Linear, Slack, Postgres, Playwright, your own) is a `plugins.json`
+edit — no Python change. See [tools.md](tools.md) for the schema.
 
 ## Monitoring & observability
 
@@ -645,13 +681,13 @@ is enforced by code, not by hope, and tested in
   (the always-on base) and a deny list covering every gated tool:
   `--disallowedTools Bash,PowerShell,Monitor,Edit,Write,Read,
   NotebookEdit,Glob,Grep,LSP,Agent --strict-mcp-config`. Each gated
-  group flips on with a single env var
-  (`PYCLAUDIR_ENABLE_BASH`, `PYCLAUDIR_ENABLE_CODE`,
-  `PYCLAUDIR_ENABLE_SUBAGENTS`); Jira/GitLab tool advertisement is
-  derived from credential presence. The forbidden flag
+  group flips on via `plugins.json` `tool_groups`; external-MCP tool
+  advertisement follows from `plugins.json` `mcps[]` entries whose
+  `${VAR}` references resolve. The forbidden flag
   `--dangerously-skip-permissions` is *never* passed; both the argv
   builder and the spawn-time assertion refuse it. See
-  [tools.md](tools.md) for the full per-tool list.
+  [tools.md](tools.md) for the full per-tool list and the
+  `plugins.json` schema.
 - **Web access (read-only).** `WebFetch` and `WebSearch` are
   deliberately enabled so the agent can answer questions that need
   fresh information. This is a real trade-off — see the next bullet.

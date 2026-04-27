@@ -1,18 +1,14 @@
 # pyclaudir
 
-**Run personal AI agent in Telegram. With your rules.**
+**Run personal AI assistant in Telegram. With your rules.**
 
-It DMs you. Sits in your group chats. Takes notes in plain markdown files you actually own. Schedules reminders. 
-Name it, pick a voice, set a language — all in `prompts/project.md`. Configure it once. Ship it. It's yours.
+Most AI tools wait. Pyclaudir doesn't. It lives in your Telegram, remembers every conversation, and pings you the moment something matters — a trend turning, a Jira ticket due, a build that broke at 3am. 
 
-Out of the box it's clean: messaging in DM & group chats, memory, reminders & scheduled tasks, web access, security.
-Want shell access? Code editing? Subagents? GitLab? GitHub? Jira? One env var each. Off until you flip them. Full list in [docs/tools.md](docs/tools.md).
+Brief it before bed: "research global tech trends, find problems worth solving in Uzbekistan, write the analysis and ship a prototype." Wake up to a report, a pitch, and a working demo. That's the difference between a chatbot and an assistant.
 
-**One process, no magic.** A Python harness that listens Telegram, runs `claude` as a subprocess (via a local MCP server), and posts the reply back. 
-Main work: message-as-stimulus loop, MCP tool host, persistent memory, multi-bot orchestration, harness logic.
-You control who can talk to it (just you, or group chats, or anyone). 
-Runs on your laptop or any small VPS. 
-Can be used with your existing Claude Code subscription.
+It learns you. Every day it reflects on what worked and writes new rules into its own playbook — with your approval. Drop it in a group chat and it tracks who's blocked, what shipped, what slipped. DM it and it's your personal chief of staff. Plain markdown files you actually own. Your rules. One process you control end to end.
+
+Out of the box: messaging, memory, reminders, web, vision. Want shell access? Code editing? Jira, GitHub, GitLab? One env var each, off until you flip them. Runs on your laptop or any small VPS. Works with your existing Claude Code subscription.
 
 ## What you can do with it
 
@@ -41,16 +37,16 @@ actually own. *Always on.*
 ### Try saying
 
 Concrete one-liners you can DM the bot today (assumes you named it
-`Nodira` in `prompts/project.md`):
+`Luna` in `prompts/project.md`):
 
-- *"@Nodira every weekday at 9am, read the last 24h of our team chat and DM me a 5-bullet status."* — uses `set_reminder` + `query_db` + `send_message`. Ships on by default.
-- *"@Nodira every Monday at 8am, pull top AI stories from Hacker News and TechCrunch and message me a briefing."* — `set_reminder` + `WebFetch` + `WebSearch`. Default tools.
-- *"@Nodira each evening at 9pm, ask me what I shipped today and append it to my journal."* — appends to `data/memories/journal.md` via `append_memory`. Default tools.
-- *"@Nodira remind me to take meds at 9pm daily, and nag me if I don't react with 👍 within 10 min."* — `set_reminder` + `add_reaction` + `query_db` to check the reaction.
-- *"@Nodira watch https://example.com/changelog hourly and ping me the moment a new entry mentions 'pricing'."* — cron `set_reminder` + `WebFetch`. Diff state lives in a memory file.
-- *"@Nodira every Friday at 5pm, review this week's git log on `~/code/myapp` and open a PR if the README has drifted."* — needs `PYCLAUDIR_ENABLE_BASH=true` and `PYCLAUDIR_ENABLE_CODE=true`, plus `GITHUB_PERSONAL_ACCESS_TOKEN` for the PR.
-- *"@Nodira every morning at 7am, DM me my Jira tickets due this week, grouped by project."* — needs `JIRA_*` env vars.
-- *"@Nodira poll the group on lunch spots — Ramen, Burrito, Salad — and message me the result at 11:45."* — `create_poll` + `set_reminder` + `stop_poll`. Default tools.
+- *"@Luna every weekday at 9am, read the last 24h of our team chat and DM me a 5-bullet status."* — uses `set_reminder` + `query_db` + `send_message`. Ships on by default.
+- *"@Luna every Monday at 8am, pull top AI stories from Hacker News and TechCrunch and message me a briefing."* — `set_reminder` + `WebFetch` + `WebSearch`. Default tools.
+- *"@Luna each evening at 9pm, ask me what I shipped today and append it to my journal."* — appends to `data/memories/journal.md` via `append_memory`. Default tools.
+- *"@Luna remind me to take meds at 9pm daily, and nag me if I don't react with 👍 within 10 min."* — `set_reminder` + `add_reaction` + `query_db` to check the reaction.
+- *"@Luna watch https://example.com/changelog hourly and ping me the moment a new entry mentions 'pricing'."* — cron `set_reminder` + `WebFetch`. Diff state lives in a memory file.
+- *"@Luna every Friday at 5pm, review this week's git log on `~/code/myapp` and open a PR if the README has drifted."* — needs `tool_groups.bash: true` and `tool_groups.code: true` in `plugins.json`, plus `GITHUB_PERSONAL_ACCESS_TOKEN` in `.env` for the PR.
+- *"@Luna every morning at 7am, DM me my Jira tickets due this week, grouped by project."* — needs `JIRA_*` env vars.
+- *"@Luna poll the group on lunch spots — Ramen, Burrito, Salad — and message me the result at 11:45."* — `create_poll` + `set_reminder` + `stop_poll`. Default tools.
 
 The pattern: you describe the *outcome* in chat, the bot picks the
 tools and schedules itself. No YAML, no cron syntax to memorise.
@@ -70,15 +66,73 @@ cp .env.example .env && nano .env
 cp prompts/project.md.example prompts/project.md && nano prompts/project.md
 #   set bot name, language, personality
 
+cp plugins.json.example plugins.json && nano plugins.json
+#   single source of truth for the bot's capability surface — see below
+
 docker compose up -d --build
-docker compose logs -f   # wait for "pyclaudir is live"
+docker compose logs -f                                                    # run harness, wait for "pyclaudir is live"
+docker compose exec pyclaudir python -m pyclaudir.scripts.trace --follow  # tail Claude Code I/O
+```
+
+```bash
+# Or run without docker
+uv run python -m pyclaudir                          # run harness, wait for "pyclaudir is live"
+uv run python -m pyclaudir.scripts.trace --follow   # tail Claude Code I/O
 ```
 
 DM your bot. It replies.
 
 **No Docker?** `uv sync --extra dev && uv run python -m pyclaudir`.
 You need Python 3.11+ and the Claude Code CLI (`claude --version`).
-If you have Windows machine, then use docker compose. 
+If you have Windows machine, then use docker compose.
+
+### The three setup files
+
+| File | Tracked in git? | What it controls |
+|---|---|---|
+| `.env` | no | secrets — Telegram bot token, owner id, integration credentials (Jira / GitLab / GitHub) referenced by `plugins.json` via `${VAR}` |
+| `prompts/project.md` | no | persona — bot name, language, house rules, owner-specific instructions; appended to the shipped `prompts/system.md` |
+| `plugins.json` | no | capability surface — what tools, skills, and MCPs are on |
+
+`.env.example`, `prompts/project.md.example`, and `plugins.json.example` are tracked so you have a starting point; the real files (the three above) are gitignored so different deployments carry different config without fighting over the file.
+
+### What `plugins.json` controls
+
+One file, four blocks. Edit and restart to apply.
+
+```jsonc
+{
+  "tool_groups": {           // dangerous Claude Code built-ins, all off by default
+    "bash":      false,      //   Bash, PowerShell, Monitor — shell execution
+    "code":      false,      //   Edit, Write, Read, NotebookEdit, Glob, Grep, LSP
+    "subagents": false       //   Agent — token-heavy, isolated context
+  },
+  "mcps": [                  // external MCP servers spawned alongside ours
+    {
+      "name": "github",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env":  { "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}" },
+      "allowed_tools": ["mcp__github"],
+      "enabled": true
+    }
+    // …add Notion, Linear, Slack, Postgres, Playwright, your own — same shape
+  ],
+  "builtin_tools_disabled": [ // pyclaudir built-ins to hide from the agent
+    // e.g. "create_poll", "stop_poll", "render_html", "render_latex", "send_photo"
+  ],
+  "skills_disabled": [       // skill directories under skills/ to hide
+    // e.g. "render-style"
+  ]
+}
+```
+
+- **Tool groups.** Claude Code's dangerous built-ins (shell / code edit / subagents). All off by default. Flip to `true` and restart to unlock.
+- **External MCPs.** Each entry spawns a stdio MCP server. `${VAR}` references pull credentials from `.env`; if any required var is empty the MCP is silently skipped at boot. To stop advertising one without removing credentials, flip `"enabled": false`. Adding a new MCP (Notion, Slack, your own) is just a new array entry — no Python.
+- **Built-in tool toggles.** Names of pyclaudir built-ins (e.g. `create_poll`, `render_latex`) you want hidden. Filtered at MCP registration — the agent literally can't see them. A typo crashes boot with the available list.
+- **Skill toggles.** Directory names under `skills/` to hide. The skill stays on disk but isn't listed or readable, so it can't be invoked.
+
+A missing `plugins.json` boots locked-down (no integrations, no tool groups). A malformed file crashes boot loudly. Full schema reference: [docs/tools.md](docs/tools.md).
 
 > **This README is the high-level intro.** Deeper material lives in
 > [docs/](docs/) — full technical manual, deployment walkthrough, tools
@@ -101,11 +155,11 @@ If you have Windows machine, then use docker compose.
 
 **skills:** read operator-curated playbooks under `skills/` — `render-style` (house style for renders), `self-reflection` (learning loop). Reference skills are read on initiative; invoked skills require a real `<reminder>` envelope.
 
-**opt-in:** shell (`Bash` / `PowerShell` / `Monitor`), code editing (`Edit` / `Write` / `Read` / `NotebookEdit` / `Glob` / `Grep` / `LSP`), subagents (`Agent`), and Jira / GitLab / GitHub MCP surfaces — each gated behind an env var, off by default.
+**opt-in:** shell (`Bash` / `PowerShell` / `Monitor`), code editing (`Edit` / `Write` / `Read` / `NotebookEdit` / `Glob` / `Grep` / `LSP`), subagents (`Agent`), and Jira / GitLab / GitHub MCP surfaces — all toggled in `plugins.json`. Credentials for the integrations live in `.env` and are pulled in via `${VAR}` references. Off by default.
 
 **what can't do:** generate images. Send voice messages, GIFs, animations, stickers. Read voice / video / video notes / stickers (they arrive empty — ask for a screenshot or description). Moderate (mute / ban / kick / unban / member lists). Make phone calls or watch videos.
 
-Per-tool descriptions and the env-var matrix for the opt-in groups: [docs/tools.md](docs/tools.md).
+Per-tool descriptions, the `plugins.json` schema, and how to add a new MCP / disable a built-in tool / hide a skill: [docs/tools.md](docs/tools.md).
 
 ## Architecture
 
@@ -147,12 +201,21 @@ All settings come from environment variables (or `.env`). Full list in
 | `PYCLAUDIR_MODEL` | yes | e.g. `claude-opus-4-6` |
 | `PYCLAUDIR_EFFORT` | yes | `low` / `medium` / `high` / `max` |
 | `PYCLAUDIR_DATA_DIR` | no | defaults to `./data` |
-| `PYCLAUDIR_ENABLE_SUBAGENTS` | no | off by default — `Agent`, token-heavy |
-| `PYCLAUDIR_ENABLE_BASH` | no | off — `Bash` / `PowerShell` / `Monitor` |
-| `PYCLAUDIR_ENABLE_CODE` | no | off — `Edit` / `Write` / `Read` / `NotebookEdit` / `Glob` / `Grep` / `LSP` |
-| `JIRA_URL` + `JIRA_USERNAME` + `JIRA_API_TOKEN` | no | turn on Jira via [mcp-atlassian](https://github.com/sooperset/mcp-atlassian) |
-| `GITLAB_URL` + `GITLAB_TOKEN` | no | turn on GitLab via [@zereight/mcp-gitlab](https://www.npmjs.com/package/@zereight/mcp-gitlab) |
-| `GITHUB_PERSONAL_ACCESS_TOKEN` | no | turn on GitHub via [@modelcontextprotocol/server-github](https://www.npmjs.com/package/@modelcontextprotocol/server-github); set `GITHUB_HOST` for Enterprise |
+
+**Tool-surface toggles** (subagents, shell, code editing, built-in
+tools, MCPs, skills) live in [`plugins.json`](plugins.json.example),
+not in `.env`. Copy `plugins.json.example` → `plugins.json` once and
+edit; restart to apply. See [docs/tools.md](docs/tools.md) for the
+schema.
+
+Credentials for the integration MCPs ship in `.env` and are pulled
+into `plugins.json` via `${VAR}` references:
+
+| Variable | Required | Notes |
+|---|---|---|
+| `JIRA_URL` + `JIRA_USERNAME` + `JIRA_API_TOKEN` | no | credentials for Jira via [mcp-atlassian](https://github.com/sooperset/mcp-atlassian); the `mcp-atlassian` entry in `plugins.json` references them via `${VAR}` |
+| `GITLAB_URL` + `GITLAB_TOKEN` | no | credentials for GitLab via [@zereight/mcp-gitlab](https://www.npmjs.com/package/@zereight/mcp-gitlab); referenced from `plugins.json` |
+| `GITHUB_PERSONAL_ACCESS_TOKEN` | no | credentials for GitHub via [@modelcontextprotocol/server-github](https://www.npmjs.com/package/@modelcontextprotocol/server-github); referenced from `plugins.json`. For Enterprise, add `GITHUB_HOST` to the entry's `env` block. |
 
 Access policy lives in `data/access.json` (hot-reloaded). DM policies:
 `owner_only` (default), `allowlist`, `open`. Group chats must be in
@@ -169,16 +232,25 @@ Almost every axis of the bot is pluggable without touching the core:
   [pyclaudir/tools/](pyclaudir/tools/) — one file, Pydantic args
   model, async `run`. The local MCP server auto-discovers it on
   restart. No registry edits, no wiring.
-- **Plug in an external MCP server.** Jira, GitLab, and GitHub are
-  already wired this way — flip an env var and the community MCP
-  server is spawned alongside ours and merged into the agent's tool
-  surface. Any stdio MCP server (Notion, Linear, Slack, Postgres,
-  Playwright, your own) drops in the same way. Pattern lives in
-  [pyclaudir/__main__.py](pyclaudir/__main__.py).
+- **Plug in an external MCP server.** Append an entry to
+  [`plugins.json`](plugins.json) with `name`, `command`, `args`,
+  `env` (with `${VAR}` interpolation from `.env`), and the
+  `allowed_tools` list. Jira, GitLab, and GitHub ship in the default
+  file — any stdio MCP server (Notion, Linear, Slack, Postgres,
+  Playwright, your own) drops in the same way. No Python edit. To
+  hide a wired-in MCP without removing credentials, flip
+  `enabled: false` on its entry.
+- **Disable a built-in tool you don't use.** List it in
+  `builtin_tools_disabled` in `plugins.json` (e.g. `create_poll`,
+  `stop_poll`, `render_html`, `render_latex`, `send_photo`). The
+  tool is filtered at MCP registration time — the model can't see or
+  invoke it. Trims the surface area without code changes.
 - **Add a skill.** Drop a playbook at `skills/<name>/SKILL.md` (see
   [Agent Skills spec](https://agentskills.io/specification)) and the
   bot reads it on demand. Two ship today: `self-reflection` (daily
   learning loop) and `render-style` (house style for `render_html`).
+  To hide one without deleting it, list its directory name in
+  `skills_disabled` in `plugins.json`.
 - **Reshape the persona.** Name, voice, language, house rules,
   default behaviours — all live in `prompts/project.md`. Edit and
   restart; no code change.
@@ -188,11 +260,11 @@ Almost every axis of the bot is pluggable without touching the core:
   nothing.
 
 **Observability** — live tagged log (`[RX]` / `[TX]` / `[CC.tool→]`),
-session replay (`uv run python -m pyclaudir.scripts.trace --follow`),
-raw wire log in `data/cc_logs/<session>.stream.jsonl`, plus
-`sqlite3 data/pyclaudir.db` for cross-session queries. To talk to the
-bot's own session interactively:
-`claude --resume $(cat data/session_id) --fork-session`.
+human-readable session replay (`uv run python -m pyclaudir.scripts.trace --follow`;
+add `--session <id>` to pin one), raw wire log in
+`data/cc_logs/<session>.stream.jsonl`, plus `sqlite3 data/pyclaudir.db`
+for cross-session queries. Talk to the bot's own session interactively
+with `claude --resume $(cat data/session_id) --fork-session`.
 
 ## Security
 
@@ -230,9 +302,11 @@ Issues and PRs welcome. Three rules before you start:
   strings, or chat ids in `pyclaudir/`. Persona lives in
   `prompts/project.md` and stays there.
 - **Default surface stays tight.** The bot ships off-by-default for
-  shell, code editing, subagents, Jira, GitLab. New capabilities
-  follow the same rule — gated behind `PYCLAUDIR_ENABLE_*` unless
-  they're strictly safer than the current base.
+  shell, code editing, subagents, and the integration MCPs (Jira /
+  GitLab / GitHub spawn only when their credentials are set). New
+  capabilities follow the same rule — gated behind a `tool_groups`
+  flag in `plugins.json` or behind a credentialled `mcps[]` entry,
+  unless they're strictly safer than the current base.
 
 Architecture deep-dive before bigger changes:
 [docs/documentation.md](docs/documentation.md) and

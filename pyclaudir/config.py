@@ -127,23 +127,9 @@ class Config:
     #: limited either.
     #: Env var: ``PYCLAUDIR_RATE_LIMIT_PER_MIN`` (default ``20``).
     rate_limit_per_min: int
-    #: Whether Claude can spawn sub-agents (the ``Agent`` tool). Off by
-    #: default because sub-agents use a lot of tokens. When off, the
-    #: tool is blocked and Claude isn't even told it exists.
-    #: Env var: ``PYCLAUDIR_ENABLE_SUBAGENTS`` (default ``False``).
-    enable_subagents: bool
-    #: Whether Claude can run shell commands (Bash, PowerShell, Monitor).
-    #: Off by default. Off means those tools are added to
-    #: ``--disallowedTools`` so Claude refuses to invoke them. See
-    #: ``docs/tools.md``.
-    #: Env var: ``PYCLAUDIR_ENABLE_BASH`` (default ``False``).
-    enable_bash: bool
-    #: Whether Claude can read or write files outside ``data/memories/``
-    #: (Edit, Write, Read, NotebookEdit, Glob, Grep, LSP). Off by default.
-    #: Useful for forks that want the bot to do code work; the regular
-    #: Telegram-assistant deployment leaves this off.
-    #: Env var: ``PYCLAUDIR_ENABLE_CODE`` (default ``False``).
-    enable_code: bool
+    # Tool-group toggles (subagents / bash / code) live in
+    # ``plugins.json`` ``tool_groups`` — single source of truth.
+    # Boot-time only: edit the file and restart.
     #: Per-file size cap (bytes) for inbound Telegram attachments. Files
     #: larger than this are rejected without download. Photos and documents
     #: both use this cap. 20 MB by default.
@@ -215,31 +201,7 @@ class Config:
     #: Env var: ``PYCLAUDIR_CRASH_WINDOW_SECONDS`` (default 600.0,
     #: which is 10 minutes).
     crash_window_seconds: float
-
-    # ----- Credentials for outside services -----
-    # Read once when the bot starts. Kept here so every env var the bot
-    # uses is in one place.
-
-    #: Login info for Jira (used by the ``mcp-atlassian`` server). All
-    #: three must be set or Jira is turned off.
-    #: Env vars: ``JIRA_URL`` / ``JIRA_USERNAME`` / ``JIRA_API_TOKEN``.
-    jira_url: str
-    jira_username: str
-    jira_api_token: str
-    #: Login info for GitLab (used by the ``mcp-gitlab`` server). Both
-    #: must be set or GitLab is turned off.
-    #: Env vars: ``GITLAB_URL`` / ``GITLAB_TOKEN``.
-    gitlab_url: str
-    gitlab_token: str
-    #: GitHub personal access token (used by the GitHub MCP server).
-    #: Empty turns GitHub off. GitHub.com is assumed.
-    #: Env var: ``GITHUB_PERSONAL_ACCESS_TOKEN``.
-    github_token: str
-    #: Optional GitHub Enterprise host (e.g. ``github.example.com``).
-    #: Empty for github.com. Passed through to the MCP server's spawn
-    #: environment. Env var: ``GITHUB_HOST``.
-    github_host: str
-
+    
     # Derived paths
     db_path: Path = field(init=False)
     memories_dir: Path = field(init=False)
@@ -272,9 +234,6 @@ class Config:
             ),  
             debounce_ms=_int("PYCLAUDIR_DEBOUNCE_MS", 0),
             rate_limit_per_min=_int("PYCLAUDIR_RATE_LIMIT_PER_MIN", 20),
-            enable_subagents=_bool("PYCLAUDIR_ENABLE_SUBAGENTS", False),
-            enable_bash=_bool("PYCLAUDIR_ENABLE_BASH", False),
-            enable_code=_bool("PYCLAUDIR_ENABLE_CODE", False),
             attachment_max_bytes=_int("PYCLAUDIR_ATTACHMENT_MAX_BYTES", 20_000_000),
             tool_error_max_count=_int("PYCLAUDIR_TOOL_ERROR_MAX_COUNT", 3),
             tool_error_window_seconds=_float("PYCLAUDIR_TOOL_ERROR_WINDOW_SECONDS", 30.0),
@@ -285,13 +244,6 @@ class Config:
             crash_backoff_cap=_float("PYCLAUDIR_CRASH_BACKOFF_CAP", 64.0),
             crash_limit=_int("PYCLAUDIR_CRASH_LIMIT", 10),
             crash_window_seconds=_float("PYCLAUDIR_CRASH_WINDOW_SECONDS", 600.0),
-            jira_url=_env("JIRA_URL", "") or "",
-            jira_username=_env("JIRA_USERNAME", "") or "",
-            jira_api_token=_env("JIRA_API_TOKEN", "") or "",
-            gitlab_url=_env("GITLAB_URL", "") or "",
-            gitlab_token=_env("GITLAB_TOKEN", "") or "",
-            github_token=_env("GITHUB_PERSONAL_ACCESS_TOKEN", "") or "",
-            github_host=_env("GITHUB_HOST", "") or "",
         )
 
     @classmethod
@@ -311,9 +263,6 @@ class Config:
             self_reflection_cron="0 0 * * *",
             debounce_ms=1000,
             rate_limit_per_min=20,
-            enable_subagents=False,
-            enable_bash=False,
-            enable_code=False,
             attachment_max_bytes=20_000_000,
             tool_error_max_count=3,
             tool_error_window_seconds=30.0,
@@ -324,13 +273,6 @@ class Config:
             crash_backoff_cap=64.0,
             crash_limit=10,
             crash_window_seconds=600.0,
-            jira_url="",
-            jira_username="",
-            jira_api_token="",
-            gitlab_url="",
-            gitlab_token="",
-            github_token="",
-            github_host="",
         )
 
     def ensure_dirs(self) -> None:

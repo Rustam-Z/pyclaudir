@@ -102,17 +102,73 @@ These come from Claude Code's own tool surface and are added to
 
 ## Opt-in tool groups
 
-All groups below default to **off**. Each is unlocked by setting the
-named env var to `true` in `.env`. Changes take effect on container
-restart.
+Two configuration layers feed the bot's tool surface:
 
-### `PYCLAUDIR_ENABLE_SUBAGENTS=true`
+* **`plugins.json`** at repo root — single source of truth for
+  tool-group toggles, the list of external MCP servers, the
+  `builtin_tools_disabled` list, and `skills_disabled`. The operator
+  copies the shipped `plugins.json.example` once
+  (`cp plugins.json.example plugins.json`), edits, and restarts.
+  `plugins.json` is gitignored so customisations stay local.
+* **`.env`** — credentials for external services (Jira, GitLab,
+  GitHub) only. Referenced from `plugins.json` via `${VAR}`.
 
-| Tool | What it does |
-|---|---|
-| `Agent` | Spawn a subagent with its own context window for an isolated task. Token-heavy — leave off unless you need it. When off, the subagent docs (`prompts/subagents.md`) aren't even loaded, so the model doesn't know the capability exists. |
+Changes to either take effect on container restart.
 
-### `PYCLAUDIR_ENABLE_BASH=true` — shell execution
+### `plugins.json` shape
+
+```jsonc
+{
+  "tool_groups": {
+    "bash": false,
+    "code": false,
+    "subagents": false
+  },
+  "mcps": [
+    {
+      "name": "mcp-atlassian",
+      "command": "mcp-atlassian",
+      "args": [],
+      "env": {
+        "JIRA_URL": "${JIRA_URL}",
+        "JIRA_USERNAME": "${JIRA_USERNAME}",
+        "JIRA_API_TOKEN": "${JIRA_API_TOKEN}"
+      },
+      "allowed_tools": ["mcp__mcp-atlassian__jira_search", "..."],
+      "enabled": true
+    }
+  ],
+  "skills_disabled": []
+}
+```
+
+* `tool_groups` — flips for the Claude-Code built-ins below
+  (`bash`, `code`, `subagents`). Edit and restart to flip.
+* `mcps[].name` is **load-bearing** — it becomes the
+  `mcp__<name>__<tool>` namespace the model sees. Renaming breaks
+  operator memory, prompts, and tests. The defaults match today's
+  keys exactly (`mcp-atlassian`, `mcp-gitlab`, `github`).
+* `mcps[].allowed_tools` is one flat list — exact tool name
+  (`mcp__mcp-atlassian__jira_search`) or a server-prefix shorthand
+  (`mcp__mcp-gitlab`). Both forms are accepted by Claude Code's
+  `--allowedTools`.
+* `${VAR}` interpolation runs over every entry in `args` and over
+  every value in `env`, pulling from the process env (i.e. `.env`).
+  Concatenation works (`${GITLAB_URL}/api/v4`). If any referenced
+  `${VAR}` resolves empty, that MCP is silently skipped at boot —
+  preserving today's "credentials missing → MCP not spawned"
+  semantics.
+* `enabled: false` skips the MCP even if its env is satisfied.
+* A missing `plugins.json` boots with empty plugins (locked-down).
+  A malformed `plugins.json` crashes boot loudly with a
+  `PluginsConfigError`.
+
+### Tool groups
+
+These three groups default to **off**. Flip in `plugins.json`
+(`tool_groups.<name>: true`).
+
+#### `bash` — shell execution
 
 | Tool | What it does |
 |---|---|
@@ -123,7 +179,7 @@ restart.
 These all share Claude Code's "permission required" risk class — same
 trust class. Off by default for safety.
 
-### `PYCLAUDIR_ENABLE_CODE=true` — code work
+#### `code` — code work
 
 | Tool | What it does |
 |---|---|
@@ -139,11 +195,69 @@ Useful unit when you want the bot to do real code work (not just chat).
 The Telegram-assistant deployment leaves this off and relies on memory
 + project.md for everything it needs to remember.
 
+#### `subagents`
+
+| Tool | What it does |
+|---|---|
+| `Agent` | Spawn a subagent with its own context window for an isolated task. Token-heavy — leave off unless you need it. When off, the subagent docs (`prompts/subagents.md`) aren't even loaded, so the model doesn't know the capability exists. |
+
+### Adding a new external MCP
+
+1. Append an entry to `mcps` in `plugins.json` with a unique `name`,
+   the `command` to spawn (and any `args`), the `env` it needs (use
+   `${VAR}` to pull credentials from `.env` rather than committing
+   them), and `allowed_tools` listing the exact tool names or
+   `mcp__<name>` prefix to advertise.
+2. Add any referenced env vars to `.env`.
+3. Restart: `docker compose up -d --force-recreate`.
+4. Tail logs — you should see `mcp <name> configured (...)`. If it
+   says `skipped (unresolved ${VAR} ...)`, an env var is empty.
+
+### Disabling a built-in pyclaudir tool
+
+The built-ins under "Always on — pyclaudir built-ins" are
+auto-discovered from `pyclaudir/tools/*.py` and registered every
+boot. To hide one (e.g. you don't use polls, or you don't want LaTeX
+rendering eating context), list its name in `builtin_tools_disabled`:
+
+```jsonc
+{
+  "builtin_tools_disabled": [
+    "create_poll", "stop_poll",
+    "render_latex", "render_html", "send_photo"
+  ]
+}
+```
+
+The tool is skipped at MCP registration time — it's never
+instantiated, never advertised, and the model has no way to invoke
+it. Names must match an exact tool name (the `name` class attribute
+on the `BaseTool` subclass — also the cell text in this doc's
+tables). A typo crashes boot with the available list.
+
+There is no curated "essential" set — disabling `send_message` mutes
+the bot, disabling `read_attachment` makes it blind to inbound
+photos and documents. The operator owns this trade-off.
+
+### Disabling a skill
+
+Add the skill's directory name to `skills_disabled`:
+
+```jsonc
+{ "skills_disabled": ["render-style"] }
+```
+
+Restart. `list_skills` no longer surfaces it and `read_skill` raises
+"not found", so envelope-driven invocations
+(`<skill name="...">`) can't bypass the toggle either.
+
 ### Jira — derived from `JIRA_URL` + `JIRA_USERNAME` + `JIRA_API_TOKEN`
 
-When all three env vars are set, the `mcp-atlassian` server spawns
-*and* its 36 Jira tools are added to `--allowedTools`. No separate
-enable flag — credentials are the gate.
+The default `plugins.json` ships an `mcp-atlassian` entry that
+references all three vars. When they're set in `.env`, the
+`mcp-atlassian` server spawns *and* its 40 Jira tools are added to
+`--allowedTools`. To stop advertising Jira while keeping credentials,
+flip `enabled: false` on the entry.
 
 Categories: search / CRUD / comments / worklog / transitions /
 projects / users / watchers / links / attachments / agile (boards,
@@ -157,22 +271,28 @@ For the canonical Jira tool list see upstream
 
 ### GitLab — derived from `GITLAB_URL` + `GITLAB_TOKEN`
 
-When both env vars are set, the `mcp-gitlab` server spawns *and* the
-`mcp__mcp-gitlab` prefix is added to `--allowedTools`. Unlike the
-Jira server, mcp-gitlab is GitLab-only — the prefix match is safe.
+The default `plugins.json` ships an `mcp-gitlab` entry that
+references both vars. When they're set in `.env`, the `mcp-gitlab`
+server spawns *and* the `mcp__mcp-gitlab` prefix is added to
+`--allowedTools`. Unlike the Jira server, mcp-gitlab is GitLab-only —
+the prefix match is safe.
 
 For the canonical GitLab tool list see upstream
 <https://github.com/zereight/mcp-gitlab>.
 
 ### GitHub — derived from `GITHUB_PERSONAL_ACCESS_TOKEN`
 
-When the token is set, the `github` MCP server spawns (via `npx -y
-@modelcontextprotocol/server-github`) *and* the `mcp__github` prefix
-is added to `--allowedTools`. Single-vendor server, blanket prefix
-match is safe.
+The default `plugins.json` ships a `github` entry that references the
+token. When set in `.env`, the `github` MCP server spawns (via `npx
+-y @modelcontextprotocol/server-github`) *and* the `mcp__github`
+prefix is added to `--allowedTools`. Single-vendor server, blanket
+prefix match is safe.
 
-GitHub.com is the default. For GitHub Enterprise, set `GITHUB_HOST`
-(e.g. `github.example.com`) and the spawn passes it through.
+GitHub.com is the default. For GitHub Enterprise, add a
+`"GITHUB_HOST": "${GITHUB_HOST}"` line to the `github` plugin's `env`
+block in `plugins.json` and set `GITHUB_HOST` (e.g.
+`github.example.com`) in `.env`. (The default omits this line so
+github.com users aren't blocked by an unset var.)
 
 **How to generate the token (fine-grained PAT — recommended):**
 
@@ -207,43 +327,48 @@ and also set `GITHUB_HOST=github.your-company.com` in `.env`.
 
 **Swapping the MCP server.** If you'd rather use the official Go-based
 [`github/github-mcp-server`](https://github.com/github/github-mcp-server)
-instead of the npm package, swap the `command` / `args` block in
-`pyclaudir/__main__.py`'s GitHub MCP config — the rest of the
-plumbing (allowlist, env passthrough, the `enable_github` derivation
-from token presence) stays as-is.
+instead of the npm package, edit the `github` entry in `plugins.json`:
+swap `command`/`args` and adjust the `env` block. The rest of the
+plumbing (allowlist, credential interpolation) stays as-is.
 
 ---
 
 ## How to enable / disable
 
-In `.env`:
+**Tool groups** — flip in `plugins.json`:
+
+```jsonc
+{ "tool_groups": { "bash": true, "code": true, "subagents": false } }
+```
+
+**External MCPs** — credentials in `.env`, advertise/disable in
+`plugins.json`:
 
 ```bash
-# Shell execution (Bash, PowerShell, Monitor)
-PYCLAUDIR_ENABLE_BASH=true
-
-# Code work (Edit, Write, Read, NotebookEdit, Glob, Grep, LSP)
-PYCLAUDIR_ENABLE_CODE=true
-
-# Subagents (Agent)
-PYCLAUDIR_ENABLE_SUBAGENTS=true
-
-# Jira (set all three to enable)
+# Jira (set all three; mcp-atlassian spawns when present)
 JIRA_URL=https://your-site.atlassian.net
 JIRA_USERNAME=you@example.com
 JIRA_API_TOKEN=...
 
-# GitLab (set both to enable)
+# GitLab (set both)
 GITLAB_URL=https://gitlab.example.com
 GITLAB_TOKEN=...
+
+# GitHub
+GITHUB_PERSONAL_ACCESS_TOKEN=github_pat_...
 ```
 
-Restart the container after editing: `docker compose up -d
---force-recreate`.
+To stop advertising an MCP without removing credentials, flip
+`enabled: false` on its entry in `plugins.json`. To remove entirely,
+delete the entry.
 
-To disable, comment out or set `=false`. You can verify what was
-actually loaded by tailing the bot logs at startup — the spawn line
-prints `enabled=[...]` listing the active capability flags.
+**Skills** — list directory names in `plugins.json` `skills_disabled`.
+
+Restart the container after any edit: `docker compose up -d
+--force-recreate`. Tail logs at startup — `plugins loaded: N enabled
+mcp(s), M disabled skill(s), tool_groups={...}` summarises the active
+config; `mcp <name> configured (...)` / `mcp <name> skipped (...)`
+lines explain each MCP's outcome.
 
 ---
 

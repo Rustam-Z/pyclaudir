@@ -126,11 +126,35 @@ def _make_wrapper(tool: BaseTool, db_logger):
     return wrapper
 
 
-def build_fastmcp(ctx: ToolContext, *, db_logger=None) -> tuple[FastMCP, list[BaseTool]]:
-    """Construct a FastMCP server with every discovered tool registered."""
+def build_fastmcp(
+    ctx: ToolContext,
+    *,
+    db_logger=None,
+    disabled: frozenset[str] = frozenset(),
+) -> tuple[FastMCP, list[BaseTool]]:
+    """Construct a FastMCP server with every discovered tool registered.
+
+    ``disabled`` names are skipped — they're never instantiated and
+    never added to the MCP server, so the model can't see or invoke
+    them. Names must match an actual discovered tool; unknown names
+    raise ``ValueError`` so a typo in ``plugins.json`` fails boot
+    loudly.
+    """
+    classes = discover_tool_classes()
+    if disabled:
+        known = {cls.name for cls in classes}
+        unknown = disabled - known
+        if unknown:
+            raise ValueError(
+                f"plugins.json builtin_tools_disabled has unknown name(s): "
+                f"{sorted(unknown)}; available: {sorted(known)}"
+            )
     mcp = FastMCP(name=MCP_SERVER_NAME)
     instances: list[BaseTool] = []
-    for cls in discover_tool_classes():
+    for cls in classes:
+        if cls.name in disabled:
+            log.info("skipped MCP tool %s (disabled in plugins.json)", cls.name)
+            continue
         instance = cls(ctx)
         instances.append(instance)
         wrapper = _make_wrapper(instance, db_logger)
@@ -142,10 +166,18 @@ def build_fastmcp(ctx: ToolContext, *, db_logger=None) -> tuple[FastMCP, list[Ba
 class McpServer:
     """Run a FastMCP HTTP server on a random localhost port via uvicorn."""
 
-    def __init__(self, ctx: ToolContext, *, db_logger=None) -> None:
+    def __init__(
+        self,
+        ctx: ToolContext,
+        *,
+        db_logger=None,
+        disabled: frozenset[str] = frozenset(),
+    ) -> None:
         self._ctx = ctx
         self._db_logger = db_logger
-        self.mcp, self.tools = build_fastmcp(ctx, db_logger=db_logger)
+        self.mcp, self.tools = build_fastmcp(
+            ctx, db_logger=db_logger, disabled=disabled,
+        )
         self._server: uvicorn.Server | None = None
         self._task = None
         self.port: int | None = None

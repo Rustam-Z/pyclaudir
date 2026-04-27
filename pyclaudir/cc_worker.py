@@ -87,71 +87,6 @@ BASE_ALLOWED_TOOLS: tuple[str, ...] = (
     "WebSearch",
 )
 
-#: Jira tools from community mcp-atlassian (sooperset/mcp-atlassian).
-#: Only Jira is allowed; Confluence, JSM, and ProForma tools are
-#: deliberately excluded. Added to ``--allowedTools`` only when
-#: :class:`CcSpawnSpec.enable_jira` is True (which ``__main__`` derives
-#: from the presence of ``JIRA_URL`` + ``JIRA_USERNAME`` +
-#: ``JIRA_API_TOKEN`` in the environment).
-JIRA_TOOLS: tuple[str, ...] = (
-    "mcp__mcp-atlassian__jira_search",
-    "mcp__mcp-atlassian__jira_get_issue",
-    "mcp__mcp-atlassian__jira_create_issue",
-    "mcp__mcp-atlassian__jira_batch_create_issues",
-    "mcp__mcp-atlassian__jira_update_issue",
-    "mcp__mcp-atlassian__jira_delete_issue",
-    "mcp__mcp-atlassian__jira_transition_issue",
-    "mcp__mcp-atlassian__jira_add_comment",
-    "mcp__mcp-atlassian__jira_edit_comment",
-    "mcp__mcp-atlassian__jira_add_worklog",
-    "mcp__mcp-atlassian__jira_get_worklog",
-    "mcp__mcp-atlassian__jira_get_transitions",
-    "mcp__mcp-atlassian__jira_get_all_projects",
-    "mcp__mcp-atlassian__jira_get_project_issues",
-    "mcp__mcp-atlassian__jira_get_project_versions",
-    "mcp__mcp-atlassian__jira_get_project_components",
-    "mcp__mcp-atlassian__jira_search_fields",
-    "mcp__mcp-atlassian__jira_get_field_options",
-    "mcp__mcp-atlassian__jira_get_user_profile",
-    "mcp__mcp-atlassian__jira_get_issue_watchers",
-    "mcp__mcp-atlassian__jira_add_watcher",
-    "mcp__mcp-atlassian__jira_remove_watcher",
-    "mcp__mcp-atlassian__jira_get_link_types",
-    "mcp__mcp-atlassian__jira_create_issue_link",
-    "mcp__mcp-atlassian__jira_create_remote_issue_link",
-    "mcp__mcp-atlassian__jira_link_to_epic",
-    "mcp__mcp-atlassian__jira_remove_issue_link",
-    "mcp__mcp-atlassian__jira_get_issue_dates",
-    "mcp__mcp-atlassian__jira_batch_get_changelogs",
-    "mcp__mcp-atlassian__jira_download_attachments",
-    "mcp__mcp-atlassian__jira_get_issue_images",
-    # Agile / sprints
-    "mcp__mcp-atlassian__jira_get_agile_boards",
-    "mcp__mcp-atlassian__jira_get_board_issues",
-    "mcp__mcp-atlassian__jira_get_sprints_from_board",
-    "mcp__mcp-atlassian__jira_get_sprint_issues",
-    "mcp__mcp-atlassian__jira_create_sprint",
-    "mcp__mcp-atlassian__jira_update_sprint",
-    "mcp__mcp-atlassian__jira_add_issues_to_sprint",
-    # Versions
-    "mcp__mcp-atlassian__jira_create_version",
-    "mcp__mcp-atlassian__jira_batch_create_versions",
-)
-
-#: GitLab tools from @zereight/mcp-gitlab. Unlike mcp-atlassian (which
-#: bundles Jira+Confluence+Compass), mcp-gitlab is GitLab-only so a
-#: blanket prefix match is safe.
-GITLAB_TOOLS: tuple[str, ...] = (
-    "mcp__mcp-gitlab",
-)
-
-#: GitHub tools from the official ``github-mcp-server``. Like mcp-gitlab
-#: it's a single-vendor server so a blanket prefix match is safe.
-#: Driven by the presence of ``GITHUB_PERSONAL_ACCESS_TOKEN`` in env.
-GITHUB_TOOLS: tuple[str, ...] = (
-    "mcp__github",
-)
-
 #: Tools unlocked when ``enable_bash`` is True.
 BASH_TOOLS: tuple[str, ...] = ("Bash", "PowerShell", "Monitor")
 
@@ -197,19 +132,16 @@ class CcSpawnSpec:
     #: ``Grep``, ``LSP`` move from deny to allow. Driven by
     #: ``PYCLAUDIR_ENABLE_CODE``.
     enable_code: bool = False
-    #: When True, the 36 Jira tools from ``mcp-atlassian`` are added to
-    #: ``--allowedTools``. ``__main__`` derives this from the presence of
-    #: ``JIRA_URL`` + ``JIRA_USERNAME`` + ``JIRA_API_TOKEN`` — no separate
-    #: env var; if the integration is configured, its tools are advertised.
-    enable_jira: bool = False
-    #: When True, the ``mcp__mcp-gitlab`` prefix is added to
-    #: ``--allowedTools``. Driven by the presence of ``GITLAB_URL`` +
-    #: ``GITLAB_TOKEN`` in ``__main__``.
-    enable_gitlab: bool = False
-    #: When True, the ``mcp__github`` prefix is added to
-    #: ``--allowedTools``. Driven by the presence of
-    #: ``GITHUB_PERSONAL_ACCESS_TOKEN`` in ``__main__``.
-    enable_github: bool = False
+    #: Flat list of tool entries to add to ``--allowedTools`` from
+    #: external MCP plugins. Each entry is either an exact tool name
+    #: (``mcp__mcp-atlassian__jira_search``) or a server-prefix shorthand
+    #: (``mcp__github``). Both forms are accepted by
+    #: Claude Code in the same comma-separated allowlist. ``__main__``
+    #: builds this from ``plugins.json`` after credential interpolation —
+    #: an MCP whose ``${VAR}`` refs aren't satisfied contributes nothing
+    #: here, preserving today's "credentials missing → tools hidden"
+    #: semantics.
+    mcp_allowed_tools: tuple[str, ...] = ()
 
 
 @dataclass
@@ -285,12 +217,7 @@ def build_argv(spec: CcSpawnSpec) -> list[str]:
         allowed_extras.append("Agent")
     else:
         disallowed_extras.append("Agent")
-    if spec.enable_jira:
-        allowed_extras.extend(JIRA_TOOLS)
-    if spec.enable_gitlab:
-        allowed_extras.extend(GITLAB_TOOLS)
-    if spec.enable_github:
-        allowed_extras.extend(GITHUB_TOOLS)
+    allowed_extras.extend(spec.mcp_allowed_tools)
 
     allowed_tools = BASE_ALLOWED_TOOLS + tuple(allowed_extras)
     disallowed_tools = tuple(disallowed_extras)
@@ -451,15 +378,14 @@ class CcWorker:
             f for f, on in (
                 ("bash", self.spec.enable_bash),
                 ("code", self.spec.enable_code),
-                ("jira", self.spec.enable_jira),
-                ("gitlab", self.spec.enable_gitlab),
-                ("github", self.spec.enable_github),
                 ("subagents", self.spec.enable_subagents),
             ) if on
         ]
         log.info(
-            "spawning claude (model=%s, enabled=%s)",
-            self.spec.model, enabled_features or "[base only]",
+            "spawning claude (model=%s, enabled=%s, mcp_tools=%d)",
+            self.spec.model,
+            enabled_features or "[base only]",
+            len(self.spec.mcp_allowed_tools),
         )
         self._open_raw_logs()
         self._proc = await asyncio.create_subprocess_exec(

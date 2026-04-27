@@ -19,12 +19,24 @@ from pyclaudir.cc_worker import (
     CODE_TOOLS,
     DEFAULT_DISALLOWED_TOOLS,
     FORBIDDEN_FLAG,
-    GITHUB_TOOLS,
-    GITLAB_TOOLS,
-    JIRA_TOOLS,
     CcSpawnSpec,
     build_argv,
 )
+
+# Sample tool names from the three integration MCPs we ship by default
+# in ``plugins.json``. The test suite no longer imports the full
+# allowlists from ``cc_worker`` — the source of truth moved to
+# ``plugins.json``. We keep representative samples here so the
+# "default-locked-down" invariant can still assert that integration
+# tools don't leak into the empty-spec allowlist.
+SAMPLE_JIRA_TOOLS = (
+    "mcp__mcp-atlassian__jira_search",
+    "mcp__mcp-atlassian__jira_get_issue",
+    "mcp__mcp-atlassian__jira_create_issue",
+    "mcp__mcp-atlassian__jira_get_agile_boards",
+)
+SAMPLE_GITLAB_TOOLS = ("mcp__mcp-gitlab",)
+SAMPLE_GITHUB_TOOLS = ("mcp__github",)
 from pyclaudir.mcp_server import MCP_SERVER_NAME, build_fastmcp, discover_tool_classes
 from pyclaudir.tools.base import ToolContext
 
@@ -66,7 +78,8 @@ def fake_spec(tmp_path: Path) -> CcSpawnSpec:
 #   PYCLAUDIR_ENABLE_BASH      → Bash, PowerShell, Monitor
 #   PYCLAUDIR_ENABLE_CODE      → Edit, Write, Read, NotebookEdit, Glob, Grep, LSP
 #   PYCLAUDIR_ENABLE_SUBAGENTS → Agent
-#   (Jira / GitLab are derived from integration-credential presence)
+#   (Jira / GitLab / GitHub tools come in via ``mcp_allowed_tools``,
+#    populated from ``plugins.json`` after credential interpolation.)
 # ---------------------------------------------------------------------------
 
 
@@ -89,12 +102,15 @@ def test_invariant_1_argv_default_locks_down_dangerous_tools(fake_spec: CcSpawnS
     assert "WebFetch" in allowed_value
     assert "WebSearch" in allowed_value
 
-    # No integration tools by default.
-    for jira in JIRA_TOOLS:
+    # No integration tools by default. ``fake_spec`` ships with
+    # ``mcp_allowed_tools=()`` so none of the integration namespaces
+    # should appear anywhere in the allowlist.
+    for jira in SAMPLE_JIRA_TOOLS:
         assert jira not in allowed_value, f"{jira} leaked into default allowlist"
-    for gitlab in GITLAB_TOOLS:
+    assert "mcp__mcp-atlassian" not in allowed_value
+    for gitlab in SAMPLE_GITLAB_TOOLS:
         assert gitlab not in allowed_value, f"{gitlab} leaked into default allowlist"
-    for github in GITHUB_TOOLS:
+    for github in SAMPLE_GITHUB_TOOLS:
         assert github not in allowed_value, f"{github} leaked into default allowlist"
     # No Confluence / JSM / Bitbucket / ProForma ever.
     for blocked in ("confluence", "Confluence", "Compass", "bitbucket",
@@ -171,44 +187,49 @@ def test_invariant_1_argv_code_enabled(fake_spec: CcSpawnSpec) -> None:
 
 
 def test_invariant_1_argv_jira_enabled(fake_spec: CcSpawnSpec) -> None:
-    """enable_jira surfaces all 36 Jira tools from mcp-atlassian."""
+    """When ``plugins.json`` advertises Jira tools (40 entries from
+    mcp-atlassian), they all land in ``--allowedTools``. Source of
+    truth for the full list is now ``plugins.json``; the test asserts
+    every tool the spec hands to ``build_argv`` survives to the argv."""
     import dataclasses
-    spec_on = dataclasses.replace(fake_spec, enable_jira=True)
+    spec_on = dataclasses.replace(fake_spec, mcp_allowed_tools=SAMPLE_JIRA_TOOLS)
     argv = build_argv(spec_on)
     allowed_value, _deny, _sp = _split_argv(argv)
 
-    for t in JIRA_TOOLS:
-        assert t in allowed_value, f"{t} missing with enable_jira=True"
-    # No GitLab leak.
+    for t in SAMPLE_JIRA_TOOLS:
+        assert t in allowed_value, f"{t} missing from allowedTools"
+    # No GitLab leak — only what was passed in goes through.
     assert "mcp__mcp-gitlab" not in allowed_value
+    assert "mcp__github" not in allowed_value
 
 
 def test_invariant_1_argv_gitlab_enabled(fake_spec: CcSpawnSpec) -> None:
-    """enable_gitlab adds the mcp-gitlab prefix to the allowlist."""
+    """The ``mcp__mcp-gitlab`` prefix in ``mcp_allowed_tools`` lands in
+    ``--allowedTools`` and no other integration namespace leaks."""
     import dataclasses
-    spec_on = dataclasses.replace(fake_spec, enable_gitlab=True)
+    spec_on = dataclasses.replace(fake_spec, mcp_allowed_tools=SAMPLE_GITLAB_TOOLS)
     argv = build_argv(spec_on)
     allowed_value, _deny, _sp = _split_argv(argv)
 
     assert "mcp__mcp-gitlab" in allowed_value
-    # No Jira / GitHub leak.
-    for jira in JIRA_TOOLS:
+    for jira in SAMPLE_JIRA_TOOLS:
         assert jira not in allowed_value
-    for github in GITHUB_TOOLS:
-        assert github not in allowed_value
+    assert "mcp__mcp-atlassian" not in allowed_value
+    assert "mcp__github" not in allowed_value
 
 
 def test_invariant_1_argv_github_enabled(fake_spec: CcSpawnSpec) -> None:
-    """enable_github adds the mcp__github prefix to the allowlist."""
+    """The ``mcp__github`` prefix in ``mcp_allowed_tools`` lands in
+    ``--allowedTools`` and no other integration namespace leaks."""
     import dataclasses
-    spec_on = dataclasses.replace(fake_spec, enable_github=True)
+    spec_on = dataclasses.replace(fake_spec, mcp_allowed_tools=SAMPLE_GITHUB_TOOLS)
     argv = build_argv(spec_on)
     allowed_value, _deny, _sp = _split_argv(argv)
 
     assert "mcp__github" in allowed_value
-    # No Jira / GitLab leak.
-    for jira in JIRA_TOOLS:
+    for jira in SAMPLE_JIRA_TOOLS:
         assert jira not in allowed_value
+    assert "mcp__mcp-atlassian" not in allowed_value
     assert "mcp__mcp-gitlab" not in allowed_value
 
 

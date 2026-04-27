@@ -116,7 +116,7 @@ tile/card/step.
   `--line` with a small label badge centered on it (e.g. "monitors &
   restarts"). Use `.arrow` + `.arrow .label`.
 - **Persona/role row** at the bottom of a tier: inline dot+name pills
-  (`<span class="dotpill purple"><i></i>Nodira — CEO</span>`).
+  (`<span class="dotpill purple"><i></i>Luna — CEO</span>`).
 - **Footer line** centered in `--tx3` 12px with em-dash separators.
 
 ## Skeleton 1 — Dashboard (calibration / scorecard)
@@ -368,12 +368,12 @@ tile/card/step.
 
   <div class="tier"><div class="label">tier 2 — public-facing</div>
     <div class="panel red">
-      <div class="ttl"><span class="ico">🤖</span><h2>Nodira &amp; Dilya</h2>
+      <div class="ttl"><span class="ico">🤖</span><h2>Luna &amp; Dilya</h2>
         <span class="pill red">sandboxed</span></div>
       <div class="desc">Public chatbots. WebSearch only via CC. MCP tools validated by
       harness. No code execution.</div>
       <div class="roles">
-        <span class="dotpill blue"><i></i>Nodira — CEO</span>
+        <span class="dotpill blue"><i></i>Luna — CEO</span>
         <span class="dotpill amber"><i></i>Dilya — Newcomer</span>
       </div>
     </div></div>

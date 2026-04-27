@@ -17,6 +17,11 @@ data/
 # Project-specific prompt (not shipped with open-source pyclaudir)
 prompts/project.md
 
+# Local plugin config — operator copies plugins.json.example on setup,
+# then customises. Not tracked so different deployments don't fight
+# over the file.
+plugins.json
+
 # Editors
 .vscode/
 .idea/

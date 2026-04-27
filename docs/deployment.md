@@ -52,19 +52,38 @@ DM your bot on Telegram to confirm it replies.
 
 The bot ships with a tight default surface — Telegram messaging,
 memory tools, reminders, and read-only web access only. Shell,
-code-editing, subagents, Jira, and GitLab are **all off by default**.
-Each group is unlocked by a single env var (or, for Jira/GitLab,
-the presence of credentials):
+code-editing, subagents, and the integration MCPs (Jira / GitLab /
+GitHub) are **all off by default**.
+
+Toggles live in `plugins.json` at the repo root. Copy the shipped
+template once on first setup:
 
 ```bash
-# In .env
-PYCLAUDIR_ENABLE_BASH=true        # Bash, PowerShell, Monitor
-PYCLAUDIR_ENABLE_CODE=true        # Edit, Write, Read, NotebookEdit, Glob, Grep, LSP
-PYCLAUDIR_ENABLE_SUBAGENTS=true   # Agent
+cp plugins.json.example plugins.json
 ```
 
-For the per-tool list and trade-offs, see [tools.md](tools.md).
-Restart the container after toggling: `docker compose up -d
+Then edit:
+
+```jsonc
+{
+  "tool_groups": { "bash": true, "code": true, "subagents": false },
+  "mcps":  [ /* Jira / GitLab / GitHub entries */ ],
+  "skills_disabled": [],
+  "builtin_tools_disabled": []
+}
+```
+
+`plugins.json` is gitignored, so different deployments can carry
+different toggles without fighting over the file. External MCPs
+(Jira / GitLab / GitHub or your own additions) are declared in
+`plugins.json` but their credentials live in `.env`, referenced as
+`${VAR}`. An MCP whose `${VAR}` references aren't satisfied is
+silently skipped at boot.
+
+For the per-tool list, the schema, "How to add a new MCP", and how
+to disable individual built-in tools (e.g. `create_poll`,
+`render_latex`) or skills, see [tools.md](tools.md). Restart the
+container after editing either file: `docker compose up -d
 --force-recreate`.
 
 ## Update workflow

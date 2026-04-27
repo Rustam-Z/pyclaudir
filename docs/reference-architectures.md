@@ -368,7 +368,7 @@ In pyclaudir: **not implemented**. We use SIGTERM/SIGINT for shutdown and `/kill
 |---------|----------------|----------------|-----------|
 | Language | TypeScript/Bun | Rust | Python/asyncio |
 | CC integration | MCP plugin (Claude owns the process) | Subprocess (Claudir owns the process) | Subprocess (pyclaudir owns) |
-| Tool count | 4 | ~40 | 18 MCP + 2 built-in (WebFetch, WebSearch) by default, +1 (Agent) when `PYCLAUDIR_ENABLE_SUBAGENTS=true`. Claude Code built-ins not on either allow/deny list (Grep, Glob, ToolSearch, Skill, ListMcpResourcesTool) are implicitly reachable by the agent; with subagents enabled they also appear inside each subagent. |
+| Tool count | 4 | ~40 | 25 MCP + 2 built-in (WebFetch, WebSearch) by default, +1 (Agent) when `tool_groups.subagents` is on. Surface is configured in `plugins.json`: tool-group toggles, external-MCP entries, `builtin_tools_disabled`, `skills_disabled`. Claude Code built-ins not on either allow/deny list (Grep, Glob, ToolSearch, Skill, ListMcpResourcesTool) are implicitly reachable by the agent; with subagents enabled they also appear inside each subagent. |
 | Multi-agent | No | Yes (3 agents) | No (Nodira only) |
 | Memory | No | Yes (read/write) | Yes (read/write, read-before-write) |
 | query_db | No | Yes | Yes (sqlglot-validated) |

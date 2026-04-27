@@ -51,6 +51,14 @@ COPY pyclaudir/ pyclaudir/
 COPY prompts/system.md prompts/system.md
 COPY skills/ skills/
 
+# Plugin config — the example is always shipped; a real ``plugins.json``
+# is bundled if the operator has copied it before ``docker build``.
+# Anchoring the COPY on plugins.json.example (always present) lets the
+# trailing ``plugins.json*`` glob be a no-op when the developer hasn't
+# run ``cp plugins.json.example plugins.json`` yet, in both classic and
+# BuildKit builders.
+COPY plugins.json.example plugins.json* ./
+
 # Data directory (mount as volume)
 VOLUME /app/data
 

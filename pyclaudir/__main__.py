@@ -23,6 +23,7 @@ from .access import AccessConfig, load_access, save_access
 from .cc_schema import schema_json
 from .cc_worker import CcSpawnSpec, CcWorker
 from .config import Config
+from .plugins import load_plugins
 from .db.database import Database
 from .db.messages import insert_tool_call
 from .db.reminders import (
@@ -157,7 +158,17 @@ async def _async_main() -> None:
         backup_dir=config.data_dir / "prompt_backups",
     )
     instructions.ensure_dirs()
-    skills = SkillsStore(root=project_root / "skills")
+    plugins = load_plugins(project_root / "plugins.json")
+    log.info(
+        "plugins loaded: %d enabled mcp(s), %d disabled skill(s), "
+        "%d disabled built-in tool(s), tool_groups=%s",
+        len(plugins.mcps),
+        len(plugins.skills_disabled),
+        len(plugins.builtin_tools_disabled),
+        dict(plugins.tool_groups),
+    )
+
+    skills = SkillsStore(root=project_root / "skills", disabled=plugins.skills_disabled)
     skills.ensure_root()
     attachments = AttachmentStore(config.attachments_dir)
     renders = RenderStore(config.renders_dir)
@@ -184,7 +195,11 @@ async def _async_main() -> None:
         chat_titles=chat_titles,
     )
 
-    mcp = McpServer(ctx, db_logger=db_logger)
+    mcp = McpServer(
+        ctx,
+        db_logger=db_logger,
+        disabled=plugins.builtin_tools_disabled,
+    )
     await mcp.start()
     log.info("mcp server live at %s", mcp.url)
 
@@ -192,64 +207,23 @@ async def _async_main() -> None:
     tmpdir = Path(tempfile.mkdtemp(prefix="pyclaudir-"))
     schema_path = tmpdir / "schema.json"
     schema_path.write_text(schema_json())
-    # External MCP servers alongside our local one. The community
-    # mcp-atlassian server (sooperset/mcp-atlassian) runs locally via
-    # stdio and talks directly to the Jira REST API.
+    # External MCP servers alongside our local one. Each enabled entry
+    # in ``plugins.json`` whose ``${VAR}`` references all resolved
+    # contributes one stdio MCP server here. The plugin's ``name`` is
+    # the dict key Claude Code uses to namespace tools as
+    # ``mcp__<name>__<tool>`` — those names are load-bearing and visible
+    # to the model.
     extra_mcp: dict = {}
-    if config.jira_url and config.jira_username and config.jira_api_token:
-        extra_mcp["mcp-atlassian"] = {
+    mcp_allowed_tools: list[str] = []
+    for plugin in plugins.mcps:
+        extra_mcp[plugin.name] = {
             "type": "stdio",
-            "command": "mcp-atlassian",
-            "args": [],
-            "env": {
-                "JIRA_URL": config.jira_url,
-                "JIRA_USERNAME": config.jira_username,
-                "JIRA_API_TOKEN": config.jira_api_token,
-            },
+            "command": plugin.command,
+            "args": list(plugin.args),
+            "env": dict(plugin.env),
         }
-        log.info(
-            "mcp-atlassian configured (jira=%s, user=%s)",
-            config.jira_url, config.jira_username,
-        )
-    else:
-        log.info("mcp-atlassian skipped (JIRA_URL / JIRA_USERNAME / JIRA_API_TOKEN not set)")
-
-    # GitLab via @zereight/mcp-gitlab (read-only + MR comments).
-    if config.gitlab_url and config.gitlab_token:
-        extra_mcp["mcp-gitlab"] = {
-            "type": "stdio",
-            "command": "npx",
-            "args": ["-y", "@zereight/mcp-gitlab"],
-            "env": {
-                "GITLAB_PERSONAL_ACCESS_TOKEN": config.gitlab_token,
-                "GITLAB_API_URL": config.gitlab_url.rstrip("/") + "/api/v4",
-            },
-        }
-        log.info("mcp-gitlab configured (url=%s)", config.gitlab_url)
-    else:
-        log.info("mcp-gitlab skipped (GITLAB_URL / GITLAB_TOKEN not set)")
-
-    # GitHub via @modelcontextprotocol/server-github. Token-only by
-    # default (MCP server talks to github.com); set GITHUB_HOST in the
-    # operator's env for GitHub Enterprise.
-    if config.github_token:
-        github_env: dict[str, str] = {
-            "GITHUB_PERSONAL_ACCESS_TOKEN": config.github_token,
-        }
-        if config.github_host:
-            github_env["GITHUB_HOST"] = config.github_host
-        extra_mcp["github"] = {
-            "type": "stdio",
-            "command": "npx",
-            "args": ["-y", "@modelcontextprotocol/server-github"],
-            "env": github_env,
-        }
-        log.info(
-            "mcp-github configured (host=%s)",
-            config.github_host or "github.com",
-        )
-    else:
-        log.info("mcp-github skipped (GITHUB_PERSONAL_ACCESS_TOKEN not set)")
+        mcp_allowed_tools.extend(plugin.allowed_tools)
+        log.info("mcp %s configured (command=%s)", plugin.name, plugin.command)
 
     mcp_config_path = mcp.write_mcp_config(tmpdir / "mcp.json", extra_servers=extra_mcp)
     log.info("mcp config written to %s", mcp_config_path)
@@ -260,15 +234,11 @@ async def _async_main() -> None:
         session_id = config.session_id_path.read_text().strip() or None
         log.info("resuming cc session %s", session_id)
 
-    # Integration tool surfaces are derived from credential presence —
-    # the same predicates used above to decide whether to spawn the MCP
-    # server. Single source of truth: env-set creds → server runs AND
-    # tools are advertised in the allowlist.
-    enable_jira = bool(
-        config.jira_url and config.jira_username and config.jira_api_token
-    )
-    enable_gitlab = bool(config.gitlab_url and config.gitlab_token)
-    enable_github = bool(config.github_token)
+    # Tool-group toggles: ``plugins.json`` is the single source of
+    # truth. Edit the file and restart to flip.
+    enable_subagents = bool(plugins.tool_groups.get("subagents", False))
+    enable_bash = bool(plugins.tool_groups.get("bash", False))
+    enable_code = bool(plugins.tool_groups.get("code", False))
 
     spec = CcSpawnSpec(
         binary=config.claude_code_bin,
@@ -280,13 +250,11 @@ async def _async_main() -> None:
         effort=config.effort,
         session_id=session_id,
         cc_logs_dir=config.cc_logs_dir,
-        enable_subagents=config.enable_subagents,
+        enable_subagents=enable_subagents,
         subagents_prompt_path=Path("prompts/subagents.md").resolve(),
-        enable_bash=config.enable_bash,
-        enable_code=config.enable_code,
-        enable_jira=enable_jira,
-        enable_gitlab=enable_gitlab,
-        enable_github=enable_github,
+        enable_bash=enable_bash,
+        enable_code=enable_code,
+        mcp_allowed_tools=tuple(mcp_allowed_tools),
     )
     from .cc_failure_classifier import classify_cc_failure
 
