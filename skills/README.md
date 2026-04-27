@@ -17,9 +17,11 @@ skills/
 ├── self-reflection/       ← daily auto-seeded learning loop
 │   ├── SKILL.md
 │   └── README.md
-└── render-style/          ← house style for render_html
-    ├── SKILL.md
-    └── README.md
+├── render-style/          ← house style for render_html
+│   ├── SKILL.md
+│   └── README.md
+└── reminder-format/       ← house format for set_reminder text
+    └── SKILL.md
 ```
 
 ## Catalogue
@@ -28,6 +30,7 @@ skills/
 |---|---|---|
 | [self-reflection](self-reflection/) | invoked | Daily two-phase loop: introspect last 24h of outbound behavior, stress-test pending lessons against scenarios, propose promote / refine / discard rules to the owner. Triggered by an auto-seeded reminder; refused without a real `<reminder>` envelope. |
 | [render-style](render-style/) | reference | Style guide for the `render_html` tool — dark dashboard / timeline / architecture-diagram look with CSS tokens, layout rules, and three copy-paste HTML skeletons. Read on the agent's own initiative before any `render_html` call. |
+| [reminder-format](reminder-format/) | reference | Three-rule format for the `set_reminder` text argument — `"This is a reminder."` opener, `Goal:` line, numbered steps. Read before creating or editing any reminder so fired `<reminder>` envelopes are self-explanatory. |
 
 ## Skill modes
 
