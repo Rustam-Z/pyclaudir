@@ -9,6 +9,7 @@ typos, and the ``skills_disabled`` round-trip into ``SkillsStore``.
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 import pytest
@@ -335,15 +336,34 @@ def test_var_substitution_concatenated(tmp_path: Path) -> None:
 
 
 def test_unresolved_var_skips_mcp(tmp_path: Path) -> None:
-    """An enabled MCP whose ``${VAR}`` resolves empty is silently
-    skipped — preserves today's "credentials missing → MCP not
-    spawned" semantics."""
+    """An enabled MCP whose ``${VAR}`` resolves empty is skipped —
+    preserves today's "credentials missing → MCP not spawned"
+    semantics."""
     p = tmp_path / "plugins.json"
     p.write_text(json.dumps({
         "mcps": [_mcp(env={"TOKEN": "${MISSING}"})]
     }))
     plugins = load_plugins(p, env={})
     assert plugins.mcps == ()
+
+
+def test_unresolved_var_skip_logs_at_error(tmp_path: Path, caplog) -> None:
+    """The skip is loud (ERROR), not silent (INFO) — silent INFO
+    let a missing-creds bug hide in startup logs (real incident).
+    A configured MCP that fails to load is a broken capability, so it
+    deserves the same level as CC-reported MCP connection failures."""
+    p = tmp_path / "plugins.json"
+    p.write_text(json.dumps({
+        "mcps": [_mcp(name="needs-cred", env={"TOKEN": "${MISSING}"})]
+    }))
+    with caplog.at_level(logging.WARNING, logger="pyclaudir.plugins"):
+        load_plugins(p, env={})
+    assert any(
+        r.levelno == logging.ERROR
+        and "needs-cred" in r.message
+        and "unresolved" in r.message
+        for r in caplog.records
+    )
 
 
 def test_var_substitution_in_args(tmp_path: Path) -> None:

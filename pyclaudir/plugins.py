@@ -385,7 +385,7 @@ def load_plugins(path: Path, *, env: Mapping[str, str] | None = None) -> Plugins
     if not path.exists():
         example = path.with_suffix(path.suffix + ".example")
         if example.exists():
-            log.warning(
+            log.error(
                 "no plugins.json at %s — using locked-down defaults (no "
                 "external MCPs, no tool groups). Copy the shipped example "
                 "to enable integrations: cp %s %s",
@@ -421,7 +421,7 @@ def load_plugins(path: Path, *, env: Mapping[str, str] | None = None) -> Plugins
             continue
         spec, missing = _interp_mcp(entry, env)
         if spec is None:
-            log.info("mcp %s skipped (unresolved ${VAR} in %s)", name, missing)
+            log.error("mcp %s skipped (unresolved ${VAR} in %s)", name, missing)
             continue
         mcps_out.append(spec)
 

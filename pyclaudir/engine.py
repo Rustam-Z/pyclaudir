@@ -794,7 +794,7 @@ class Engine:
                         # user when the subprocess exits. We leave
                         # ``_active_chats`` alone so the callback knows
                         # who to notify.
-                        log.warning("turn aborted: tool-error-limit")
+                        log.error("turn aborted: tool-error-limit")
                         continue
 
                     action = result.control.action if result.control else None

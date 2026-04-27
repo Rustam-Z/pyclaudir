@@ -599,7 +599,7 @@ class CcWorker:
             if silence <= timeout:
                 continue
 
-            log.warning(
+            log.error(
                 "cc subprocess wedged mid-turn: no activity for %.0fs "
                 "(timeout=%.0fs). Terminating to trigger respawn.",
                 silence, timeout,
@@ -630,7 +630,7 @@ class CcWorker:
                 await self.start()
                 continue
 
-            log.warning(
+            log.error(
                 "cc subprocess exited rc=%s; recent stderr=%s",
                 rc, self._stderr_tail[-5:],
             )
@@ -656,7 +656,7 @@ class CcWorker:
                 self._crash_backoff_cap,
                 self._crash_backoff_base * (2 ** (attempt - 1)),
             )
-            log.warning("respawning cc in %.1fs (attempt %d)", backoff, attempt)
+            log.error("respawning cc in %.1fs (attempt %d)", backoff, attempt)
             if self._on_crash is not None:
                 try:
                     await self._on_crash(attempt, backoff)
@@ -763,6 +763,8 @@ class CcWorker:
                 self._stderr_tail.append(decoded)
                 self._stderr_tail = self._stderr_tail[-10:]
                 self._write_stderr_line(decoded)
+                if decoded:
+                    log.warning("cc stderr: %s", decoded)
         except asyncio.CancelledError:
             raise
         except Exception:  # pragma: no cover
@@ -837,7 +839,7 @@ class CcWorker:
             if self._turn_first_tool_error_at is not None
             else 0.0
         )
-        log.warning(
+        log.error(
             "cc tool-error circuit breaker tripped (reason=%s): "
             "%d errors in %.1fs (max=%d, window=%.0fs). "
             "Terminating to trigger respawn.",
@@ -869,12 +871,41 @@ class CcWorker:
           payload is parsed into a :class:`ControlAction`.
         """
         etype = event.get("type")
+        # Generic relay of any error-shaped top-level field. Per-tool
+        # ``is_error`` lives inside ``user``-typed events and is handled
+        # by the tool-error breaker; skip those to avoid double-logging.
+        if etype != "user":
+            err_bits: list[str] = []
+            if event.get("is_error"):
+                err_bits.append("is_error=true")
+            api_err = event.get("api_error_status")
+            if api_err:
+                err_bits.append(f"api_error_status={api_err}")
+            err = event.get("error")
+            if err:
+                err_bits.append(f"error={err}")
+            if err_bits:
+                log.error(
+                    "cc reported error in %s/%s event: %s",
+                    etype, event.get("subtype") or "-", ", ".join(err_bits),
+                )
+
         if etype == "system" and event.get("subtype") == "init":
             sid = event.get("session_id")
             if isinstance(sid, str):
                 self._session_id = sid
                 log.info("cc session id %s", sid)
                 self._maybe_rename_raw_logs()
+            for server in event.get("mcp_servers") or ():
+                if not isinstance(server, dict):
+                    continue
+                status = server.get("status")
+                if status != "connected":
+                    log.error(
+                        "mcp server %s did not connect (status=%s) — its "
+                        "tools won't be available this session",
+                        server.get("name", "?"), status,
+                    )
             return
 
         if self._current_turn is None:
