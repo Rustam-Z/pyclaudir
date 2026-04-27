@@ -74,10 +74,10 @@ def fake_spec(tmp_path: Path) -> CcSpawnSpec:
 # nor deny are implicitly reachable via ToolSearch — so the deny side has to
 # carry every gated tool, not just the historically-cared-about ones.
 #
-# The flags map to env vars in ``Config``:
-#   PYCLAUDIR_ENABLE_BASH      → Bash, PowerShell, Monitor
-#   PYCLAUDIR_ENABLE_CODE      → Edit, Write, Read, NotebookEdit, Glob, Grep, LSP
-#   PYCLAUDIR_ENABLE_SUBAGENTS → Agent
+# The flags come from ``plugins.json`` ``tool_groups`` (default off):
+#   tool_groups.bash      → Bash, PowerShell, Monitor
+#   tool_groups.code      → Edit, Write, Read, NotebookEdit, Glob, Grep, LSP
+#   tool_groups.subagents → Agent
 #   (Jira / GitLab / GitHub tools come in via ``mcp_allowed_tools``,
 #    populated from ``plugins.json`` after credential interpolation.)
 # ---------------------------------------------------------------------------

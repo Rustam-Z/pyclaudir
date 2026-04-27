@@ -8,17 +8,23 @@
   "skills_disabled": [],
   "mcps": [
     {
-      "enabled": false,
+        "name": "deepwiki",
+        "type": "http",
+        "url": "https://mcp.deepwiki.com/mcp",
+        "allowed_tools": ["mcp__deepwiki"],
+        "enabled": false
+    },
+    {
       "name": "github",
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-github"],
       "env": {
         "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}"
       },
-      "allowed_tools": ["mcp__github"]
+      "allowed_tools": ["mcp__github"],
+      "enabled": false
     },
     {
-      "enabled": false,
       "name": "mcp-gitlab",
       "command": "npx",
       "args": ["-y", "@zereight/mcp-gitlab"],
@@ -26,10 +32,10 @@
         "GITLAB_PERSONAL_ACCESS_TOKEN": "${GITLAB_TOKEN}",
         "GITLAB_API_URL": "${GITLAB_URL}/api/v4"
       },
-      "allowed_tools": ["mcp__mcp-gitlab"]
+      "allowed_tools": ["mcp__mcp-gitlab"],
+      "enabled": false
     },
     {
-      "enabled": false,
       "name": "mcp-atlassian",
       "command": "mcp-atlassian",
       "args": [],
@@ -41,7 +47,8 @@
       "allowed_tools": [
         "mcp__mcp-atlassian__jira_*",
         "mcp__mcp-atlassian__confluence_*"
-      ]
+      ],
+      "enabled": false
     }
   ]
 }

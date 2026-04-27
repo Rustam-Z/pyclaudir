@@ -3,10 +3,9 @@
 Single repo-root file ``plugins.json`` declares:
 
 * ``tool_groups`` — toggles for the Claude Code built-in tool groups
-  (``bash``, ``code``, ``subagents``). The env vars
-  ``PYCLAUDIR_ENABLE_BASH/CODE/SUBAGENTS`` still work as overrides; if
-  the env var is set to ``"1"`` the group is on, otherwise the JSON
-  value wins.
+  (``bash``, ``code``, ``subagents``). Default is off for every group;
+  flip to ``true`` here to unlock. ``plugins.json`` is the only source —
+  there are no env-var overrides.
 * ``mcps`` — one entry per external MCP server. Each entry names the
   command to spawn, ``args``/``env`` (with ``${VAR}`` interpolation
   from the process env), the ``allowed_tools`` list to add to

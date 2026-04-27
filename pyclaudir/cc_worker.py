@@ -59,8 +59,10 @@ log = logging.getLogger(__name__)
 #: + Telegram-only output channel are the bounding mitigations.
 #:
 #: Each tool category here is unlocked by a corresponding ``enable_*``
-#: field on :class:`CcSpawnSpec`, driven by ``PYCLAUDIR_ENABLE_*`` env
-#: vars in ``Config``. See ``docs/tools.md``.
+#: field on :class:`CcSpawnSpec`, populated from ``plugins.json``'s
+#: ``tool_groups`` block (``bash`` / ``code`` / ``subagents``). Default
+#: off; ``plugins.json`` is the only source of truth — no env-var
+#: overrides. See ``docs/tools.md``.
 DEFAULT_DISALLOWED_TOOLS: tuple[str, ...] = (
     # Shell execution — unlocked by ``enable_bash``.
     "Bash",
@@ -119,18 +121,19 @@ class CcSpawnSpec:
     #: system prompt. When False (default), ``Agent`` is added to
     #: ``--disallowedTools`` and the docs file is not read — the bot cannot
     #: spawn subagents and doesn't even see the capability. Subagent turns
-    #: are token-heavy; keep off unless you need them. Driven by
-    #: ``PYCLAUDIR_ENABLE_SUBAGENTS``.
+    #: are token-heavy; keep off unless you need them. Sourced from
+    #: ``plugins.json`` ``tool_groups.subagents``.
     enable_subagents: bool = False
     #: Path to the subagent docs markdown. Read and appended to the system
     #: prompt iff ``enable_subagents`` is True. Ignored otherwise.
     subagents_prompt_path: Path | None = None
     #: When True, ``Bash``, ``PowerShell``, ``Monitor`` move from the deny
-    #: list to the allow list. Driven by ``PYCLAUDIR_ENABLE_BASH``.
+    #: list to the allow list. Sourced from ``plugins.json``
+    #: ``tool_groups.bash``.
     enable_bash: bool = False
     #: When True, ``Edit``, ``Write``, ``Read``, ``NotebookEdit``, ``Glob``,
-    #: ``Grep``, ``LSP`` move from deny to allow. Driven by
-    #: ``PYCLAUDIR_ENABLE_CODE``.
+    #: ``Grep``, ``LSP`` move from deny to allow. Sourced from
+    #: ``plugins.json`` ``tool_groups.code``.
     enable_code: bool = False
     #: Flat list of tool entries to add to ``--allowedTools`` from
     #: external MCP plugins. Each entry is either an exact tool name
