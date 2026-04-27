@@ -20,7 +20,9 @@ skills/
 ├── render-style/          ← house style for render_html
 │   ├── SKILL.md
 │   └── README.md
-└── reminder-format/       ← house format for set_reminder text
+├── reminder-format/       ← house format for set_reminder text
+│   └── SKILL.md
+└── trend-watch/           ← on-demand WORLD + UZBEKISTAN digest
     └── SKILL.md
 ```
 
@@ -31,6 +33,7 @@ skills/
 | [self-reflection](self-reflection/) | invoked | Daily two-phase loop: introspect last 24h of outbound behavior, stress-test pending lessons against scenarios, propose promote / refine / discard rules to the owner. Triggered by an auto-seeded reminder; refused without a real `<reminder>` envelope. |
 | [render-style](render-style/) | reference | Style guide for the `render_html` tool — dark dashboard / timeline / architecture-diagram look with CSS tokens, layout rules, and three copy-paste HTML skeletons. Read on the agent's own initiative before any `render_html` call. |
 | [reminder-format](reminder-format/) | reference | Three-rule format for the `set_reminder` text argument — `"This is a reminder."` opener, `Goal:` line, numbered steps. Read before creating or editing any reminder so fired `<reminder>` envelopes are self-explanatory. |
+| [trend-watch](trend-watch/) | invoked | On-demand WORLD + UZBEKISTAN digest. Sweeps tech / finance / AI-lab / earnings sources globally and Uzbek VC, fintech, gov-tech, and Telegram channels locally, then synthesises a two-minute digest with money-making angles. Triggered by a reminder containing `<skill name="trend-watch">run</skill>`. |
 
 ## Skill modes
 
