@@ -188,83 +188,50 @@ Restart `python -m pyclaudir`. The tool is live.
 
 ## Access control
 
-Who can talk to the bot is governed by `access.json` at the repo root
-(sibling of `plugins.json`), which is **hot-reloaded on every inbound
-message** — edits take effect immediately without a restart. The file
-is gitignored; a starting template lives at `access.json.example`.
+`access.json` at the repo root governs who can talk to the bot.
+Hot-reloaded on every inbound message. Gitignored; template at
+`access.json.example`. First run seeds `policy: "owner_only"` with
+empty allowlists.
 
 ```json
 {
-  "dm_policy": "owner_only",
+  "policy": "owner_only",
   "allowed_users": [],
   "allowed_chats": [-1001234567890]
 }
 ```
 
-### DM policies
+| Policy | DMs | Groups |
+|---|---|---|
+| `owner_only` (default) | Owner only | Blocked |
+| `allowlist` | Owner + `allowed_users` | `allowed_chats` |
+| `open` | Anyone | Any group |
 
-| Policy | Who can DM the bot |
-|---|---|
-| `owner_only` | Only `PYCLAUDIR_OWNER_ID`. Default. |
-| `allowlist` | Owner + user IDs in `allowed_users`. |
-| `open` | Anyone. |
+The owner is always allowed in DMs. Blocked messages are still persisted
+to SQLite (audit trail), then dropped before the engine sees them.
+Non-allowlisted DMs receive: *"You don't have access to this bot. To
+request access, message the owner (Telegram user ID: N)."* Groups stay
+silent.
 
-The owner is **always** implicitly allowed regardless of policy.
+### Owner commands
 
-### Groups
-
-A group must be in `allowed_chats` for the bot to respond in it. Messages
-from unlisted groups are still persisted to SQLite (audit trail) but
-dropped before the engine sees them.
-
-### Strangers DMing the bot
-
-Non-allowlisted DMs get a one-line reply: *"You don't have access to
-this bot. To request access, message the owner (Telegram user ID: N)."*
-Groups stay silent.
-
-### Managing access from Telegram (owner-only commands)
-
-All slash commands below check `update.effective_user.id ==
-PYCLAUDIR_OWNER_ID` and silently no-op for anyone else (no error leaked
-to the caller, by design).
-
-**Access control:**
+Owner-only — silently no-op for everyone else. `update.effective_user.id
+== PYCLAUDIR_OWNER_ID` is the actual gate; `BotCommandScopeChat` just
+hides the `/` menu from non-owners.
 
 ```
-/access                      Show current policy, allowed users, allowed chats
-/allow 123456789             Add a user to the DM allowlist
-/deny 123456789              Remove a user from the DM allowlist
-/dmpolicy allowlist          Change DM policy (owner_only | allowlist | open)
+/access                      Show policy + allowlists
+/allow user <id>             Add user to allowed_users
+/allow group <chat_id>       Add chat to allowed_chats
+/deny user <id>              Remove user
+/deny group <chat_id>        Remove chat
+/policy <owner_only|allowlist|open>
+/kill                        SIGTERM (graceful shutdown)
+/health                      Last send, reminder state, rate-limit notices
+/audit                       Recent tool failures, backups, memory footprint
 ```
 
-**Operational:**
-
-```
-/kill                        Stop the bot cleanly (sends SIGTERM, same path as Ctrl+C)
-/health                      Quick health readout — last bot send, reminder
-                             status, lifetime rate-limit notice count
-/audit                       Richer — recent tool failures, prompt backup
-                             count, memory footprint
-```
-
-Autocomplete is owner-scoped via `BotCommandScopeChat`, so the `/` menu
-only shows up in the owner's DM. Visibility is UX; the `_is_owner` gate
-is the actual authorization. `/kill` sends `SIGTERM` to itself, reusing
-the signal-handler shutdown path in `__main__.py`.
-
-Or edit `access.json` directly — changes are picked up on the next
-message.
-
-### First run bootstrap
-
-If `access.json` doesn't exist at the repo root on startup, pyclaudir
-creates it empty: `dm_policy: "owner_only"`, no allowed users or
-chats. Only the owner DM works until you grant more access via
-`/telegram:access` (or by editing `access.json` directly — changes are
-hot-reloaded).
-
-A template is provided at `access.json.example`.
+Edit `access.json` directly if you prefer — changes are hot-reloaded.
 
 ## Memory
 
@@ -736,7 +703,7 @@ is enforced by code, not by hope, and tested in
   under `pyclaudir/tools/`. The *only* place those primitives are
   allowed is `cc_worker.py`, which spawns `claude` itself.
 - **Owner-only privileged commands.** `/kill`, `/health`, `/audit`,
-  `/access`, `/allow`, `/deny`, `/dmpolicy` check
+  `/access`, `/allow`, `/deny`, `/policy` check
   `update.effective_user.id == PYCLAUDIR_OWNER_ID` before running and
   silently no-op for anyone else.
 - **`query_db` is read-only.** Inputs are parsed with `sqlglot` and

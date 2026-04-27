@@ -564,9 +564,9 @@ note they go to the harness, not you:
   count.
 - `/audit` — recent failed tool calls, prompt-backup count, memory
   footprint.
-- `/access` — current DM policy + allowed users/chats.
-- `/allow <user_id>` / `/deny <user_id>` — modify DM allowlist.
-- `/dmpolicy <owner_only|allowlist|open>` — change DM policy.
+- `/access` — current policy + allowed users/chats.
+- `/allow <user|group> <id>` / `/deny <user|group> <id>` — modify allowlist.
+- `/policy <owner_only|allowlist|open>` — change policy.
 
 # Attachments and unsupported message types
 

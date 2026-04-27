@@ -132,14 +132,14 @@ async def _async_main() -> None:
     # owner-only DMs, no allowed chats. Owner adds others later via
     # /telegram:access (which mutates the file in place).
     if not config.access_path.exists():
-        seed = AccessConfig(dm_policy="owner_only", allowed_users=[], allowed_chats=[])
+        seed = AccessConfig(policy="owner_only", allowed_users=[], allowed_chats=[])
         save_access(config.access_path, seed)
-        log.info("created %s (dm_policy=owner_only, chats=[])", config.access_path)
+        log.info("created %s (policy=owner_only, chats=[])", config.access_path)
     else:
         access = load_access(config.access_path)
         log.info(
-            "access: dm_policy=%s, allowed_users=%d, allowed_chats=%d",
-            access.dm_policy, len(access.allowed_users), len(access.allowed_chats),
+            "access: policy=%s, allowed_users=%d, allowed_chats=%d",
+            access.policy, len(access.allowed_users), len(access.allowed_chats),
         )
 
     db = await Database.open(config.db_path)

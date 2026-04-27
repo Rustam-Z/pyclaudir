@@ -3,7 +3,7 @@
 The handlers do the absolute minimum: persist the incoming update to SQLite
 and enqueue it on the engine. They never call any LLM directly. Owner-only
 slash commands (``/kill``, ``/health``, ``/audit``, ``/access``, ``/allow``,
-``/deny``, ``/dmpolicy``) are intercepted before the engine sees the
+``/deny``, ``/policy``) are intercepted before the engine sees the
 message and silently no-op for non-owners.
 """
 
@@ -218,6 +218,24 @@ class EnginePort(Protocol):
     def prime_typing(self, chat_id: int) -> None: ...
 
 
+def _parse_allow_args(
+    args: list[str] | None, *, verb: str
+) -> tuple[str, int, None] | tuple[None, None, str]:
+    """Parse ``/allow|/deny <user|group> <id>`` argv. Returns either
+    ``(kind, target_id, None)`` on success or ``(None, None, error_msg)``."""
+    usage = f"Usage: /{verb} <user|group> <id>"
+    if not args or len(args) < 2:
+        return None, None, usage
+    kind = args[0].lower()
+    if kind not in ("user", "group"):
+        return None, None, usage
+    try:
+        target_id = int(args[1])
+    except ValueError:
+        return None, None, "ID must be a number."
+    return kind, target_id, None
+
+
 def _to_chat_message(update: Update, direction: str = "in") -> ChatMessage | None:
     msg = update.effective_message
     if msg is None or msg.from_user is None:
@@ -290,7 +308,7 @@ class TelegramDispatcher:
         # Owner-only access management commands.
         self.application.add_handler(CommandHandler("allow", self._cmd_allow))
         self.application.add_handler(CommandHandler("deny", self._cmd_deny))
-        self.application.add_handler(CommandHandler("dmpolicy", self._cmd_dmpolicy))
+        self.application.add_handler(CommandHandler("policy", self._cmd_policy))
         self.application.add_handler(CommandHandler("access", self._cmd_access))
 
         # All other text/caption messages plus photos and documents.
@@ -426,55 +444,49 @@ class TelegramDispatcher:
     async def _cmd_allow(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if not self._is_owner(update):
             return
-        args = ctx.args
-        if not args:
-            await update.effective_message.reply_text("Usage: /allow <user_id>")
-            return
-        try:
-            user_id = int(args[0])
-        except ValueError:
-            await update.effective_message.reply_text("User ID must be a number.")
+        kind, target_id, error = _parse_allow_args(ctx.args, verb="allow")
+        if error is not None:
+            await update.effective_message.reply_text(error)
             return
         access = load_access(self.config.access_path)
-        if user_id not in access.allowed_users:
-            access.allowed_users.append(user_id)
+        bucket = access.allowed_users if kind == "user" else access.allowed_chats
+        if target_id not in bucket:
+            bucket.append(target_id)
             save_access(self.config.access_path, access)
-        await update.effective_message.reply_text(f"User {user_id} added to DM allowlist.")
+        label = "User" if kind == "user" else "Group"
+        await update.effective_message.reply_text(f"{label} {target_id} added to allowlist.")
 
     async def _cmd_deny(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if not self._is_owner(update):
             return
-        args = ctx.args
-        if not args:
-            await update.effective_message.reply_text("Usage: /deny <user_id>")
-            return
-        try:
-            user_id = int(args[0])
-        except ValueError:
-            await update.effective_message.reply_text("User ID must be a number.")
+        kind, target_id, error = _parse_allow_args(ctx.args, verb="deny")
+        if error is not None:
+            await update.effective_message.reply_text(error)
             return
         access = load_access(self.config.access_path)
-        if user_id in access.allowed_users:
-            access.allowed_users.remove(user_id)
+        bucket = access.allowed_users if kind == "user" else access.allowed_chats
+        label = "User" if kind == "user" else "Group"
+        if target_id in bucket:
+            bucket.remove(target_id)
             save_access(self.config.access_path, access)
-            await update.effective_message.reply_text(f"User {user_id} removed from DM allowlist.")
+            await update.effective_message.reply_text(f"{label} {target_id} removed from allowlist.")
         else:
-            await update.effective_message.reply_text(f"User {user_id} was not in the allowlist.")
+            await update.effective_message.reply_text(f"{label} {target_id} was not in the allowlist.")
 
-    async def _cmd_dmpolicy(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    async def _cmd_policy(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if not self._is_owner(update):
             return
         args = ctx.args
         valid = ("owner_only", "allowlist", "open")
         if not args or args[0] not in valid:
             await update.effective_message.reply_text(
-                f"Usage: /dmpolicy <{'|'.join(valid)}>"
+                f"Usage: /policy <{'|'.join(valid)}>"
             )
             return
         access = load_access(self.config.access_path)
-        access.dm_policy = args[0]  # type: ignore[assignment]
+        access.policy = args[0]  # type: ignore[assignment]
         save_access(self.config.access_path, access)
-        await update.effective_message.reply_text(f"DM policy set to: {args[0]}")
+        await update.effective_message.reply_text(f"Policy set to: {args[0]}")
 
     async def _cmd_access(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if not self._is_owner(update):
@@ -483,7 +495,7 @@ class TelegramDispatcher:
         users = ", ".join(str(u) for u in access.allowed_users) or "(none)"
         chats = ", ".join(str(c) for c in access.allowed_chats) or "(none)"
         await update.effective_message.reply_text(
-            f"DM policy: {access.dm_policy}\n"
+            f"Policy: {access.policy}\n"
             f"Allowed users: {users}\n"
             f"Allowed chats: {chats}\n"
             f"Owner: {self.config.owner_id} (always allowed)"
@@ -690,10 +702,10 @@ class TelegramDispatcher:
         commands = [
             BotCommand("health", "quick health readout"),
             BotCommand("audit", "recent failures, backups, memory footprint"),
-            BotCommand("access", "show DM access policy"),
-            BotCommand("allow", "add user to DM allowlist: /allow <user_id>"),
-            BotCommand("deny", "remove user from DM allowlist: /deny <user_id>"),
-            BotCommand("dmpolicy", "set DM policy: /dmpolicy <owner_only|allowlist|open>"),
+            BotCommand("access", "show access policy"),
+            BotCommand("allow", "add to allowlist: /allow <user|group> <id>"),
+            BotCommand("deny", "remove from allowlist: /deny <user|group> <id>"),
+            BotCommand("policy", "set policy: /policy <owner_only|allowlist|open>"),
             BotCommand("kill", "stop the bot"),
         ]
         try:

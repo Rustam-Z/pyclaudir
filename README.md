@@ -229,11 +229,10 @@ freely; nothing in pyclaudir's code path treats them as special:
 | `GITLAB_URL` + `GITLAB_TOKEN` | no | credentials for GitLab via [@zereight/mcp-gitlab](https://www.npmjs.com/package/@zereight/mcp-gitlab); referenced from `plugins.json` |
 | `GITHUB_PERSONAL_ACCESS_TOKEN` | no | credentials for GitHub via [@modelcontextprotocol/server-github](https://www.npmjs.com/package/@modelcontextprotocol/server-github); referenced from `plugins.json`. For Enterprise, add `GITHUB_HOST` to the entry's `env` block. |
 
-Access policy lives in `access.json` at the repo root (hot-reloaded). DM policies:
-`owner_only` (default), `allowlist`, `open`. Group chats must be in
-`allowed_chats`. `allowlist` is only for exclusive users in `allowed_users`, not groups.
-Owner-only commands (silent for non-owners):
-`/access`, `/allow`, `/deny`, `/dmpolicy`, `/kill`, `/health`, `/audit`.
+Access lives in `access.json` at the repo root (hot-reloaded). One `policy`
+gates DMs and groups: `owner_only` (default, owner DM only) · `allowlist`
+(`allowed_users` for DMs, `allowed_chats` for groups) · `open` (everyone).
+Owner-only commands: `/access`, `/allow`, `/deny`, `/policy`, `/kill`, `/health`, `/audit`.
 Details: [docs/documentation.md](docs/documentation.md).
 
 ## Extending

@@ -402,7 +402,7 @@ def test_invariant_7_owner_check_via_gate() -> None:
     always allowed; strangers are blocked under ``owner_only`` policy."""
     from pyclaudir.access import AccessConfig, gate
 
-    access = AccessConfig(dm_policy="owner_only", allowed_users=[], allowed_chats=[])
+    access = AccessConfig(policy="owner_only", allowed_users=[], allowed_chats=[])
     assert gate(access=access, owner_id=42, chat_id=42, user_id=42, chat_type="private") is True
     assert gate(access=access, owner_id=42, chat_id=999, user_id=999, chat_type="private") is False
     assert gate(access=access, owner_id=42, chat_id=-100123, user_id=999, chat_type="supergroup") is False

@@ -100,6 +100,6 @@ async def test_dispatcher_drops_disallowed_chats() -> None:
     stranger DMs and unlisted groups are dropped."""
     from pyclaudir.access import AccessConfig, gate
 
-    access = AccessConfig(dm_policy="owner_only", allowed_users=[], allowed_chats=[])
+    access = AccessConfig(policy="owner_only", allowed_users=[], allowed_chats=[])
     assert gate(access=access, owner_id=42, chat_id=-100999, user_id=999, chat_type="supergroup") is False
     assert gate(access=access, owner_id=42, chat_id=42, user_id=42, chat_type="private") is True

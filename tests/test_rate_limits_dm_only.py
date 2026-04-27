@@ -39,7 +39,7 @@ def _cfg(tmp_path: Path) -> Config:
     # Open DMs so the gate lets non-owners through.
     save_access(
         cfg.access_path,
-        AccessConfig(dm_policy="open", allowed_users=[], allowed_chats=[GROUP_CHAT]),
+        AccessConfig(policy="open", allowed_users=[], allowed_chats=[GROUP_CHAT]),
     )
     return cfg
 

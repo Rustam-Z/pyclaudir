@@ -1,5 +1,5 @@
 {
-  "dm_policy": "owner_only",
+  "policy": "owner_only",
   "allowed_users": [],
   "allowed_chats": []
 }

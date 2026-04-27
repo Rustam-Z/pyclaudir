@@ -3,12 +3,22 @@
 Hot-reloadable ``access.json`` (at the repo root, alongside
 ``plugins.json``) governs who can talk to the bot:
 
-- **DM policy**: ``owner_only`` (default), ``allowlist``, or ``open``.
-- **Allowed users**: explicit list of Telegram user IDs that may DM.
-- **Allowed chats**: explicit list of group/supergroup chat IDs.
+- **Policy**: ``owner_only`` (default), ``allowlist``, or ``open``.
+  Governs both DMs and group chats.
+- **Allowed users**: explicit list of Telegram user IDs (used in
+  ``allowlist``).
+- **Allowed chats**: explicit list of group/supergroup chat IDs (used
+  in ``allowlist``).
+
+Semantics:
+
+- ``owner_only`` — only the owner in a DM. Groups are always blocked.
+- ``allowlist`` — owner + ``allowed_users`` in DMs; groups in
+  ``allowed_chats``.
+- ``open`` — anyone in DMs, any group.
 
 The owner (``PYCLAUDIR_OWNER_ID``) is always implicitly allowed in DMs
-regardless of policy or ``allowed_users`` content.
+regardless of ``allowed_users`` content.
 
 The file is re-read on every inbound message so edits take effect
 immediately without a restart. Writes use atomic tmp+rename to prevent
@@ -25,20 +35,20 @@ from typing import Literal
 
 log = logging.getLogger(__name__)
 
-DmPolicy = Literal["owner_only", "allowlist", "open"]
+Policy = Literal["owner_only", "allowlist", "open"]
 
 _VALID_POLICIES: set[str] = {"owner_only", "allowlist", "open"}
 
 
 @dataclass
 class AccessConfig:
-    dm_policy: DmPolicy = "owner_only"
+    policy: Policy = "owner_only"
     allowed_users: list[int] = field(default_factory=list)
     allowed_chats: list[int] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
-            "dm_policy": self.dm_policy,
+            "policy": self.policy,
             "allowed_users": self.allowed_users,
             "allowed_chats": self.allowed_chats,
         }
@@ -62,13 +72,13 @@ def load_access(path: Path) -> AccessConfig:
             pass
         return AccessConfig()
 
-    policy = raw.get("dm_policy", "owner_only")
+    policy = raw.get("policy", "owner_only")
     if policy not in _VALID_POLICIES:
-        log.warning("invalid dm_policy %r in access.json, defaulting to owner_only", policy)
+        log.warning("invalid policy %r in access.json, defaulting to owner_only", policy)
         policy = "owner_only"
 
     return AccessConfig(
-        dm_policy=policy,
+        policy=policy,
         allowed_users=[int(u) for u in raw.get("allowed_users", []) if _is_int(u)],
         allowed_chats=[int(c) for c in raw.get("allowed_chats", []) if _is_int(c)],
     )
@@ -99,21 +109,19 @@ def gate(
     persisted to SQLite regardless — this only controls whether the agent
     sees it.
     """
-    # Groups: chat must be in the allowlist.
-    if chat_type in ("group", "supergroup", "channel"):
+    is_group = chat_type in ("group", "supergroup", "channel")
+
+    if access.policy == "owner_only":
+        # Owner DMs only. Groups are always denied.
+        return not is_group and user_id == owner_id
+
+    if access.policy == "open":
+        return True
+
+    # "allowlist"
+    if is_group:
         return chat_id in access.allowed_chats
-
-    # DMs: owner is always allowed.
-    if user_id == owner_id:
-        return True
-
-    # DM policy gates.
-    if access.dm_policy == "open":
-        return True
-    if access.dm_policy == "allowlist":
-        return user_id in access.allowed_users
-    # "owner_only" — only the owner passes, and we already checked above.
-    return False
+    return user_id == owner_id or user_id in access.allowed_users
 
 
 def _is_int(v) -> bool:
