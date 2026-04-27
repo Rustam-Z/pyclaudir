@@ -216,7 +216,11 @@ class Config:
         object.__setattr__(self, "memories_dir", self.data_dir / "memories")
         object.__setattr__(self, "session_id_path", self.data_dir / "session_id")
         object.__setattr__(self, "cc_logs_dir", self.data_dir / "cc_logs")
-        object.__setattr__(self, "access_path", self.data_dir / "access.json")
+        # access.json sits at the repo root alongside plugins.json — both
+        # are operator-edited config files, not runtime state, so they
+        # don't belong in data/. Tests override this via for_test().
+        project_root = Path(__file__).resolve().parent.parent
+        object.__setattr__(self, "access_path", project_root / "access.json")
         object.__setattr__(self, "attachments_dir", self.data_dir / "attachments")
         object.__setattr__(self, "renders_dir", self.data_dir / "renders")
 
@@ -253,7 +257,7 @@ class Config:
         Used by tests so they don't depend on whatever is set on the
         machine running them.
         """
-        return cls(
+        cfg = cls(
             telegram_bot_token="test-token",
             owner_id=0,
             model="claude-opus-4-7",
@@ -274,6 +278,10 @@ class Config:
             crash_limit=10,
             crash_window_seconds=600.0,
         )
+        # Tests use isolated tmp dirs — keep access.json inside data_dir
+        # so each test gets its own copy and never touches the repo root.
+        object.__setattr__(cfg, "access_path", data_dir.resolve() / "access.json")
+        return cfg
 
     def ensure_dirs(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)

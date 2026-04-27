@@ -59,6 +59,12 @@ COPY skills/ skills/
 # BuildKit builders.
 COPY plugins.json.example plugins.json* ./
 
+# Access policy — same pattern as plugins. The example is always shipped;
+# a real ``access.json`` is overlaid via bind mount at runtime
+# (docker-compose.yml) so /allow, /deny, /dmpolicy mutations persist
+# across restarts. The image-baked copy (if any) is the seed value.
+COPY access.json.example access.json* ./
+
 # Data directory (mount as volume)
 VOLUME /app/data
 

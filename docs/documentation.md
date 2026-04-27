@@ -104,8 +104,9 @@ spawn; clear them to silently skip its MCP at boot.
 | `GITLAB_TOKEN` | no | — | GitLab personal access token — same |
 | `GITHUB_PERSONAL_ACCESS_TOKEN` | no | — | GitHub PAT — referenced by the `github` plugin entry. For Enterprise, add `GITHUB_HOST` to the entry's `env` block in `plugins.json` and set it here too. |
 
-Who can DM the bot or use it in groups is set in `data/access.json`, not
-in environment variables. See [Access control](#access-control).
+Who can DM the bot or use it in groups is set in `access.json` at the
+repo root (sibling of `plugins.json`), not in environment variables.
+See [Access control](#access-control).
 
 ## How it works (in detail)
 
@@ -187,9 +188,10 @@ Restart `python -m pyclaudir`. The tool is live.
 
 ## Access control
 
-Who can talk to the bot is governed by `data/access.json`, which is
-**hot-reloaded on every inbound message** — edits take effect immediately
-without a restart.
+Who can talk to the bot is governed by `access.json` at the repo root
+(sibling of `plugins.json`), which is **hot-reloaded on every inbound
+message** — edits take effect immediately without a restart. The file
+is gitignored; a starting template lives at `access.json.example`.
 
 ```json
 {
@@ -214,6 +216,12 @@ The owner is **always** implicitly allowed regardless of policy.
 A group must be in `allowed_chats` for the bot to respond in it. Messages
 from unlisted groups are still persisted to SQLite (audit trail) but
 dropped before the engine sees them.
+
+### Strangers DMing the bot
+
+Non-allowlisted DMs get a one-line reply: *"You don't have access to
+this bot. To request access, message the owner (Telegram user ID: N)."*
+Groups stay silent.
 
 ### Managing access from Telegram (owner-only commands)
 
@@ -240,34 +248,23 @@ to the caller, by design).
                              count, memory footprint
 ```
 
-**Autocomplete is owner-scoped.** On startup the dispatcher registers
-the command list with `set_my_commands(...,
-scope=BotCommandScopeChat(chat_id=owner_id))`, so the `/` menu only
-suggests these commands inside the owner's DM. Other users' clients
-fall through to the empty default scope and see nothing — even in
-groups the bot is in. Group menus inherit the default scope, so the
-owner won't see autocomplete in groups either; type the command
-manually (with `@botname` if Bot privacy is on). Visibility ≠
-authorization: the `_is_owner` gate is what actually blocks execution.
+Autocomplete is owner-scoped via `BotCommandScopeChat`, so the `/` menu
+only shows up in the owner's DM. Visibility is UX; the `_is_owner` gate
+is the actual authorization. `/kill` sends `SIGTERM` to itself, reusing
+the signal-handler shutdown path in `__main__.py`.
 
-`/kill` writes a "Shutting down…" reply, then `os.kill(os.getpid(),
-SIGTERM)`. The signal hits the handler in `__main__.py` which sets
-`stop_event`, and the existing `finally` block tears down dispatcher,
-engine, worker, MCP, and DB in order. Don't call
-`Application.stop_running()` from the dispatcher — it stops the asyncio
-loop directly and conflicts with our custom lifecycle.
-
-Or edit `data/access.json` directly — changes are picked up on the next
+Or edit `access.json` directly — changes are picked up on the next
 message.
 
 ### First run bootstrap
 
-If `data/access.json` doesn't exist on startup, pyclaudir creates it
-empty: `dm_policy: "owner_only"`, no allowed users or chats. Only the
-owner DM works until you grant more access via `/telegram:access` (or
-by editing `access.json` directly — changes are hot-reloaded).
+If `access.json` doesn't exist at the repo root on startup, pyclaudir
+creates it empty: `dm_policy: "owner_only"`, no allowed users or
+chats. Only the owner DM works until you grant more access via
+`/telegram:access` (or by editing `access.json` directly — changes are
+hot-reloaded).
 
-A template is provided at `data/access.json.example`.
+A template is provided at `access.json.example`.
 
 ## Memory
 
@@ -883,6 +880,10 @@ pyclaudir/
 │   └── reference-architectures.md  # Claudir / Anthropic plugin notes
 ├── Dockerfile
 ├── docker-compose.yml
+├── plugins.json                # operator-edited capability config (gitignored)
+├── plugins.json.example        # template for plugins.json
+├── access.json                 # DM policy + allowed users/chats (gitignored, hot-reloaded)
+├── access.json.example         # template for access.json
 ├── prompts/
 │   ├── system.md               # generic pyclaudir system prompt (shipped)
 │   ├── project.md              # project-specific overlay (gitignored)
@@ -897,7 +898,6 @@ pyclaudir/
 │       └── README.md
 ├── data/                       # gitignored
 │   ├── pyclaudir.db            # SQLite (messages, users, tool_calls, ...)
-│   ├── access.json             # DM policy + allowed users/chats (hot-reloaded)
 │   ├── session_id              # CC session id for --resume
 │   ├── memories/               # the agent's working memory
 │   ├── attachments/            # inbound photos/docs the dispatcher saves

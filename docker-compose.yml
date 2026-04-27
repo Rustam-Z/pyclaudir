@@ -4,7 +4,7 @@ services:
     restart: unless-stopped
     env_file: .env
     volumes:
-      # Persistent data: SQLite, memories, access.json, session_id, cc_logs
+      # Persistent data: SQLite, memories, session_id, cc_logs
       - ./data:/app/data
       # Prompt files. Mounted as a directory (not a single-file mount)
       # so the bot's `append_instructions` tool can rename(2)-replace

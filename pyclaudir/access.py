@@ -1,6 +1,7 @@
 """Access control for pyclaudir.
 
-Hot-reloadable ``data/access.json`` governs who can talk to the bot:
+Hot-reloadable ``access.json`` (at the repo root, alongside
+``plugins.json``) governs who can talk to the bot:
 
 - **DM policy**: ``owner_only`` (default), ``allowlist``, or ``open``.
 - **Allowed users**: explicit list of Telegram user IDs that may DM.

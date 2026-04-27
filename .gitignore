@@ -8,7 +8,6 @@ __pycache__/
 # Project data (runtime)
 data/
 !data/memories/.gitkeep
-!data/access.json.example
 
 # Env
 .env
@@ -21,6 +20,12 @@ prompts/project.md
 # then customises. Not tracked so different deployments don't fight
 # over the file.
 plugins.json
+
+# Local access policy — operator copies access.json.example on setup,
+# then customises (DM policy, allowed users/chats). Lives at repo root
+# alongside plugins.json so both operator-edited config files sit
+# together; not tracked so deployments don't fight over the file.
+access.json
 
 # Editors
 .vscode/

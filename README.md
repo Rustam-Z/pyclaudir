@@ -85,15 +85,16 @@ uv run python -m pyclaudir.scripts.trace --follow   # tail Claude Code I/O
 
 **On Windows?** Easiest path: install [Docker Desktop](https://docs.docker.com/desktop/install/windows-install/) and run the Quickstart from **Git Bash** or **WSL** — all commands above work as written. From PowerShell, swap `nano` for `notepad` (the rest of the commands are fine; `cp` is an alias for `Copy-Item`). From `cmd.exe`, additionally swap `cp` → `copy` and `&&` chaining still works. Docker Desktop's `docker compose` runs identically on Windows.
 
-### The three setup files
+### The four setup files
 
 | File | Tracked in git? | What it controls |
 |---|---|---|
 | `.env` | no | secrets — Telegram bot token, owner id, plus any credentials your `plugins.json` entries reference via `${VAR}` (the example file's Jira / GitLab / GitHub entries demonstrate the pattern) |
 | `prompts/project.md` | no | persona — bot name, language, house rules, owner-specific instructions; appended to the shipped `prompts/system.md` |
 | `plugins.json` | no | capability surface — what tools, skills, and MCPs are on |
+| `access.json` | no | who can DM the bot or use it in groups (hot-reloaded, no restart) |
 
-`.env.example`, `prompts/project.md.example`, and `plugins.json.example` are tracked so you have a starting point; the real files (the three above) are gitignored so different deployments carry different config without fighting over the file.
+`.env.example`, `prompts/project.md.example`, `plugins.json.example`, and `access.json.example` are tracked so you have a starting point; the real files are gitignored so different deployments carry different config without fighting over the file. `access.json` is auto-created on first run with the safest default (`owner_only`, no allowlist) if you don't seed it from the example.
 
 ### What `plugins.json` controls
 
@@ -228,7 +229,7 @@ freely; nothing in pyclaudir's code path treats them as special:
 | `GITLAB_URL` + `GITLAB_TOKEN` | no | credentials for GitLab via [@zereight/mcp-gitlab](https://www.npmjs.com/package/@zereight/mcp-gitlab); referenced from `plugins.json` |
 | `GITHUB_PERSONAL_ACCESS_TOKEN` | no | credentials for GitHub via [@modelcontextprotocol/server-github](https://www.npmjs.com/package/@modelcontextprotocol/server-github); referenced from `plugins.json`. For Enterprise, add `GITHUB_HOST` to the entry's `env` block. |
 
-Access policy lives in `data/access.json` (hot-reloaded). DM policies:
+Access policy lives in `access.json` at the repo root (hot-reloaded). DM policies:
 `owner_only` (default), `allowlist`, `open`. Group chats must be in
 `allowed_chats`. `allowlist` is only for exclusive users in `allowed_users`, not groups.
 Owner-only commands (silent for non-owners):

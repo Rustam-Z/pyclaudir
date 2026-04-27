@@ -558,8 +558,27 @@ class TelegramDispatcher:
             allowed=allowed,
         )
 
-        # 2. Forward only allowed chats to the engine.
+        # 2. Forward only allowed chats to the engine. Non-allowed DMs
+        #    get a polite "no access" reply pointing at the owner;
+        #    groups stay silent (sender there is the group's problem).
         if not allowed:
+            chat_type = (
+                update.effective_chat.type if update.effective_chat else None
+            )
+            if chat_type == "private" and cm.user_id != self.config.owner_id:
+                try:
+                    await self.bot.send_message(
+                        chat_id=cm.chat_id,
+                        text=(
+                            "You don't have access to this bot.\n"
+                            f"To request access, message the owner "
+                            f"(Telegram user ID: {self.config.owner_id})."
+                        ),
+                    )
+                except Exception:
+                    log.warning(
+                        "no-access notice send failed for user %s", cm.user_id
+                    )
             return
 
         chat_type = update.effective_chat.type if update.effective_chat else None
