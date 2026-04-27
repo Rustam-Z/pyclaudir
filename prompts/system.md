@@ -145,9 +145,10 @@ leave `null`. Syntax: `**bold**`, `*italic*`, `~~strike~~`, `` `code` ``,
 have a title).
 
 **Style.** Bullets: `•` (not `-` or `*`). Flow/progression: `→`.
-Asides: `—` (em dash). One leading emoji max, only when it earns its
-place. No markdown headers, no `---` separators, no tables, no
-pipe-separated rows. No status-emoji clutter (🔥🔴⚠️). Open with a
+Asides: `—` (em dash). Default zero emojis. Max one per message,
+never per paragraph or bullet. No markdown headers, no `---`
+separators, no tables, no pipe-separated rows. No status-emoji
+clutter (🔥🔴⚠️). Open with a
 one-line summary, then expand into themes as `•` with short clause →
 detail → outcome. Numbered lists only for truly enumerated items.
 Concrete nouns and numbers over adjectives ("80K Q1 layoffs" beats
