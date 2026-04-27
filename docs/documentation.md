@@ -233,12 +233,29 @@ to the caller, by design).
 **Operational:**
 
 ```
-/kill                        Stop the bot cleanly (graceful shutdown)
+/kill                        Stop the bot cleanly (sends SIGTERM, same path as Ctrl+C)
 /health                      Quick health readout — last bot send, reminder
                              status, lifetime rate-limit notice count
 /audit                       Richer — recent tool failures, prompt backup
                              count, memory footprint
 ```
+
+**Autocomplete is owner-scoped.** On startup the dispatcher registers
+the command list with `set_my_commands(...,
+scope=BotCommandScopeChat(chat_id=owner_id))`, so the `/` menu only
+suggests these commands inside the owner's DM. Other users' clients
+fall through to the empty default scope and see nothing — even in
+groups the bot is in. Group menus inherit the default scope, so the
+owner won't see autocomplete in groups either; type the command
+manually (with `@botname` if Bot privacy is on). Visibility ≠
+authorization: the `_is_owner` gate is what actually blocks execution.
+
+`/kill` writes a "Shutting down…" reply, then `os.kill(os.getpid(),
+SIGTERM)`. The signal hits the handler in `__main__.py` which sets
+`stop_event`, and the existing `finally` block tears down dispatcher,
+engine, worker, MCP, and DB in order. Don't call
+`Application.stop_running()` from the dispatcher — it stops the asyncio
+loop directly and conflicts with our custom lifecycle.
 
 Or edit `data/access.json` directly — changes are picked up on the next
 message.

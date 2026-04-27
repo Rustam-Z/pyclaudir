@@ -11,13 +11,15 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import signal
 import time
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Protocol
 
 from pathlib import Path
 
-from telegram import Message, Update
+from telegram import BotCommand, BotCommandScopeChat, Message, Update
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -319,7 +321,11 @@ class TelegramDispatcher:
         if not self._is_owner(update):
             return
         log.warning("/kill received from owner; shutting down")
-        await self.application.stop_running()
+        try:
+            await update.effective_message.reply_text("Shutting down…")
+        except Exception:
+            pass
+        os.kill(os.getpid(), signal.SIGTERM)
 
     async def _cmd_health(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
         """Quick operational health readout — owner-only, DM or group.
@@ -649,6 +655,7 @@ class TelegramDispatcher:
                 "Set dispatcher.engine before starting."
             )
         await self.application.initialize()
+        await self._register_owner_commands()
         await self.application.start()
         await self.application.updater.start_polling(
             allowed_updates=[
@@ -659,6 +666,24 @@ class TelegramDispatcher:
             ],
         )
         log.info("telegram dispatcher polling")
+
+    async def _register_owner_commands(self) -> None:
+        commands = [
+            BotCommand("health", "quick health readout"),
+            BotCommand("audit", "recent failures, backups, memory footprint"),
+            BotCommand("access", "show DM access policy"),
+            BotCommand("allow", "add user to DM allowlist: /allow <user_id>"),
+            BotCommand("deny", "remove user from DM allowlist: /deny <user_id>"),
+            BotCommand("dmpolicy", "set DM policy: /dmpolicy <owner_only|allowlist|open>"),
+            BotCommand("kill", "stop the bot"),
+        ]
+        try:
+            await self.application.bot.set_my_commands(
+                commands,
+                scope=BotCommandScopeChat(chat_id=self.config.owner_id),
+            )
+        except Exception:
+            log.exception("failed to register owner-scoped bot commands")
 
     async def stop(self) -> None:
         try:

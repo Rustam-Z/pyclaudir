@@ -659,9 +659,10 @@ entirely unless the file is over 40 KiB or >50 entries or it's been
 
 ### 5.11 Owner-only operational commands
 
-**Files:** `pyclaudir/telegram_io.py:_cmd_health`, `_cmd_audit`.
+**Files:** `pyclaudir/telegram_io.py:_cmd_health`, `_cmd_audit`,
+`_cmd_kill`, `_register_owner_commands`.
 
-Two owner-only slash commands for on-demand operational visibility
+Owner-only slash commands for on-demand operational visibility
 without SSH:
 
 - `/health` — last bot send timestamp, self-reflection reminder
@@ -669,9 +670,21 @@ without SSH:
   count.
 - `/audit` — recent failed tool calls (from `tool_calls` where
   `error IS NOT NULL`), prompt backup count, total memory footprint.
+- `/kill` — graceful shutdown. Replies "Shutting down…", then
+  `os.kill(os.getpid(), SIGTERM)`. Reuses the `__main__.py` signal
+  handler so dispatcher → engine → worker → MCP → DB tear down in
+  order. Do not call `Application.stop_running()` here — it calls
+  `loop.stop()` and conflicts with our custom lifecycle.
 
 Gated by `_is_owner()` like all other owner commands. Silent no-op
 for non-owners (intentional — doesn't confirm the command exists).
+
+**Menu autocomplete.** `_register_owner_commands` runs once after
+`application.initialize()` and calls `bot.set_my_commands(...,
+scope=BotCommandScopeChat(chat_id=owner_id))`. Only the owner's
+client populates the `/` menu; everyone else falls through to the
+empty default scope. Visibility is a UX detail; the `_is_owner` gate
+is the real authorization.
 
 ### 5.12 Agent Skills spec conformance + validator
 
