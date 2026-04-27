@@ -39,11 +39,12 @@ the repo root:
   unlocks `Bash` / `PowerShell` / `Monitor`; `code` unlocks `Edit` /
   `Write` / `Read` / `NotebookEdit` / `Glob` / `Grep` / `LSP`;
   `subagents` unlocks `Agent`.
-* `mcps` — list of external MCP servers to spawn. Jira, GitLab, and
-  GitHub ship in the default file, gated by `${VAR}` references that
-  pull credentials from `.env` (`JIRA_URL` etc., `GITLAB_URL` /
-  `GITLAB_TOKEN`, `GITHUB_PERSONAL_ACCESS_TOKEN`). Add an entry to
-  plug in any other stdio MCP server.
+* `mcps` — list of external MCP servers to spawn. Three transports
+  supported: `stdio`, `http`, `sse`. `${VAR}` references pull
+  credentials from `.env`. The shipped `plugins.json.example`
+  carries sample Jira / GitLab / GitHub entries you can keep, edit,
+  or delete — they're starting points, not first-class. Add a new
+  entry to plug in any other MCP server.
 * `builtin_tools_disabled` — names of pyclaudir built-in tools to
   hide (e.g. `create_poll`, `render_html`). Filtered at MCP
   registration time, never advertised to Claude.
@@ -65,9 +66,10 @@ what's in your environment.
 
 The one allowed exception is `pyclaudir/plugins.py` — it reads
 `os.environ` directly to substitute `${VAR}` references in
-`plugins.json` `mcps[].args` and `mcps[].env` values. That's how
-Jira / GitLab / GitHub credentials reach their MCP servers without
-being copied into a `Config` field.
+`plugins.json` `mcps[].args`, `env`, `url`, and `headers` values.
+That's how an external MCP's credentials reach the spawned server
+(or the auth headers for an HTTP/SSE MCP) without being copied
+into a `Config` field.
 
 | Variable | Required | Default | Notes |
 |---|---|---|---|
@@ -463,32 +465,33 @@ If `project.md` doesn't exist, only the base prompt is used.
 
 ## External MCP integrations
 
-pyclaudir can optionally connect to external MCP servers alongside its
-own. The default [`plugins.json`](../plugins.json) at the repo root
-ships three credential-gated entries:
+pyclaudir can optionally connect to external MCP servers alongside
+its own. There's no built-in integration list — every external MCP
+is just an entry in `plugins.json` `mcps[]`. The shipped
+`plugins.json.example` includes three sample entries you can keep,
+edit, or delete — they're starting points, not first-class:
 
 - **Jira** via [mcp-atlassian](https://github.com/sooperset/mcp-atlassian)
-  — set `JIRA_URL`, `JIRA_USERNAME`, `JIRA_API_TOKEN` in `.env`.
+  (stdio) — set `JIRA_URL`, `JIRA_USERNAME`, `JIRA_API_TOKEN` in `.env`.
 - **GitLab** via
   [@zereight/mcp-gitlab](https://www.npmjs.com/package/@zereight/mcp-gitlab)
-  — set `GITLAB_URL`, `GITLAB_TOKEN` in `.env`.
+  (stdio) — set `GITLAB_URL`, `GITLAB_TOKEN` in `.env`.
 - **GitHub** via
   [@modelcontextprotocol/server-github](https://www.npmjs.com/package/@modelcontextprotocol/server-github)
-  — set `GITHUB_PERSONAL_ACCESS_TOKEN` in `.env`. For Enterprise, add
-  `"GITHUB_HOST": "${GITHUB_HOST}"` to the entry's `env` block and set
-  `GITHUB_HOST` in `.env` too.
+  (stdio) — set `GITHUB_PERSONAL_ACCESS_TOKEN` in `.env`. For
+  Enterprise, add `"GITHUB_HOST": "${GITHUB_HOST}"` to the entry's
+  `env` block and set `GITHUB_HOST` in `.env` too.
 
 Each entry references its credentials with `${VAR}` interpolation;
-when any required var is empty, that MCP is silently skipped at boot
-(matching the pre-`plugins.json` "credentials missing → no spawn"
-semantics). To stop advertising an integration without removing
-credentials, flip `enabled: false` on its entry. To remove
-permanently, delete the entry.
+when any required var is empty, that MCP is silently skipped at boot.
+To stop advertising one without removing credentials, flip
+`enabled: false` on its entry. To remove permanently, delete the
+entry.
 
-These are stdio-based MCP servers spawned as child processes
-alongside the local pyclaudir MCP server. Adding a fourth (Notion,
-Linear, Slack, Postgres, Playwright, your own) is a `plugins.json`
-edit — no Python change. See [tools.md](tools.md) for the schema.
+Adding a new MCP (Notion, Linear, Slack, Postgres, Playwright, your
+own — stdio, http, or sse) is a `plugins.json` edit — no Python
+change. See [tools.md](tools.md) for the schema and per-transport
+shape.
 
 ## Monitoring & observability
 

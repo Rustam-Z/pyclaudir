@@ -8,7 +8,7 @@ Brief it before bed: "research global tech trends, find problems worth solving i
 
 It learns you. Every day it reflects on what worked and writes new rules into its own playbook — with your approval. Drop it in a group chat and it tracks who's blocked, what shipped, what slipped. DM it and it's your personal chief of staff. Plain markdown files you actually own. Your rules. One process you control end to end.
 
-Out of the box: messaging, memory, reminders, web, vision. Want shell access? Code editing? Jira, GitHub, GitLab? One env var each, off until you flip them. Runs on your laptop or any small VPS. Works with your existing Claude Code subscription.
+Out of the box: messaging, memory, reminders, web, vision. Want shell access? Code editing? Plug in any other MCP server — GitHub, Jira, Notion, Slack, your own — same one-entry pattern, stdio or remote HTTP/SSE with auth headers. Runs on your laptop or any small VPS. Works with your existing Claude Code subscription.
 
 ## What you can do with it
 
@@ -74,23 +74,22 @@ docker compose logs -f                                                    # run 
 docker compose exec pyclaudir python -m pyclaudir.scripts.trace --follow  # tail Claude Code I/O
 ```
 
+DM your bot. It replies.
+
+**No Docker?** You need Python 3.11+ and the Claude Code CLI (`claude --version`).
+
 ```bash
-# Or run without docker
-uv run python -m pyclaudir                          # run harness, wait for "pyclaudir is live"
+uv sync --extra dev && uv run python -m pyclaudir                        # run harness, wait for "pyclaudir is live"
 uv run python -m pyclaudir.scripts.trace --follow   # tail Claude Code I/O
 ```
 
-DM your bot. It replies.
-
-**No Docker?** `uv sync --extra dev && uv run python -m pyclaudir`.
-You need Python 3.11+ and the Claude Code CLI (`claude --version`).
-If you have Windows machine, then use docker compose.
+**On Windows?** Easiest path: install [Docker Desktop](https://docs.docker.com/desktop/install/windows-install/) and run the Quickstart from **Git Bash** or **WSL** — all commands above work as written. From PowerShell, swap `nano` for `notepad` (the rest of the commands are fine; `cp` is an alias for `Copy-Item`). From `cmd.exe`, additionally swap `cp` → `copy` and `&&` chaining still works. Docker Desktop's `docker compose` runs identically on Windows.
 
 ### The three setup files
 
 | File | Tracked in git? | What it controls |
 |---|---|---|
-| `.env` | no | secrets — Telegram bot token, owner id, integration credentials (Jira / GitLab / GitHub) referenced by `plugins.json` via `${VAR}` |
+| `.env` | no | secrets — Telegram bot token, owner id, plus any credentials your `plugins.json` entries reference via `${VAR}` (the example file's Jira / GitLab / GitHub entries demonstrate the pattern) |
 | `prompts/project.md` | no | persona — bot name, language, house rules, owner-specific instructions; appended to the shipped `prompts/system.md` |
 | `plugins.json` | no | capability surface — what tools, skills, and MCPs are on |
 
@@ -164,7 +163,7 @@ A missing `plugins.json` boots locked-down (no integrations, no tool groups). A 
 
 **skills:** read operator-curated playbooks under `skills/` — `render-style` (house style for renders), `self-reflection` (learning loop). Reference skills are read on initiative; invoked skills require a real `<reminder>` envelope.
 
-**opt-in:** shell (`Bash` / `PowerShell` / `Monitor`), code editing (`Edit` / `Write` / `Read` / `NotebookEdit` / `Glob` / `Grep` / `LSP`), subagents (`Agent`), and Jira / GitLab / GitHub MCP surfaces — all toggled in `plugins.json`. Credentials for the integrations live in `.env` and are pulled in via `${VAR}` references. Off by default.
+**opt-in:** shell (`Bash` / `PowerShell` / `Monitor`), code editing (`Edit` / `Write` / `Read` / `NotebookEdit` / `Glob` / `Grep` / `LSP`), and subagents (`Agent`) — all toggled in `plugins.json`. Off by default. Plug in any external MCP server the same way (the example file ships sample Jira / GitLab / GitHub entries to copy from).
 
 **what can't do:** generate images. Send voice messages, GIFs, animations, stickers. Read voice / video / video notes / stickers (they arrive empty — ask for a screenshot or description). Moderate (mute / ban / kick / unban / member lists). Make phone calls or watch videos.
 
@@ -217,8 +216,11 @@ not in `.env`. Copy `plugins.json.example` → `plugins.json` once and
 edit; restart to apply. See [docs/tools.md](docs/tools.md) for the
 schema.
 
-Credentials for the integration MCPs ship in `.env` and are pulled
-into `plugins.json` via `${VAR}` references:
+Credentials for any external MCP you wire in live in `.env` and are
+pulled into `plugins.json` via `${VAR}` references. The keys below
+are referenced by the **sample entries** in `plugins.json.example`
+(Jira / GitLab / GitHub) — keep, edit, or delete those entries
+freely; nothing in pyclaudir's code path treats them as special:
 
 | Variable | Required | Notes |
 |---|---|---|
@@ -242,12 +244,17 @@ Almost every axis of the bot is pluggable without touching the core:
   model, async `run`. The local MCP server auto-discovers it on
   restart. No registry edits, no wiring.
 - **Plug in an external MCP server.** Append an entry to
-  [`plugins.json`](plugins.json) with `name`, `command`, `args`,
-  `env` (with `${VAR}` interpolation from `.env`), and the
-  `allowed_tools` list. Jira, GitLab, and GitHub ship in the default
-  file — any stdio MCP server (Notion, Linear, Slack, Postgres,
-  Playwright, your own) drops in the same way. No Python edit. To
-  hide a wired-in MCP without removing credentials, flip
+  [`plugins.json`](plugins.json.example). Three transports
+  supported, exactly as the [MCP spec](https://modelcontextprotocol.io)
+  defines them: `stdio` (local subprocess; auth via `env`), `http`
+  (remote streamable HTTP; auth via static `headers`), and `sse`
+  (same shape as http). `${VAR}` references pull credentials from
+  `.env`. The example file ships sample Jira, GitLab, and GitHub
+  entries you can keep, edit, or delete; nothing in the code path
+  treats them as special. Any other MCP server (Notion, Linear,
+  Slack, Postgres, Playwright, GitHub-remote, your own) drops in the
+  same way — no Python edit.
+  To hide a wired-in MCP without removing credentials, flip
   `enabled: false` on its entry.
 - **Disable a built-in tool you don't use.** List it in
   `builtin_tools_disabled` in `plugins.json` (e.g. `create_poll`,
@@ -301,30 +308,6 @@ Enforced in code:
 - **Wedged subprocesses** are killed and respawned. Crash-loops give
   up after 10 crashes in 10 min and notify the owner.
 
-## Contributing
-
-Issues and PRs welcome. Three rules before you start:
-
-- **Run the suite** — `uv run python -m pytest -q`. 346 tests today;
-  keep them green.
-- **Persona-agnostic code.** Don't hardcode bot names, owner-specific
-  strings, or chat ids in `pyclaudir/`. Persona lives in
-  `prompts/project.md` and stays there.
-- **Default surface stays tight.** The bot ships off-by-default for
-  shell, code editing, subagents, and the integration MCPs (Jira /
-  GitLab / GitHub spawn only when their credentials are set). New
-  capabilities follow the same rule — gated behind a `tool_groups`
-  flag in `plugins.json` or behind a credentialled `mcps[]` entry,
-  unless they're strictly safer than the current base.
-
-Architecture deep-dive before bigger changes:
-[docs/documentation.md](docs/documentation.md) and
-[docs/reference-architectures.md](docs/reference-architectures.md).
-
-## License
-
-MIT. See [LICENSE](LICENSE).
-
 ## Layout
 
 ```
@@ -345,3 +328,29 @@ pyclaudir/
 │   └── scripts/trace.py   replay a session
 └── tests/
 ```
+
+## Contributing
+
+Issues and PRs welcome. Three rules before you start:
+
+- **Run the suite** — `uv run python -m pytest -q`. 346 tests today;
+  keep them green.
+- **Persona-agnostic code.** Don't hardcode bot names, owner-specific
+  strings, or chat ids in `pyclaudir/`. Persona lives in
+  `prompts/project.md` and stays there.
+- **Default surface stays tight.** The bot ships off-by-default for
+  shell, code editing, and subagents. External MCPs spawn only when
+  their `${VAR}` credentials are set in `.env` (the example file's
+  Jira / GitLab / GitHub entries follow this pattern, but they're
+  examples — not first-class). New capabilities follow the same
+  rule — gated behind a `tool_groups` flag in `plugins.json` or
+  behind a credentialled `mcps[]` entry, unless they're strictly
+  safer than the current base.
+
+Architecture deep-dive before bigger changes:
+[docs/documentation.md](docs/documentation.md) and
+[docs/reference-architectures.md](docs/reference-architectures.md).
+
+## License
+
+MIT. See [LICENSE](LICENSE).

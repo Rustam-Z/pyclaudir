@@ -52,8 +52,8 @@ DM your bot on Telegram to confirm it replies.
 
 The bot ships with a tight default surface — Telegram messaging,
 memory tools, reminders, and read-only web access only. Shell,
-code-editing, subagents, and the integration MCPs (Jira / GitLab /
-GitHub) are **all off by default**.
+code-editing, subagents, and any external MCPs are **all off by
+default**.
 
 Toggles live in `plugins.json` at the repo root. Copy the shipped
 template once on first setup:
@@ -67,18 +67,19 @@ Then edit:
 ```jsonc
 {
   "tool_groups": { "bash": true, "code": true, "subagents": false },
-  "mcps":  [ /* Jira / GitLab / GitHub entries */ ],
+  "mcps":  [ /* sample Jira / GitLab / GitHub entries — keep, edit, or delete */ ],
   "skills_disabled": [],
   "builtin_tools_disabled": []
 }
 ```
 
 `plugins.json` is gitignored, so different deployments can carry
-different toggles without fighting over the file. External MCPs
-(Jira / GitLab / GitHub or your own additions) are declared in
-`plugins.json` but their credentials live in `.env`, referenced as
-`${VAR}`. An MCP whose `${VAR}` references aren't satisfied is
-silently skipped at boot.
+different toggles without fighting over the file. External MCPs are
+declared in `plugins.json` but their credentials live in `.env`,
+referenced as `${VAR}`. An MCP whose `${VAR}` references aren't
+satisfied is silently skipped at boot. The shipped example carries
+sample Jira / GitLab / GitHub entries to copy from — they're not
+first-class, just convenient starting points.
 
 For the per-tool list, the schema, "How to add a new MCP", and how
 to disable individual built-in tools (e.g. `create_poll`,
