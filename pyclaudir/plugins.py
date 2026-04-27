@@ -40,10 +40,30 @@ _TOP_LEVEL_KEYS = frozenset({
 })
 
 #: Per-MCP keys allowed in each entry of ``mcps``. Any other key crashes boot.
-_MCP_KEYS = frozenset({"name", "command", "args", "env", "allowed_tools", "enabled"})
+#: ``type`` is optional and defaults to ``"stdio"`` for backward compatibility.
+#: ``command``/``args``/``env`` are valid only on stdio entries; ``url`` and
+#: ``headers`` only on ``http``/``sse``.
+_MCP_KEYS = frozenset({
+    "name", "type", "allowed_tools", "enabled",
+    # stdio
+    "command", "args", "env",
+    # http / sse
+    "url", "headers",
+})
 
-#: Required per-MCP keys. Missing any crashes boot.
-_MCP_REQUIRED = frozenset({"name", "command", "allowed_tools", "enabled"})
+#: Always-required per-MCP keys (regardless of transport).
+_MCP_REQUIRED = frozenset({"name", "allowed_tools", "enabled"})
+
+#: Supported MCP transports. Mirrors what Claude Code's ``--mcp-config``
+#: accepts. ``stdio`` spawns a subprocess; ``http`` / ``sse`` reach a
+#: remote server (auth via static ``headers``). OAuth flows aren't
+#: managed by pyclaudir — supply an already-issued token via
+#: ``${VAR}`` interpolation.
+_MCP_TRANSPORTS = frozenset({"stdio", "http", "sse"})
+
+#: Per-transport key constraints.
+_STDIO_ONLY = frozenset({"command", "args", "env"})
+_REMOTE_ONLY = frozenset({"url", "headers"})
 
 #: Tool-group names recognised in ``tool_groups``.
 _TOOL_GROUP_KEYS = frozenset({"bash", "code", "subagents"})
@@ -59,13 +79,32 @@ class PluginsConfigError(RuntimeError):
 
 @dataclass(frozen=True)
 class McpPluginSpec:
-    """One external MCP server, post-interpolation, ready to spawn."""
+    """One external MCP server, post-interpolation, ready to wire up.
+
+    Three transports are supported, mirroring the canonical Anthropic
+    MCP server config shape that Claude Code's ``--mcp-config`` reads:
+
+    * **stdio** — subprocess; ``command`` is required, ``args``/``env``
+      optional.
+    * **http** — remote streamable-HTTP server; ``url`` is required,
+      static ``headers`` optional (typical auth: ``"Authorization":
+      "Bearer ${TOKEN}"``).
+    * **sse** — remote SSE server; same field shape as ``http``.
+
+    The unused fields stay at their defaults (``None`` / empty
+    mapping) per transport.
+    """
 
     name: str
-    command: str
-    args: tuple[str, ...]
-    env: Mapping[str, str]
+    type: str
     allowed_tools: tuple[str, ...]
+    # stdio
+    command: str | None = None
+    args: tuple[str, ...] = ()
+    env: Mapping[str, str] = field(default_factory=dict)
+    # http / sse
+    url: str | None = None
+    headers: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -106,42 +145,86 @@ def _interp_str(value: str, env: Mapping[str, str]) -> str | None:
     return out
 
 
+def _interp_str_dict(
+    raw: Mapping[str, Any], env: Mapping[str, str], *, owner: str, field_name: str,
+) -> tuple[dict[str, str] | None, str | None]:
+    """Interpolate every value in a ``{str: str}`` mapping.
+
+    Returns ``(out, None)`` on success, or ``(None, "field[key]")``
+    when any value's ``${VAR}`` is unresolved.
+    """
+    out: dict[str, str] = {}
+    for k, v in raw.items():
+        if not isinstance(k, str) or not isinstance(v, str):
+            raise PluginsConfigError(
+                f"mcps[{owner!r}].{field_name} entries must be string→string"
+            )
+        sub = _interp_str(v, env)
+        if sub is None:
+            return None, f"{field_name}[{k}]"
+        out[k] = sub
+    return out, None
+
+
 def _interp_mcp(raw: dict[str, Any], env: Mapping[str, str]) -> tuple[McpPluginSpec | None, str | None]:
     """Interpolate one MCP entry. Returns ``(spec, None)`` on success,
     or ``(None, reason)`` if an unresolved ``${VAR}`` was found.
     """
-    args_raw = raw.get("args", []) or []
-    env_raw = raw.get("env", {}) or {}
+    name = raw["name"]
+    transport = raw.get("type", "stdio")
 
-    args_out: list[str] = []
-    for i, a in enumerate(args_raw):
-        if not isinstance(a, str):
-            raise PluginsConfigError(
-                f"mcps[{raw.get('name')!r}].args[{i}] must be a string"
-            )
-        sub = _interp_str(a, env)
-        if sub is None:
-            return None, f"args[{i}]"
-        args_out.append(sub)
+    if transport == "stdio":
+        args_raw = raw.get("args", []) or []
+        args_out: list[str] = []
+        for i, a in enumerate(args_raw):
+            if not isinstance(a, str):
+                raise PluginsConfigError(
+                    f"mcps[{name!r}].args[{i}] must be a string"
+                )
+            sub = _interp_str(a, env)
+            if sub is None:
+                return None, f"args[{i}]"
+            args_out.append(sub)
 
-    env_out: dict[str, str] = {}
-    for k, v in env_raw.items():
-        if not isinstance(k, str) or not isinstance(v, str):
-            raise PluginsConfigError(
-                f"mcps[{raw.get('name')!r}].env entries must be string→string"
-            )
-        sub = _interp_str(v, env)
-        if sub is None:
-            return None, f"env[{k}]"
-        env_out[k] = sub
+        env_out, missing = _interp_str_dict(
+            raw.get("env", {}) or {}, env, owner=name, field_name="env",
+        )
+        if env_out is None:
+            return None, missing
+
+        return (
+            McpPluginSpec(
+                name=name,
+                type=transport,
+                allowed_tools=tuple(raw["allowed_tools"]),
+                command=raw["command"],
+                args=tuple(args_out),
+                env=env_out,
+            ),
+            None,
+        )
+
+    # http / sse — remote server
+    url = raw["url"]
+    if not isinstance(url, str):
+        raise PluginsConfigError(f"mcps[{name!r}].url must be a string")
+    url_sub = _interp_str(url, env)
+    if url_sub is None:
+        return None, "url"
+
+    headers_out, missing = _interp_str_dict(
+        raw.get("headers", {}) or {}, env, owner=name, field_name="headers",
+    )
+    if headers_out is None:
+        return None, missing
 
     return (
         McpPluginSpec(
-            name=raw["name"],
-            command=raw["command"],
-            args=tuple(args_out),
-            env=env_out,
+            name=name,
+            type=transport,
             allowed_tools=tuple(raw["allowed_tools"]),
+            url=url_sub,
+            headers=headers_out,
         ),
         None,
     )
@@ -211,10 +294,45 @@ def _validate_mcps(raw: Any, path: Path) -> list[dict[str, Any]]:
                 f"mcp__<name>__ namespace and must be unique"
             )
         seen_names.add(name)
-        if not isinstance(entry["command"], str) or not entry["command"]:
+        transport = entry.get("type", "stdio")
+        if transport not in _MCP_TRANSPORTS:
             raise PluginsConfigError(
-                f"{path}: mcps[{name!r}].command must be a non-empty string"
+                f"{path}: mcps[{name!r}].type must be one of "
+                f"{sorted(_MCP_TRANSPORTS)}; got {transport!r}"
             )
+        present = set(entry.keys())
+        if transport == "stdio":
+            forbidden = present & _REMOTE_ONLY
+            if forbidden:
+                raise PluginsConfigError(
+                    f"{path}: mcps[{name!r}] is type=stdio but has "
+                    f"remote-only key(s) {sorted(forbidden)}; use "
+                    f"command/args/env, not url/headers"
+                )
+            if "command" not in entry:
+                raise PluginsConfigError(
+                    f"{path}: mcps[{name!r}] (type=stdio) requires 'command'"
+                )
+            if not isinstance(entry["command"], str) or not entry["command"]:
+                raise PluginsConfigError(
+                    f"{path}: mcps[{name!r}].command must be a non-empty string"
+                )
+        else:  # http or sse
+            forbidden = present & _STDIO_ONLY
+            if forbidden:
+                raise PluginsConfigError(
+                    f"{path}: mcps[{name!r}] is type={transport} but has "
+                    f"stdio-only key(s) {sorted(forbidden)}; use url/headers, "
+                    f"not command/args/env"
+                )
+            if "url" not in entry:
+                raise PluginsConfigError(
+                    f"{path}: mcps[{name!r}] (type={transport}) requires 'url'"
+                )
+            if not isinstance(entry["url"], str) or not entry["url"]:
+                raise PluginsConfigError(
+                    f"{path}: mcps[{name!r}].url must be a non-empty string"
+                )
         if not isinstance(entry["enabled"], bool):
             raise PluginsConfigError(
                 f"{path}: mcps[{name!r}].enabled must be true/false"

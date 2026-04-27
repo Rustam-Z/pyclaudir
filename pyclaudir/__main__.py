@@ -216,14 +216,27 @@ async def _async_main() -> None:
     extra_mcp: dict = {}
     mcp_allowed_tools: list[str] = []
     for plugin in plugins.mcps:
-        extra_mcp[plugin.name] = {
-            "type": "stdio",
-            "command": plugin.command,
-            "args": list(plugin.args),
-            "env": dict(plugin.env),
-        }
+        if plugin.type == "stdio":
+            extra_mcp[plugin.name] = {
+                "type": "stdio",
+                "command": plugin.command,
+                "args": list(plugin.args),
+                "env": dict(plugin.env),
+            }
+            log.info(
+                "mcp %s configured (type=stdio, command=%s)",
+                plugin.name, plugin.command,
+            )
+        else:  # http or sse — remote server, optional static auth headers
+            entry: dict = {"type": plugin.type, "url": plugin.url}
+            if plugin.headers:
+                entry["headers"] = dict(plugin.headers)
+            extra_mcp[plugin.name] = entry
+            log.info(
+                "mcp %s configured (type=%s, url=%s)",
+                plugin.name, plugin.type, plugin.url,
+            )
         mcp_allowed_tools.extend(plugin.allowed_tools)
-        log.info("mcp %s configured (command=%s)", plugin.name, plugin.command)
 
     mcp_config_path = mcp.write_mcp_config(tmpdir / "mcp.json", extra_servers=extra_mcp)
     log.info("mcp config written to %s", mcp_config_path)

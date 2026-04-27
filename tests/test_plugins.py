@@ -119,19 +119,31 @@ def test_mcp_minimal_loads(tmp_path: Path) -> None:
     assert len(plugins.mcps) == 1
     assert plugins.mcps[0] == McpPluginSpec(
         name="demo",
+        type="stdio",
+        allowed_tools=("mcp__demo",),
         command="demo-cmd",
         args=(),
         env={},
-        allowed_tools=("mcp__demo",),
     )
 
 
 def test_mcp_missing_required_key_crashes(tmp_path: Path) -> None:
+    """Missing always-required key (e.g. allowed_tools)."""
+    p = tmp_path / "plugins.json"
+    bad = _mcp()
+    bad.pop("allowed_tools")
+    p.write_text(json.dumps({"mcps": [bad]}))
+    with pytest.raises(PluginsConfigError, match="missing required"):
+        load_plugins(p)
+
+
+def test_stdio_mcp_missing_command_crashes(tmp_path: Path) -> None:
+    """``command`` is required for stdio (the default transport)."""
     p = tmp_path / "plugins.json"
     bad = _mcp()
     bad.pop("command")
     p.write_text(json.dumps({"mcps": [bad]}))
-    with pytest.raises(PluginsConfigError, match="missing required"):
+    with pytest.raises(PluginsConfigError, match="requires 'command'"):
         load_plugins(p)
 
 
@@ -162,6 +174,139 @@ def test_mcp_disabled_is_skipped(tmp_path: Path) -> None:
     p.write_text(json.dumps({"mcps": [_mcp(enabled=False)]}))
     plugins = load_plugins(p, env={})
     assert plugins.mcps == ()
+
+
+def test_mcp_explicit_stdio_type(tmp_path: Path) -> None:
+    p = tmp_path / "plugins.json"
+    p.write_text(json.dumps({"mcps": [_mcp(type="stdio")]}))
+    plugins = load_plugins(p, env={})
+    assert len(plugins.mcps) == 1
+    assert plugins.mcps[0].type == "stdio"
+
+
+def test_mcp_unknown_type_crashes(tmp_path: Path) -> None:
+    p = tmp_path / "plugins.json"
+    p.write_text(json.dumps({"mcps": [_mcp(type="websocket")]}))
+    with pytest.raises(PluginsConfigError, match="type must be one of"):
+        load_plugins(p)
+
+
+# ---------------------------------------------------------------------------
+# HTTP transport
+# ---------------------------------------------------------------------------
+
+
+def _http_mcp(**overrides) -> dict:
+    base = {
+        "name": "remote",
+        "type": "http",
+        "url": "https://api.example.com/mcp",
+        "headers": {"Authorization": "Bearer ${REMOTE_TOKEN}"},
+        "allowed_tools": ["mcp__remote"],
+        "enabled": True,
+    }
+    base.update(overrides)
+    return base
+
+
+def test_http_mcp_loads(tmp_path: Path) -> None:
+    p = tmp_path / "plugins.json"
+    p.write_text(json.dumps({"mcps": [_http_mcp()]}))
+    plugins = load_plugins(p, env={"REMOTE_TOKEN": "abc"})
+    assert len(plugins.mcps) == 1
+    spec = plugins.mcps[0]
+    assert spec.type == "http"
+    assert spec.url == "https://api.example.com/mcp"
+    assert spec.headers == {"Authorization": "Bearer abc"}
+    assert spec.command is None and spec.args == () and spec.env == {}
+
+
+def test_http_mcp_missing_url_crashes(tmp_path: Path) -> None:
+    p = tmp_path / "plugins.json"
+    bad = _http_mcp()
+    del bad["url"]
+    p.write_text(json.dumps({"mcps": [bad]}))
+    with pytest.raises(PluginsConfigError, match="requires 'url'"):
+        load_plugins(p)
+
+
+def test_http_mcp_with_stdio_field_crashes(tmp_path: Path) -> None:
+    """Mixing http + command must crash so typos surface immediately."""
+    p = tmp_path / "plugins.json"
+    bad = _http_mcp()
+    bad["command"] = "should-not-be-here"
+    p.write_text(json.dumps({"mcps": [bad]}))
+    with pytest.raises(PluginsConfigError, match="stdio-only key"):
+        load_plugins(p)
+
+
+def test_stdio_mcp_with_url_crashes(tmp_path: Path) -> None:
+    p = tmp_path / "plugins.json"
+    bad = _mcp()
+    bad["url"] = "https://nope.example.com"
+    p.write_text(json.dumps({"mcps": [bad]}))
+    with pytest.raises(PluginsConfigError, match="remote-only key"):
+        load_plugins(p)
+
+
+def test_http_mcp_headers_unresolved_skips(tmp_path: Path) -> None:
+    """An http MCP whose ``${VAR}`` in headers is empty is silently
+    skipped — same credential-gate semantics as stdio."""
+    p = tmp_path / "plugins.json"
+    p.write_text(json.dumps({"mcps": [_http_mcp()]}))
+    plugins = load_plugins(p, env={})  # REMOTE_TOKEN unset
+    assert plugins.mcps == ()
+
+
+def test_http_mcp_url_var_substitution(tmp_path: Path) -> None:
+    p = tmp_path / "plugins.json"
+    p.write_text(json.dumps({
+        "mcps": [_http_mcp(url="${REMOTE_BASE}/mcp")]
+    }))
+    plugins = load_plugins(p, env={
+        "REMOTE_BASE": "https://api.example.com",
+        "REMOTE_TOKEN": "abc",
+    })
+    assert plugins.mcps[0].url == "https://api.example.com/mcp"
+
+
+# ---------------------------------------------------------------------------
+# SSE transport
+# ---------------------------------------------------------------------------
+
+
+def test_sse_mcp_loads(tmp_path: Path) -> None:
+    p = tmp_path / "plugins.json"
+    p.write_text(json.dumps({"mcps": [
+        {
+            "name": "live",
+            "type": "sse",
+            "url": "https://events.example.com/sse",
+            "headers": {"X-API-Key": "${LIVE_KEY}"},
+            "allowed_tools": ["mcp__live"],
+            "enabled": True,
+        }
+    ]}))
+    plugins = load_plugins(p, env={"LIVE_KEY": "secret"})
+    assert plugins.mcps[0].type == "sse"
+    assert plugins.mcps[0].headers == {"X-API-Key": "secret"}
+
+
+def test_sse_mcp_no_headers_works(tmp_path: Path) -> None:
+    """A public SSE endpoint with no auth headers should just work."""
+    p = tmp_path / "plugins.json"
+    p.write_text(json.dumps({"mcps": [
+        {
+            "name": "public",
+            "type": "sse",
+            "url": "https://public.example.com/sse",
+            "allowed_tools": ["mcp__public"],
+            "enabled": True,
+        }
+    ]}))
+    plugins = load_plugins(p, env={})
+    assert len(plugins.mcps) == 1
+    assert plugins.mcps[0].headers == {}
 
 
 # ---------------------------------------------------------------------------

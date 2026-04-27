@@ -107,16 +107,25 @@ One file, four blocks. Edit and restart to apply.
     "code":      false,      //   Edit, Write, Read, NotebookEdit, Glob, Grep, LSP
     "subagents": false       //   Agent — token-heavy, isolated context
   },
-  "mcps": [                  // external MCP servers spawned alongside ours
-    {
+  "mcps": [                  // external MCP servers — stdio, http, or sse
+    {                        //   stdio (local subprocess; auth via env)
       "name": "github",
+      "type": "stdio",       //   optional; "stdio" is the default
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-github"],
       "env":  { "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}" },
       "allowed_tools": ["mcp__github"],
       "enabled": true
+    },
+    {                        //   http (remote server; auth via static headers)
+      "name": "linear",
+      "type": "http",
+      "url": "https://mcp.linear.app/mcp",
+      "headers": { "Authorization": "Bearer ${LINEAR_API_KEY}" },
+      "allowed_tools": ["mcp__linear"],
+      "enabled": true
     }
-    // …add Notion, Linear, Slack, Postgres, Playwright, your own — same shape
+    // …Notion, Slack, Postgres, Playwright, your own — same shape; sse also supported
   ],
   "builtin_tools_disabled": [ // pyclaudir built-ins to hide from the agent
     // e.g. "create_poll", "stop_poll", "render_html", "render_latex", "send_photo"
@@ -128,7 +137,7 @@ One file, four blocks. Edit and restart to apply.
 ```
 
 - **Tool groups.** Claude Code's dangerous built-ins (shell / code edit / subagents). All off by default. Flip to `true` and restart to unlock.
-- **External MCPs.** Each entry spawns a stdio MCP server. `${VAR}` references pull credentials from `.env`; if any required var is empty the MCP is silently skipped at boot. To stop advertising one without removing credentials, flip `"enabled": false`. Adding a new MCP (Notion, Slack, your own) is just a new array entry — no Python.
+- **External MCPs.** Three transports supported, exactly as the [MCP spec](https://modelcontextprotocol.io) defines them: `stdio` (local subprocess, auth via `env`), `http` (remote streamable HTTP, auth via static `headers`), and `sse` (Server-Sent Events, same field shape as http). `${VAR}` references pull credentials from `.env`; if any required var is empty the MCP is silently skipped at boot. To stop advertising one without removing credentials, flip `"enabled": false`. Adding a new MCP (Linear, Notion, Slack, your own) is just a new array entry — no Python. Pyclaudir doesn't manage OAuth flows; supply an already-issued token via `${VAR}`.
 - **Built-in tool toggles.** Names of pyclaudir built-ins (e.g. `create_poll`, `render_latex`) you want hidden. Filtered at MCP registration — the agent literally can't see them. A typo crashes boot with the available list.
 - **Skill toggles.** Directory names under `skills/` to hide. The skill stays on disk but isn't listed or readable, so it can't be invoked.
 

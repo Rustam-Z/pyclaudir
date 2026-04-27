@@ -148,20 +148,80 @@ Changes to either take effect on container restart.
   `mcp__<name>__<tool>` namespace the model sees. Renaming breaks
   operator memory, prompts, and tests. The defaults match today's
   keys exactly (`mcp-atlassian`, `mcp-gitlab`, `github`).
+* `mcps[].type` selects the transport: `stdio` (default), `http`, or
+  `sse`. Mirrors what Claude Code's `--mcp-config` accepts. See
+  "MCP transports" below for the per-transport field shape.
 * `mcps[].allowed_tools` is one flat list — exact tool name
   (`mcp__mcp-atlassian__jira_search`) or a server-prefix shorthand
   (`mcp__mcp-gitlab`). Both forms are accepted by Claude Code's
   `--allowedTools`.
-* `${VAR}` interpolation runs over every entry in `args` and over
-  every value in `env`, pulling from the process env (i.e. `.env`).
-  Concatenation works (`${GITLAB_URL}/api/v4`). If any referenced
-  `${VAR}` resolves empty, that MCP is silently skipped at boot —
-  preserving today's "credentials missing → MCP not spawned"
-  semantics.
-* `enabled: false` skips the MCP even if its env is satisfied.
+* `${VAR}` interpolation runs over `args` (each element), `env`
+  values, `url`, and `headers` values — pulling from the process
+  env (i.e. `.env`). Concatenation works (`${GITLAB_URL}/api/v4`).
+  If any referenced `${VAR}` resolves empty, that MCP is silently
+  skipped at boot — preserving today's "credentials missing → MCP
+  not spawned" semantics.
+* `enabled: false` skips the MCP even if its `${VAR}` refs resolve.
 * A missing `plugins.json` boots with empty plugins (locked-down).
   A malformed `plugins.json` crashes boot loudly with a
   `PluginsConfigError`.
+
+### MCP transports
+
+Three transports are supported, exactly as the [MCP
+spec](https://modelcontextprotocol.io) and Claude Code's
+`--mcp-config` define them. Mixing fields across transports
+(e.g. `command` on an `http` entry) crashes boot.
+
+**`stdio`** — local subprocess (default). pyclaudir spawns the
+command, talks over stdin/stdout. Auth via the subprocess `env`
+block.
+
+```jsonc
+{
+  "name": "github",
+  "type": "stdio",          // optional; default when omitted
+  "command": "npx",
+  "args": ["-y", "@modelcontextprotocol/server-github"],
+  "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}" },
+  "allowed_tools": ["mcp__github"],
+  "enabled": true
+}
+```
+
+**`http`** — remote streamable-HTTP server. Auth via static
+`headers`. Use this for hosted MCPs (Linear, Notion-cloud, GitHub's
+remote MCP, etc.) where you've already issued a PAT or OAuth token.
+
+```jsonc
+{
+  "name": "linear",
+  "type": "http",
+  "url": "https://mcp.linear.app/mcp",
+  "headers": { "Authorization": "Bearer ${LINEAR_API_KEY}" },
+  "allowed_tools": ["mcp__linear"],
+  "enabled": true
+}
+```
+
+**`sse`** — Server-Sent Events transport. Same field shape as
+`http`. Some hosted MCPs use this; check vendor docs.
+
+```jsonc
+{
+  "name": "events",
+  "type": "sse",
+  "url": "https://example.com/sse",
+  "headers": { "X-API-Key": "${EVENTS_KEY}" },
+  "allowed_tools": ["mcp__events"],
+  "enabled": true
+}
+```
+
+**Auth.** Pyclaudir doesn't manage OAuth flows — supply an
+already-issued token via `${VAR}` interpolation. For interactive
+OAuth-managed servers, see Claude Code's MCP docs (it can run the
+flow on your behalf when configured outside `plugins.json`).
 
 ### Tool groups
 
