@@ -732,7 +732,7 @@ class Engine:
             try:
                 await self._error_notify(
                     chat_id,
-                    "Still on it — one moment.",
+                    "Working on this — one moment.",
                     reply_to,
                 )
                 log.info(
