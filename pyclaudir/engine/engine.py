@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Awaitable, Callable
 
 from ..cc_failure_classifier import CcFailureClassification, classify_cc_failure
@@ -74,6 +75,53 @@ if TYPE_CHECKING:  # pragma: no cover
 log = logging.getLogger("pyclaudir.engine")
 
 
+@dataclass
+class TypingState:
+    """All typing-indicator state for one engine instance.
+
+    Lives on ``Engine._typing``. Tests poke directly at these fields
+    (``eng._typing.chats``, ``eng._typing.task``) so the names are
+    part of the test contract — rename with care.
+    """
+
+    #: Background refresh task. ``None`` between turns.
+    task: asyncio.Task[None] | None = None
+    #: Chat ids the indicator is currently active for.
+    chats: set[int] = field(default_factory=set)
+    #: Set whenever the chat set changes — wakes the refresh loop so it
+    #: notices a removal without sleeping out the full refresh interval.
+    wake: asyncio.Event = field(default_factory=asyncio.Event)
+    #: ``time.monotonic()`` of the first typing call this turn. Anchors
+    #: ``MIN_TYPING_VISIBLE_SECONDS`` so a fast turn 2 still renders.
+    started_at: float = 0.0
+    #: Background task that defers a discard when ``notify_chat_replied``
+    #: fires before the minimum visible duration has elapsed.
+    deferred_stop: asyncio.Task[None] | None = None
+
+
+@dataclass
+class TurnState:
+    """Per-turn user-facing state. Cleared on each new turn in ``_kick``,
+    consulted by the progress watchdog and dropped-text handler."""
+
+    #: Chats from the most recent batch waiting on a reply. Synthetic
+    #: reminders (``message_id == 0``) are excluded so reminder-only
+    #: turns produce no progress watchdog or typing indicator.
+    active_chats: set[int] = field(default_factory=set)
+    #: Per-active-chat, the most recent inbound ``message_id``. Used as
+    #: ``reply_to_message_id`` so the "still working" notice threads to
+    #: the user's own message and routes to the correct chat by
+    #: construction.
+    active_triggers: dict[int, int] = field(default_factory=dict)
+    #: Chats that received at least one ``send_message`` reply during
+    #: the current turn. Populated by ``notify_chat_replied`` and
+    #: consulted by the progress watchdog.
+    replied_chats: set[int] = field(default_factory=set)
+    #: Count of consecutive ``dropped_text`` results across turns.
+    #: Bounded by ``Config.tool_error_max_count``.
+    dropped_text_retries: int = 0
+
+
 class Engine:
     def __init__(
         self,
@@ -100,52 +148,15 @@ class Engine:
         #: Optional callback to send error messages directly via the bot
         #: when CC is down and the MCP path is unavailable.
         self._error_notify = error_notify
-        #: Chat IDs from the most recent batch whose users are actually
-        #: waiting on a reply. Synthetic reminders (``message_id == 0``)
-        #: are excluded — same filter as ``_active_triggers`` below — so
-        #: the progress watchdog and turn-start typing indicator skip
-        #: reminder-only turns where there is no human to notify.
-        self._active_chats: set[int] = set()
-        #: For each active chat, the most recent inbound ``message_id``
-        #: in the current turn's batch. The progress watchdog uses this
-        #: as ``reply_to_message_id`` so the "still working" notice
-        #: threads to the user's own message and is guaranteed to land
-        #: in the correct chat. Synthetic messages (reminders,
-        #: ``message_id == 0``) are excluded — Telegram would reject a
-        #: reply to a non-existent message.
-        self._active_triggers: dict[int, int] = {}
+        #: Per-turn user state — see :class:`TurnState`.
+        self._turn = TurnState()
+        #: Typing-indicator state — see :class:`TypingState`.
+        self._typing = TypingState()
         self._pending: list[ChatMessage] = []
         self._lock = asyncio.Lock()
         self._is_processing = asyncio.Event()
-        self._debounce_task: asyncio.Task | None = None
-        self._control_task: asyncio.Task | None = None
-        self._typing_task: asyncio.Task | None = None
-        self._typing_chats: set[int] = set()
-        #: Set whenever something changes the typing set (a chat is added
-        #: or removed). The typing loop ``wait_for``s this with a
-        #: ``TYPING_REFRESH_SECONDS`` timeout, so it wakes immediately on a
-        #: removal instead of sleeping out the full refresh interval.
-        self._typing_wake = asyncio.Event()
-        #: ``time.monotonic()`` value at the moment typing was first armed
-        #: for the current turn. Used by :meth:`notify_chat_replied` to
-        #: enforce :data:`MIN_TYPING_VISIBLE_SECONDS`.
-        self._typing_started_at: float = 0.0
-        #: Background task that defers the actual stop when ``notify_chat_replied``
-        #: fires before the minimum visible duration has elapsed.
-        self._typing_deferred_stop: asyncio.Task | None = None
-        #: Chats that have received at least one ``send_message`` reply
-        #: during the current turn. Populated by ``notify_chat_replied``,
-        #: cleared on each new turn in ``_kick``. The progress watchdog
-        #: skips these chats — no point telling the user "still working"
-        #: when they've already seen the model's first reply.
-        self._replied_chats_this_turn: set[int] = set()
-        #: Count of consecutive ``dropped_text`` results across turns.
-        #: Reset on (a) a new user turn via ``_kick``, (b) any successful
-        #: turn, and (c) after the cap is hit and the user has been
-        #: notified — so their next follow-up message isn't pre-tainted
-        #: by a prior failure. Bounded by ``Config.tool_error_max_count``
-        #: — same knob the tool-error circuit breaker uses.
-        self._dropped_text_retries: int = 0
+        self._debounce_task: asyncio.Task[None] | None = None
+        self._control_task: asyncio.Task[None] | None = None
         #: ``time.monotonic()`` of the last real user inbound (mid > 0).
         #: 0.0 means "no user has ever messaged this process". Used by
         #: :meth:`is_busy` to defer reminder firing during active
@@ -237,16 +248,16 @@ class Engine:
         # Skip synthetic reminders (mid=0) — no human waiting on them, so
         # the progress watchdog and turn-start typing indicator should
         # both be silent for reminder-only turns.
-        self._active_chats = {m.chat_id for m in batch if m.message_id > 0}
-        self._active_triggers = {
+        self._turn.active_chats = {m.chat_id for m in batch if m.message_id > 0}
+        self._turn.active_triggers = {
             m.chat_id: m.message_id for m in batch if m.message_id > 0
         }
-        self._replied_chats_this_turn.clear()
-        self._dropped_text_retries = 0
+        self._turn.replied_chats.clear()
+        self._turn.dropped_text_retries = 0
         xml = await format_messages_with_context(batch, self._db)
         log.info("starting turn with %d msgs", len(batch))
         # Show "typing..." in every chat involved in this batch.
-        await self._start_typing(set(self._active_chats))
+        await self._start_typing(set(self._turn.active_chats))
         import time as _t
         now = _t.monotonic()
         oldest_receipt = min(
@@ -255,7 +266,7 @@ class Engine:
         )
         log.info(
             "hot-path stage=worker-send chats=%s msgs=%d t_ms=%d",
-            sorted(self._active_chats), len(batch),
+            sorted(self._turn.active_chats), len(batch),
             int((now - oldest_receipt) * 1000),
         )
         await self._worker.send(xml)
@@ -306,8 +317,8 @@ class Engine:
         #    StructuredOutput etc.). In this case the loop is gone and we
         #    must restart it from scratch — same path as a fresh turn.
         new_chats = {m.chat_id for m in batch}
-        if self._typing_task is not None and not self._typing_task.done():
-            self._typing_chats.update(new_chats)
+        if self._typing.task is not None and not self._typing.task.done():
+            self._typing.chats.update(new_chats)
         else:
             await self._start_typing(new_chats)
 
@@ -331,11 +342,11 @@ class Engine:
             return
         import time
 
-        is_new_chat = chat_id not in self._typing_chats
-        if not self._typing_chats:
+        is_new_chat = chat_id not in self._typing.chats
+        if not self._typing.chats:
             # First chat of a fresh turn — anchor the min-visible clock.
-            self._typing_started_at = time.monotonic()
-        self._typing_chats.add(chat_id)
+            self._typing.started_at = time.monotonic()
+        self._typing.chats.add(chat_id)
 
         if is_new_chat:
             action = self._typing_action
@@ -344,9 +355,9 @@ class Engine:
                 name=f"pyclaudir-typing-prime-{chat_id}",
             )
 
-        if self._typing_task is None or self._typing_task.done():
-            self._typing_wake.clear()
-            self._typing_task = asyncio.create_task(
+        if self._typing.task is None or self._typing.task.done():
+            self._typing.wake.clear()
+            self._typing.task = asyncio.create_task(
                 self._typing_refresh_loop(), name="pyclaudir-typing"
             )
 
@@ -368,20 +379,20 @@ class Engine:
             "start_typing called: chats=%s action_set=%s task_state=%s",
             chat_ids,
             self._typing_action is not None,
-            "None" if self._typing_task is None else (
-                "done" if self._typing_task.done() else "running"
+            "None" if self._typing.task is None else (
+                "done" if self._typing.task.done() else "running"
             ),
         )
         if self._typing_action is None or not chat_ids:
             return
         import time
 
-        loop_running = self._typing_task is not None and not self._typing_task.done()
+        loop_running = self._typing.task is not None and not self._typing.task.done()
         if loop_running:
-            new_chats = chat_ids - self._typing_chats
+            new_chats = chat_ids - self._typing.chats
             if not new_chats:
                 return
-            self._typing_chats.update(new_chats)
+            self._typing.chats.update(new_chats)
             for chat_id in new_chats:
                 try:
                     await self._typing_action(chat_id)
@@ -389,11 +400,11 @@ class Engine:
                     log.warning("typing action failed for chat %s: %s", chat_id, exc)
             return
 
-        self._typing_chats = set(chat_ids)
-        self._typing_wake.clear()
-        self._typing_started_at = time.monotonic()
+        self._typing.chats = set(chat_ids)
+        self._typing.wake.clear()
+        self._typing.started_at = time.monotonic()
         await self._fire_typing_once()
-        self._typing_task = asyncio.create_task(
+        self._typing.task = asyncio.create_task(
             self._typing_refresh_loop(), name="pyclaudir-typing"
         )
 
@@ -419,20 +430,20 @@ class Engine:
         # Always track the reply, even if typing was already stopped —
         # the progress watchdog uses this to skip chats that have
         # already seen a reply.
-        self._replied_chats_this_turn.add(chat_id)
+        self._turn.replied_chats.add(chat_id)
 
-        if chat_id not in self._typing_chats:
+        if chat_id not in self._typing.chats:
             return
 
         import time
 
-        elapsed = time.monotonic() - self._typing_started_at
+        elapsed = time.monotonic() - self._typing.started_at
         remaining = MIN_TYPING_VISIBLE_SECONDS - elapsed
 
         if remaining <= 0:
             # Typing has been live long enough; stop immediately.
-            self._typing_chats.discard(chat_id)
-            self._typing_wake.set()
+            self._typing.chats.discard(chat_id)
+            self._typing.wake.set()
             return
 
         # Too fast — defer the discard so the indicator is visible for
@@ -443,39 +454,39 @@ class Engine:
                 await asyncio.sleep(remaining)
             except asyncio.CancelledError:
                 return
-            self._typing_chats.discard(chat_id)
-            self._typing_wake.set()
+            self._typing.chats.discard(chat_id)
+            self._typing.wake.set()
 
         # Schedule it; we don't await — notify_chat_replied returns
         # immediately so the send_message tool isn't blocked.
-        self._typing_deferred_stop = asyncio.create_task(
+        self._typing.deferred_stop = asyncio.create_task(
             _deferred_discard(), name="pyclaudir-typing-deferred-stop"
         )
 
     async def _stop_typing(self) -> None:
-        self._typing_chats.clear()
-        self._typing_wake.set()
+        self._typing.chats.clear()
+        self._typing.wake.set()
         # Cancel any pending deferred discard so it doesn't fire after we
         # already stopped.
-        if self._typing_deferred_stop is not None and not self._typing_deferred_stop.done():
-            self._typing_deferred_stop.cancel()
+        if self._typing.deferred_stop is not None and not self._typing.deferred_stop.done():
+            self._typing.deferred_stop.cancel()
             try:
-                await self._typing_deferred_stop
+                await self._typing.deferred_stop
             except (asyncio.CancelledError, Exception):
                 pass
-        self._typing_deferred_stop = None
-        if self._typing_task is not None and not self._typing_task.done():
-            self._typing_task.cancel()
+        self._typing.deferred_stop = None
+        if self._typing.task is not None and not self._typing.task.done():
+            self._typing.task.cancel()
             try:
-                await self._typing_task
+                await self._typing.task
             except (asyncio.CancelledError, Exception):
                 pass
-        self._typing_task = None
+        self._typing.task = None
 
     async def _fire_typing_once(self) -> None:
         if self._typing_action is None:
             return
-        for chat_id in list(self._typing_chats):
+        for chat_id in list(self._typing.chats):
             try:
                 await self._typing_action(chat_id)
                 log.info("typing fired for chat %s", chat_id)
@@ -498,16 +509,16 @@ class Engine:
         message.
         """
         try:
-            while self._typing_chats:
-                self._typing_wake.clear()
+            while self._typing.chats:
+                self._typing.wake.clear()
                 try:
                     await asyncio.wait_for(
-                        self._typing_wake.wait(),
+                        self._typing.wake.wait(),
                         timeout=TYPING_REFRESH_SECONDS,
                     )
                 except asyncio.TimeoutError:
                     pass
-                if not self._typing_chats:
+                if not self._typing.chats:
                     return
                 await self._fire_typing_once()
         except asyncio.CancelledError:
@@ -524,7 +535,7 @@ class Engine:
         """
         if self._error_notify is None:
             return
-        for chat_id in self._active_chats:
+        for chat_id in self._turn.active_chats:
             try:
                 await self._error_notify(chat_id, text, None)
                 log.info("sent error notification to chat %s", chat_id)
@@ -545,10 +556,10 @@ class Engine:
            diagnostic (classifier match on text blocks, or the raw first
            block) is included so the user understands why.
         """
-        self._dropped_text_retries += 1
+        self._turn.dropped_text_retries += 1
         max_retries = self._tool_error_max_count
 
-        if self._dropped_text_retries < max_retries:
+        if self._turn.dropped_text_retries < max_retries:
             # Recoverable — inject the corrective reminder and let the
             # model try again.
             error_xml = (
@@ -557,8 +568,8 @@ class Engine:
             )
             await self._worker.send(error_xml)
             self._is_processing.set()
-            if self._typing_chats:
-                await self._start_typing(set(self._typing_chats))
+            if self._typing.chats:
+                await self._start_typing(set(self._typing.chats))
             return
 
         # Cap hit. Build the clearest user-facing message we can from
@@ -566,15 +577,15 @@ class Engine:
         user_msg = self._build_dropped_text_user_message(result)
         log.warning(
             "dropped_text retry limit hit (%d/%d); surfacing to user",
-            self._dropped_text_retries, max_retries,
+            self._turn.dropped_text_retries, max_retries,
         )
         await self._notify_error_to_chats(user_msg)
-        self._active_chats.clear()
-        self._active_triggers.clear()
+        self._turn.active_chats.clear()
+        self._turn.active_triggers.clear()
         # Reset counter so the *next* user turn starts clean even if the
         # underlying CC issue persists — we don't want to nuke their
         # first follow-up message silently.
-        self._dropped_text_retries = 0
+        self._turn.dropped_text_retries = 0
 
     @staticmethod
     def _build_dropped_text_user_message(result: "TurnResult") -> str:
@@ -628,9 +639,9 @@ class Engine:
             return
         if self._error_notify is None:
             return
-        pending = self._active_chats - self._replied_chats_this_turn
+        pending = self._turn.active_chats - self._turn.replied_chats
         for chat_id in pending:
-            reply_to = self._active_triggers.get(chat_id)
+            reply_to = self._turn.active_triggers.get(chat_id)
             try:
                 await self._error_notify(
                     chat_id,
@@ -703,8 +714,8 @@ class Engine:
             "⚠️ Sorry, I ran into a temporary issue. "
             "I'm restarting and will be back in a few seconds."
         )
-        self._active_chats.clear()
-        self._active_triggers.clear()
+        self._turn.active_chats.clear()
+        self._turn.active_triggers.clear()
 
     async def _handle_turn_result(self, result: "TurnResult") -> None:
         """Process a successfully-returned :class:`TurnResult`.
@@ -746,9 +757,9 @@ class Engine:
             return
 
         # Successful turn — reset the dropped-text retry counter.
-        self._dropped_text_retries = 0
-        self._active_chats.clear()
-        self._active_triggers.clear()
+        self._turn.dropped_text_retries = 0
+        self._turn.active_chats.clear()
+        self._turn.active_triggers.clear()
 
         if action == "sleep" and result.control and result.control.sleep_ms:
             await asyncio.sleep(result.control.sleep_ms / 1000)

@@ -303,16 +303,16 @@ async def test_notify_chat_replied_stops_typing_after_min_visible_duration(
         # The typing chat should NOT be cleared yet — the deferral is in
         # flight, and the loop is still alive.
         await asyncio.sleep(0.05)
-        assert -100 in eng._typing_chats, (
+        assert -100 in eng._typing.chats, (
             "notify_chat_replied stopped typing too early; user wouldn't "
             "see the indicator"
         )
-        assert eng._typing_task is not None and not eng._typing_task.done()
+        assert eng._typing.task is not None and not eng._typing.task.done()
 
         # After the min duration elapses, the deferred stop should fire
         # and the loop should exit on its next tick.
         await asyncio.sleep(MIN_TYPING_VISIBLE_SECONDS + 0.1)
-        assert -100 not in eng._typing_chats
+        assert -100 not in eng._typing.chats
     finally:
         await eng.stop()
 
@@ -341,9 +341,9 @@ async def test_notify_chat_replied_stops_immediately_when_already_visible_long_e
         # NOW notify — should stop immediately, no defer
         eng.notify_chat_replied(-100)
         await asyncio.sleep(0.05)
-        assert -100 not in eng._typing_chats
+        assert -100 not in eng._typing.chats
         # The deferred-stop task should NOT have been spawned
-        assert eng._typing_deferred_stop is None
+        assert eng._typing.deferred_stop is None
     finally:
         await eng.stop()
 
@@ -381,9 +381,9 @@ async def test_notify_chat_replied_only_stops_the_named_chat() -> None:
         eng.notify_chat_replied(-100)
         await asyncio.sleep(0.05)
         # Group B is still in the typing set
-        assert -200 in eng._typing_chats
+        assert -200 in eng._typing.chats
         # Loop is still alive
-        assert eng._typing_task is not None and not eng._typing_task.done()
+        assert eng._typing.task is not None and not eng._typing.task.done()
     finally:
         await eng.stop()
 
@@ -428,7 +428,7 @@ async def test_typing_fires_on_two_consecutive_turns() -> None:
 
         # Engine should be idle now
         assert not eng._is_processing.is_set()
-        assert eng._typing_task is None or eng._typing_task.done()
+        assert eng._typing.task is None or eng._typing.task.done()
 
         # === turn 2 — the regression case ===
         await eng.submit(_msg("second", mid=2))
@@ -498,7 +498,7 @@ async def test_inject_after_notify_restarts_typing() -> None:
         await asyncio.sleep(0.05)
 
         # Typing task should have exited
-        assert eng._typing_task is None or eng._typing_task.done()
+        assert eng._typing.task is None or eng._typing.task.done()
         calls_after_notify = len(typing_calls)
 
         # === inject — second message arrives MID-TURN, before result ===
@@ -512,7 +512,7 @@ async def test_inject_after_notify_restarts_typing() -> None:
             f"calls={typing_calls}"
         )
         # And the typing task is alive again
-        assert eng._typing_task is not None and not eng._typing_task.done()
+        assert eng._typing.task is not None and not eng._typing.task.done()
     finally:
         await eng.stop()
 

@@ -433,14 +433,14 @@ async def _async_main() -> None:
             f"(attempt {attempt}, retrying in {backoff:.0f}s). "
             "Please resend your last message in a moment."
         )
-        if engine is not None and engine._active_chats:
-            for chat_id in engine._active_chats:
+        if engine is not None and engine._turn.active_chats:
+            for chat_id in engine._turn.active_chats:
                 try:
                     await dispatcher.bot.send_message(chat_id=chat_id, text=user_text)
                 except Exception:
                     log.warning("crash notify to %s failed", chat_id, exc_info=True)
         owner_chat = config.owner_id
-        if owner_chat not in (engine._active_chats if engine else set()):
+        if owner_chat not in (engine._turn.active_chats if engine else set()):
             try:
                 await dispatcher.bot.send_message(
                     chat_id=owner_chat,
@@ -455,8 +455,8 @@ async def _async_main() -> None:
             "The operator needs to intervene."
         )
         chats_to_notify: set[int] = set()
-        if engine is not None and engine._active_chats:
-            chats_to_notify.update(engine._active_chats)
+        if engine is not None and engine._turn.active_chats:
+            chats_to_notify.update(engine._turn.active_chats)
         chats_to_notify.add(config.owner_id)
         for chat_id in chats_to_notify:
             try:

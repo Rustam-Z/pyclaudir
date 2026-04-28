@@ -232,7 +232,7 @@ async def test_progress_watchdog_skips_reminder_only_turn() -> None:
         # _active_chats should not contain the reminder's chat — the same
         # filter that excludes mid=0 from _active_triggers excludes it
         # here too.
-        assert -100 not in eng._active_chats
+        assert -100 not in eng._turn.active_chats
 
         worker.feed_result(
             TurnResult(control=ControlAction(action="stop", reason="ok"))
