@@ -10,6 +10,38 @@ It learns you. Every day it reflects on what worked and writes new rules into it
 
 Out of the box: messaging, memory, reminders, web, vision. Want shell access? Code editing? Plug in any other MCP server — GitHub, Jira, Notion, Slack, your own — same one-entry pattern, stdio or remote HTTP/SSE with auth headers. Runs on your laptop or any small VPS. Works with your existing Claude Code subscription.
 
+## Quickstart (3 minutes)
+
+```bash
+git clone https://github.com/Rustam-Z/pyclaudir && cd pyclaudir
+
+cp .env.example .env && nano .env
+#   set TELEGRAM_BOT_TOKEN  (from @BotFather)
+#   set PYCLAUDIR_OWNER_ID  (your numeric Telegram user id, from @userinfobot)
+#   update if necessary: PYCLAUDIR_MODEL and PYCLAUDIR_EFFORT
+
+cp prompts/project.md.example prompts/project.md && nano prompts/project.md
+#   set bot name, language, personality
+
+cp plugins.json.example plugins.json && nano plugins.json
+#   single source of truth for the bot's capability surface — see below
+
+docker compose up -d --build
+docker compose logs -f                                                    # run harness, wait for "pyclaudir is live"
+docker compose exec pyclaudir python -m pyclaudir.scripts.trace --follow  # tail Claude Code I/O
+```
+
+DM your bot. It replies.
+
+**No Docker?** You need Python 3.11+ and the Claude Code CLI (`claude --version`).
+
+```bash
+uv sync --extra dev && uv run python -m pyclaudir                        # run harness, wait for "pyclaudir is live"
+uv run python -m pyclaudir.scripts.trace --follow   # tail Claude Code I/O
+```
+
+**On Windows?** Easiest path: install [Docker Desktop](https://docs.docker.com/desktop/install/windows-install/) and run the Quickstart from **Git Bash** or **WSL** — all commands above work as written. From PowerShell, swap `nano` for `notepad` (the rest of the commands are fine; `cp` is an alias for `Copy-Item`). From `cmd.exe`, additionally swap `cp` → `copy` and `&&` chaining still works. Docker Desktop's `docker compose` runs identically on Windows.
+
 ## What you can do with it
 
 **Overnight engineer.** Brief it before bed — *"build a Stripe checkout
@@ -52,38 +84,6 @@ The pattern: you describe the *outcome* in chat, the bot picks the
 tools and schedules itself. No YAML, no cron syntax to memorise.
 
 <!-- TODO: 30s GIF demo for the README header once we have one -->
-
-## Quickstart (3 minutes)
-
-```bash
-git clone https://github.com/Rustam-Z/pyclaudir && cd pyclaudir
-
-cp .env.example .env && nano .env
-#   set TELEGRAM_BOT_TOKEN  (from @BotFather)
-#   set PYCLAUDIR_OWNER_ID  (your numeric Telegram user id, from @userinfobot)
-#   update if necessary: PYCLAUDIR_MODEL and PYCLAUDIR_EFFORT
-
-cp prompts/project.md.example prompts/project.md && nano prompts/project.md
-#   set bot name, language, personality
-
-cp plugins.json.example plugins.json && nano plugins.json
-#   single source of truth for the bot's capability surface — see below
-
-docker compose up -d --build
-docker compose logs -f                                                    # run harness, wait for "pyclaudir is live"
-docker compose exec pyclaudir python -m pyclaudir.scripts.trace --follow  # tail Claude Code I/O
-```
-
-DM your bot. It replies.
-
-**No Docker?** You need Python 3.11+ and the Claude Code CLI (`claude --version`).
-
-```bash
-uv sync --extra dev && uv run python -m pyclaudir                        # run harness, wait for "pyclaudir is live"
-uv run python -m pyclaudir.scripts.trace --follow   # tail Claude Code I/O
-```
-
-**On Windows?** Easiest path: install [Docker Desktop](https://docs.docker.com/desktop/install/windows-install/) and run the Quickstart from **Git Bash** or **WSL** — all commands above work as written. From PowerShell, swap `nano` for `notepad` (the rest of the commands are fine; `cp` is an alias for `Copy-Item`). From `cmd.exe`, additionally swap `cp` → `copy` and `&&` chaining still works. Docker Desktop's `docker compose` runs identically on Windows.
 
 ## Configuration
 
