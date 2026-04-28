@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from pyclaudir.render_store import RenderPathError, RenderStore
+from pyclaudir.storage.render import RenderPathError, RenderStore
 from pyclaudir.tools import render_html as render_html_mod
 from pyclaudir.tools.base import ToolContext
 from pyclaudir.tools.render_html import RenderHtmlArgs, RenderHtmlTool

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from pyclaudir.render_store import RenderStore
+from pyclaudir.storage.render import RenderStore
 from pyclaudir.tools import render_html as render_html_mod
 from pyclaudir.tools.base import ToolContext
 from pyclaudir.tools.render_latex import (

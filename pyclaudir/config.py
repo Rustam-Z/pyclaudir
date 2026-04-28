@@ -124,7 +124,7 @@ class Config:
     #: If Claude hasn't sent a message to a chat after this many seconds,
     #: the bot posts "Working on this — one moment." as a reply to the
     #: user's original message, so they know it's still working.
-    #: Env var: ``PYCLAUDIR_PROGRESS_NOTIFY_SECONDS`` (default 30).
+    #: Env var: ``PYCLAUDIR_PROGRESS_NOTIFY_SECONDS`` (default 60).
     progress_notify_seconds: float
 
     # ----- Settings for spotting a stuck Claude process -----
@@ -211,7 +211,7 @@ class Config:
             attachment_max_bytes=_int("PYCLAUDIR_ATTACHMENT_MAX_BYTES", 20_000_000),
             tool_error_max_count=_int("PYCLAUDIR_TOOL_ERROR_MAX_COUNT", 3),
             tool_error_window_seconds=_float("PYCLAUDIR_TOOL_ERROR_WINDOW_SECONDS", 30.0),
-            progress_notify_seconds=_float("PYCLAUDIR_PROGRESS_NOTIFY_SECONDS", 30.0),
+            progress_notify_seconds=_float("PYCLAUDIR_PROGRESS_NOTIFY_SECONDS", 60.0),
             liveness_timeout_seconds=_float("PYCLAUDIR_LIVENESS_TIMEOUT_SECONDS", 300.0),
             liveness_poll_seconds=_float("PYCLAUDIR_LIVENESS_POLL_SECONDS", 30.0),
             crash_backoff_base=_float("PYCLAUDIR_CRASH_BACKOFF_BASE", 2.0),

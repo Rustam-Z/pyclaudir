@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from pyclaudir.memory_store import MemoryPathError, MemoryStore
+from pyclaudir.storage.memory import MemoryPathError, MemoryStore
 
 
 @pytest.fixture()

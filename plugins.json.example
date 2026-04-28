@@ -49,7 +49,7 @@
         "JIRA_API_TOKEN": "${JIRA_API_TOKEN}"
       },
       "allowed_tools": [
-        "mcp__mcp-atlassian",
+        "mcp__mcp-atlassian"
       ],
       "enabled": false
     }

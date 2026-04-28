@@ -1,7 +1,7 @@
 """File-backed read-only store for inbound Telegram attachments.
 
 Scoped strictly to ``data/attachments/``. Path resolution mirrors
-:class:`pyclaudir.memory_store.MemoryStore` — same traversal-hardened rules
+:class:`pyclaudir.storage.memory.MemoryStore` — same traversal-hardened rules
 (no ``..``, no absolute paths outside the root, no symlinks). The dispatcher
 in :mod:`pyclaudir.telegram_io` is the *only* writer; the model only ever
 reads through :class:`AttachmentStore`.

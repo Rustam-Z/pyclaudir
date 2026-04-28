@@ -1,7 +1,7 @@
 """File-backed store for HTML→PNG renders under ``data/renders/``.
 
-Same path-traversal hardening as :class:`pyclaudir.memory_store.MemoryStore`
-and :class:`pyclaudir.attachments_store.AttachmentStore`: no ``..``, no
+Same path-traversal hardening as :class:`pyclaudir.storage.memory.MemoryStore`
+and :class:`pyclaudir.storage.attachments.AttachmentStore`: no ``..``, no
 absolute paths, no symlinks, must stay inside the renders root.
 
 Writers: ``render_html`` tool only. Reader: ``send_photo`` tool only.

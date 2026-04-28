@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from pyclaudir.memory_store import MemoryStore
+from pyclaudir.storage.memory import MemoryStore
 from pyclaudir.tools.base import ToolContext
 from pyclaudir.tools.send_memory_document import (
     SendMemoryDocumentArgs,

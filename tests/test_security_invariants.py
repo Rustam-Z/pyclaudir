@@ -280,7 +280,7 @@ def test_invariant_3_memory_write_safety_rails() -> None:
 
 def test_invariant_3_read_before_write_enforced(tmp_path: Path) -> None:
     """The MemoryStore itself rejects overwrites of files it hasn't read."""
-    from pyclaudir.memory_store import MemoryPathError, MemoryStore
+    from pyclaudir.storage.memory import MemoryPathError, MemoryStore
 
     store = MemoryStore(tmp_path / "memories")
     store.ensure_root()
@@ -292,7 +292,7 @@ def test_invariant_3_read_before_write_enforced(tmp_path: Path) -> None:
 
 
 def test_invariant_3_size_cap_enforced(tmp_path: Path) -> None:
-    from pyclaudir.memory_store import MAX_MEMORY_BYTES, MemoryPathError, MemoryStore
+    from pyclaudir.storage.memory import MAX_MEMORY_BYTES, MemoryPathError, MemoryStore
 
     store = MemoryStore(tmp_path / "memories")
     store.ensure_root()
@@ -307,7 +307,7 @@ def test_invariant_3_size_cap_enforced(tmp_path: Path) -> None:
 
 
 def test_invariant_4_memory_path_traversal_rejected(tmp_path: Path) -> None:
-    from pyclaudir.memory_store import MemoryPathError, MemoryStore
+    from pyclaudir.storage.memory import MemoryPathError, MemoryStore
 
     store = MemoryStore(tmp_path / "memories")
     store.ensure_root()

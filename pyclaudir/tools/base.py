@@ -24,11 +24,11 @@ from ..db.messages import insert_message
 from ..models import ChatMessage
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from ..attachments_store import AttachmentStore
+    from ..storage.attachments import AttachmentStore
     from ..db.database import Database
     from ..instructions_store import InstructionsStore
-    from ..memory_store import MemoryStore
-    from ..render_store import RenderStore
+    from ..storage.memory import MemoryStore
+    from ..storage.render import RenderStore
     from ..skills_store import SkillsStore
 
 

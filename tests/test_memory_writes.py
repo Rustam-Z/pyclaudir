@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from pyclaudir.memory_store import MAX_MEMORY_BYTES, MemoryPathError, MemoryStore
+from pyclaudir.storage.memory import MAX_MEMORY_BYTES, MemoryPathError, MemoryStore
 from pyclaudir.tools.base import ToolContext
 from pyclaudir.tools.memory import (
     AppendMemoryArgs,

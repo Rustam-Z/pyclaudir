@@ -2,7 +2,7 @@
 
 This module is the **only** place in ``pyclaudir/tools/`` allowed to touch
 the filesystem (security invariant 5). All four tools route through
-:class:`pyclaudir.memory_store.MemoryStore`, which enforces:
+:class:`pyclaudir.storage.memory.MemoryStore`, which enforces:
 
 - path traversal protection (no ``..``, no absolute paths, no symlinks)
 - 64 KiB per-file cap

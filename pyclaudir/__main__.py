@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .access import AccessConfig, load_access, save_access
-from .attachments_store import AttachmentStore
+from .storage.attachments import AttachmentStore
 from .cc_schema import schema_json
 from .cc_worker import CcSpawnSpec, CcWorker
 from .config import Config
@@ -38,10 +38,10 @@ from .db.reminders import (
 from .engine import Engine
 from .instructions_store import InstructionsStore
 from .mcp_server import McpServer
-from .memory_store import MemoryStore
+from .storage.memory import MemoryStore
 from .plugins import Plugins, load_plugins
 from .rate_limiter import RateLimiter
-from .render_store import RenderStore
+from .storage.render import RenderStore
 from .skills_store import SkillsStore
 from .telegram_io import TelegramDispatcher
 from .tools.base import ToolContext
