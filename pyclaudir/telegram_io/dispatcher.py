@@ -36,6 +36,7 @@ from ..db.messages import (
     mark_edited,
     upsert_user,
 )
+from ..input_normalizer import normalize_inbound
 from ..models import ChatMessage
 from ..rate_limiter import RateLimitExceeded, RateLimiter
 from ..secrets_scrubber import contains_secret, scrub
@@ -71,21 +72,27 @@ def _parse_allow_args(
     return kind, target_id, None
 
 
+def _clean_inbound(raw: str | None) -> tuple[str | None, frozenset[str]]:
+    """Scrub credentials, then defang Unicode obfuscation (zero-width /
+    bidi / NFKC). Order matters: scrub first so the credential regexes
+    see original bytes; normalize after so DB and model see clean text.
+
+    Returns ``(cleaned_or_None, flags)``. Empty / None input passes
+    through with an empty flag set.
+    """
+    if not raw:
+        return raw, frozenset()
+    return normalize_inbound(scrub(raw))
+
+
 def _to_chat_message(update: Update, direction: str = "in") -> ChatMessage | None:
     msg = update.effective_message
     if msg is None or msg.from_user is None:
         return None
-    raw_text = msg.text or msg.caption or ""
-    # Redact credential-shaped strings BEFORE persistence (OWASP LLM02,
-    # data-handling rule #2). If the user pastes an API key, we never
-    # want it landing in SQLite where query_db can later surface it.
-    text = scrub(raw_text)
-    reply_to_text_raw = (
-        (msg.reply_to_message.text or msg.reply_to_message.caption or None)
-        if msg.reply_to_message
-        else None
-    )
-    reply_to_text = scrub(reply_to_text_raw) if reply_to_text_raw else None
+    text, text_flags = _clean_inbound(msg.text or msg.caption or "")
+    reply = msg.reply_to_message
+    reply_raw = (reply.text or reply.caption or None) if reply else None
+    reply_to_text, reply_flags = _clean_inbound(reply_raw)
     raw_update_json = json.dumps(update.to_dict(), default=str)
     if contains_secret(raw_update_json):
         raw_update_json = scrub(raw_update_json)
@@ -97,10 +104,11 @@ def _to_chat_message(update: Update, direction: str = "in") -> ChatMessage | Non
         first_name=msg.from_user.first_name,
         direction=direction,
         timestamp=msg.date or datetime.now(timezone.utc),
-        text=text,
-        reply_to_id=msg.reply_to_message.message_id if msg.reply_to_message else None,
+        text=text or "",
+        reply_to_id=reply.message_id if reply else None,
         reply_to_text=reply_to_text,
         raw_update_json=raw_update_json,
+        input_flags=text_flags | reply_flags,
     )
 
 
@@ -125,7 +133,9 @@ class TelegramDispatcher:
         self.engine: EnginePort | None = engine
         #: Shared with ToolContext.chat_titles so outbound logs can render
         #: the chat's display name. We populate it from every inbound message.
-        self.chat_titles: dict[int, str] = chat_titles if chat_titles is not None else {}
+        self.chat_titles: dict[int, str] = (
+            chat_titles if chat_titles is not None else {}
+        )
         self.application: Application = (
             Application.builder().token(config.telegram_bot_token).build()
         )
@@ -180,7 +190,9 @@ class TelegramDispatcher:
             pass
         os.kill(os.getpid(), signal.SIGTERM)
 
-    async def _cmd_health(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    async def _cmd_health(
+        self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE
+    ) -> None:
         """Quick operational health readout — owner-only, DM or group.
 
         Surfaces things that matter day-to-day: when the CC subprocess
@@ -205,7 +217,9 @@ class TelegramDispatcher:
                 "ORDER BY id DESC LIMIT 1"
             )
             if row is None:
-                lines.append("- self-reflection reminder: MISSING (will re-seed on restart)")
+                lines.append(
+                    "- self-reflection reminder: MISSING (will re-seed on restart)"
+                )
             else:
                 lines.append(
                     f"- self-reflection reminder: {row['status']} "
@@ -221,7 +235,9 @@ class TelegramDispatcher:
             lines.append(f"- rate-limit notices fired (lifetime): {notices}")
         except Exception as exc:
             lines.append(f"- rate-limit notices: query error ({exc})")
-        await update.effective_message.reply_text("\n".join(lines), parse_mode="Markdown")
+        await update.effective_message.reply_text(
+            "\n".join(lines), parse_mode="Markdown"
+        )
 
     async def _cmd_audit(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
         """Recent changes / failures / backups — owner-only.
@@ -253,10 +269,13 @@ class TelegramDispatcher:
             backups_dir = self.config.data_dir / "prompt_backups"
             if backups_dir.exists():
                 files = [
-                    p for p in backups_dir.iterdir()
+                    p
+                    for p in backups_dir.iterdir()
                     if p.is_file() and p.suffix == ".md"
                 ]
-                lines.append(f"*prompt backups:* {len(files)} file(s) in `{backups_dir}`")
+                lines.append(
+                    f"*prompt backups:* {len(files)} file(s) in `{backups_dir}`"
+                )
             else:
                 lines.append("*prompt backups:* (none yet)")
         except Exception as exc:
@@ -264,13 +283,19 @@ class TelegramDispatcher:
         # Memory footprint.
         try:
             mem_dir = self.config.memories_dir
-            total_bytes = sum(
-                p.stat().st_size for p in mem_dir.rglob("*") if p.is_file()
-            ) if mem_dir.exists() else 0
-            lines.append(f"*memory footprint:* {total_bytes:,} bytes under `data/memories/`")
+            total_bytes = (
+                sum(p.stat().st_size for p in mem_dir.rglob("*") if p.is_file())
+                if mem_dir.exists()
+                else 0
+            )
+            lines.append(
+                f"*memory footprint:* {total_bytes:,} bytes under `data/memories/`"
+            )
         except Exception as exc:
             lines.append(f"*memory footprint:* error ({exc})")
-        await update.effective_message.reply_text("\n".join(lines), parse_mode="Markdown")
+        await update.effective_message.reply_text(
+            "\n".join(lines), parse_mode="Markdown"
+        )
 
     # ------------------------------------------------------------------
     # Access management commands (owner-only)
@@ -289,7 +314,9 @@ class TelegramDispatcher:
             bucket.append(target_id)
             save_access(self.config.access_path, access)
         label = "User" if kind == "user" else "Group"
-        await update.effective_message.reply_text(f"{label} {target_id} added to allowlist.")
+        await update.effective_message.reply_text(
+            f"{label} {target_id} added to allowlist."
+        )
 
     async def _cmd_deny(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if not self._is_owner(update):
@@ -304,9 +331,13 @@ class TelegramDispatcher:
         if target_id in bucket:
             bucket.remove(target_id)
             save_access(self.config.access_path, access)
-            await update.effective_message.reply_text(f"{label} {target_id} removed from allowlist.")
+            await update.effective_message.reply_text(
+                f"{label} {target_id} removed from allowlist."
+            )
         else:
-            await update.effective_message.reply_text(f"{label} {target_id} was not in the allowlist.")
+            await update.effective_message.reply_text(
+                f"{label} {target_id} was not in the allowlist."
+            )
 
     async def _cmd_policy(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if not self._is_owner(update):
@@ -323,7 +354,9 @@ class TelegramDispatcher:
         save_access(self.config.access_path, access)
         await update.effective_message.reply_text(f"Policy set to: {args[0]}")
 
-    async def _cmd_access(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    async def _cmd_access(
+        self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE
+    ) -> None:
         if not self._is_owner(update):
             return
         access = load_access(self.config.access_path)
@@ -348,7 +381,9 @@ class TelegramDispatcher:
         if title:
             self.chat_titles[chat.id] = title
 
-    async def _on_message(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    async def _on_message(
+        self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE
+    ) -> None:
         received_at = time.monotonic()
         cm = _to_chat_message(update, direction="in")
         if cm is None:
@@ -356,7 +391,8 @@ class TelegramDispatcher:
         cm.received_at_monotonic = received_at
         log.info(
             "hot-path stage=receipt chat=%s msg=%s t_ms=0",
-            cm.chat_id, cm.message_id,
+            cm.chat_id,
+            cm.message_id,
         )
 
         await self._attach_attachment_markers(update, cm)
@@ -379,13 +415,16 @@ class TelegramDispatcher:
         self.engine.prime_typing(cm.chat_id)
         log.info(
             "hot-path stage=submit chat=%s msg=%s t_ms=%d",
-            cm.chat_id, cm.message_id,
+            cm.chat_id,
+            cm.message_id,
             int((time.monotonic() - received_at) * 1000),
         )
         await self.engine.submit(cm)
 
     async def _attach_attachment_markers(
-        self, update: Update, cm: ChatMessage,
+        self,
+        update: Update,
+        cm: ChatMessage,
     ) -> None:
         """Download photos/documents BEFORE persistence so the marker line
         lands in the same row as the user's caption (or stands alone when
@@ -440,7 +479,9 @@ class TelegramDispatcher:
         return allowed
 
     async def _check_rate_limit(
-        self, cm: ChatMessage, chat_type: str | None,
+        self,
+        cm: ChatMessage,
+        chat_type: str | None,
     ) -> bool:
         """Per-user DM rate limit. Owner is exempt (enforced inside the
         limiter). Group messages skip the check — noisy group users are
@@ -461,12 +502,15 @@ class TelegramDispatcher:
                     )
                 except Exception:
                     log.warning(
-                        "rate-limit notice send failed for user %s", cm.user_id,
+                        "rate-limit notice send failed for user %s",
+                        cm.user_id,
                     )
             return False
         return True
 
-    async def _on_reaction(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    async def _on_reaction(
+        self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE
+    ) -> None:
         """Handle ``MessageReactionUpdated``.
 
         Extract the before/after emoji sets and update the message row's
@@ -506,7 +550,9 @@ class TelegramDispatcher:
             chat_id=msg.chat_id,
             chat_titles=self.chat_titles,
             user_id=msg.from_user.id if msg.from_user else None,
-            user_name=(msg.from_user.first_name or msg.from_user.username) if msg.from_user else None,
+            user_name=(msg.from_user.first_name or msg.from_user.username)
+            if msg.from_user
+            else None,
             message_id=msg.message_id,
             text=msg.text or "",
         )

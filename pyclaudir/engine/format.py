@@ -40,9 +40,17 @@ def _format_one(message: ChatMessage, parents_xml: str = "") -> str:
     reply_attr = (
         f' reply_to="{message.reply_to_id}"' if message.reply_to_id is not None else ""
     )
+    # Surface input-normalization flags to the model so it can refuse
+    # obfuscated requests on-character (see system.md §Prompt-injection).
+    flags_attr = (
+        f' flags="{",".join(sorted(message.input_flags))}"'
+        if message.input_flags
+        else ""
+    )
     return (
         f'<msg id="{message.message_id}" chat="{message.chat_id}" '
-        f'user="{message.user_id}" name="{_attr(name)}" time="{ts}"{reply_attr}>\n'
+        f'user="{message.user_id}" name="{_attr(name)}" '
+        f'time="{ts}"{reply_attr}{flags_attr}>\n'
         f"{parents_xml}{body}\n</msg>"
     )
 
@@ -100,7 +108,7 @@ async def format_messages_with_context(
                         f'  <parent id="{p["message_id"]}" user="{p["user_id"]}" '
                         f'name="{_attr(pname)}" direction="{p["direction"]}" '
                         f'time="{p["timestamp"]}">'
-                        f'{sx.escape(p["text"] or "")}'
+                        f"{sx.escape(p['text'] or '')}"
                         f"</parent>"
                     )
                 parts.append("</reply_chain>\n")
