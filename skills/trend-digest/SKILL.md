@@ -79,9 +79,15 @@ sources, do editorialise the synthesis.
    concrete data points with names, numbers, dates. Skip
    anything you can't attribute to a fetched URL — no
    training-memory facts in the digest.
-4. **Cite.** Every claim in the digest carries a source —
-   either a URL you actually fetched, or "via @channel"
-   for TG. No bare numbers.
+4. **Cite with exact URLs.** Every claim carries the
+   *exact* URL of the specific item it came from — the
+   article, post, paper, or per-message Telegram permalink
+   (`https://t.me/<channel>/<message_id>`, visible in the
+   `https://t.me/s/<channel>` preview). No bare channel
+   handles, no homepage links, no "via @channel". If a
+   preview doesn't expose a per-item permalink for the
+   fact, drop the bullet — don't paper over it with the
+   channel root.
 5. **Refuse internal URLs.** Same rule as system.md
    §Capabilities: no localhost, RFC1918, `.local`. If a
    user-suggested source is internal, drop it and note why.
@@ -93,16 +99,21 @@ two-minute read.
 
 1. **Top of the day** (1–3 lines). The single most
    consequential thing across all sources today. Why it
-   matters in one clause.
+   matters in one clause. Carries its primary URL inline
+   as `[source](exact-url)`.
 2. **WORLD** (bulleted, ~5–8 bullets). One bullet per
    distinct signal. Format: `• <one-clause headline> — <why
-   it matters / what to do>. (source)`
-3. **UZBEKISTAN** (bulleted, ~3–6 bullets). Same format.
-   Empty if nothing new — say so explicitly, don't pad.
+   it matters / what to do>. ([source](exact-url))` —
+   `exact-url` is the specific article / post / permalink,
+   never a homepage or channel handle.
+3. **UZBEKISTAN** (bulleted, ~3–6 bullets). Same format,
+   same exact-URL requirement. Empty if nothing new — say
+   so explicitly, don't pad.
 4. **Money-making angles** (1–3 bullets). Concrete: a market
    entering / leaving, a pricing shift, an arbitrage, a hiring
    trend that implies a tool-gap. Each angle names *who*
-   could act and *how*.
+   could act and *how*, and links the underlying signal
+   with `([source](exact-url))`.
 
 Tone: §Tone in `system.md`. Concrete nouns and numbers, no
 "significant", no emoji decoration.
@@ -113,14 +124,20 @@ Tone: §Tone in `system.md`. Concrete nouns and numbers, no
 Markdown formatting per system.md §Outgoing message
 formatting (bullets `•`, flow `→`, no headers, no tables).
 
-If the synthesis would exceed Telegram's 4096-char ceiling,
-split at section boundaries: send "Top of the day + WORLD"
-first, then "UZBEKISTAN + Money-making angles" as a follow-up.
-Don't truncate mid-bullet.
+Send **exactly one** `send_message` per run. No follow-ups,
+no continuations. If the draft is approaching 4096 chars,
+tighten before sending: drop the lowest-signal bullets first
+(usually the bottom of WORLD), shorten clauses, merge
+near-duplicates. Never split into a second message. Per
+§Keep outputs tight in `system.md`, 4096 is a ceiling, not
+a target — aim well under it.
 
 ## Must follow
 
-- Add a reference to every claim. No uncited facts.
+- Every bullet carries an **exact URL** to the specific
+  source item — no bare channel handles, no homepage links,
+  no uncited facts.
+- **One** `send_message` per run. Trim, don't split.
 
 ## Don'ts
 
