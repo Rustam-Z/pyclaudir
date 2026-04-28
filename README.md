@@ -1,6 +1,12 @@
-# pyclaudir
+<p align="center">
+  <img src="assets/pyclaudir-logo.jpg" alt="pyclaudir" width="600">
+</p>
 
-**Run personal self-evolving AI assistant in Telegram. With your rules.**
+<p align="center">
+  Run personal self-evolving AI assistant in Telegram. With your rules. Lightweight. 
+</p>
+
+---
 
 Most AI tools wait. Pyclaudir doesn't. It lives in your Telegram, remembers every conversation, and pings you the moment something matters — a trend turning, a Jira ticket due, a build that broke at 3am. 
 
