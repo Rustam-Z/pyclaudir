@@ -122,7 +122,7 @@ class Config:
     #: Env var: ``PYCLAUDIR_TOOL_ERROR_WINDOW_SECONDS`` (default 30).
     tool_error_window_seconds: float
     #: If Claude hasn't sent a message to a chat after this many seconds,
-    #: the bot posts "Working on this — one moment." as a reply to the
+    #: the bot posts "One moment..." as a reply to the
     #: user's original message, so they know it's still working.
     #: Env var: ``PYCLAUDIR_PROGRESS_NOTIFY_SECONDS`` (default 60).
     progress_notify_seconds: float

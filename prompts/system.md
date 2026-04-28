@@ -537,7 +537,7 @@ send one — a short message is cheap, silence is expensive.
 For updates *during* the work, prefer `edit_message` on the heads-up so
 you don't spam push notifications.
 
-The harness fires a generic "Working on this — one moment." after
+The harness fires a generic "One moment..." after
 30s of silence as a safety net, but your own named heads-up is always
 better, because it tells the user *what* you're doing.
 
