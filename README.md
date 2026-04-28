@@ -85,6 +85,13 @@ uv run python -m pyclaudir.scripts.trace --follow   # tail Claude Code I/O
 
 **On Windows?** Easiest path: install [Docker Desktop](https://docs.docker.com/desktop/install/windows-install/) and run the Quickstart from **Git Bash** or **WSL** — all commands above work as written. From PowerShell, swap `nano` for `notepad` (the rest of the commands are fine; `cp` is an alias for `Copy-Item`). From `cmd.exe`, additionally swap `cp` → `copy` and `&&` chaining still works. Docker Desktop's `docker compose` runs identically on Windows.
 
+## Configuration
+
+> **This README is the high-level intro.** Deeper material lives in
+> [docs/](docs/) — full technical manual, deployment walkthrough, tools
+> reference, and the systems pyclaudir descends from. Start at
+> [docs/README.md](docs/README.md).
+
 ### The four setup files
 
 | File | Tracked in git? | What it controls |
@@ -143,10 +150,27 @@ One file, four blocks. Edit and restart to apply.
 
 A missing `plugins.json` boots locked-down (no integrations, no tool groups). A malformed file crashes boot loudly. Full schema reference: [docs/tools.md](docs/tools.md).
 
-> **This README is the high-level intro.** Deeper material lives in
-> [docs/](docs/) — full technical manual, deployment walkthrough, tools
-> reference, and the systems pyclaudir descends from. Start at
-> [docs/README.md](docs/README.md).
+### `.env`
+
+All settings come from environment variables (or `.env`). Full list in
+[pyclaudir/config.py](pyclaudir/config.py). The ones you'll touch:
+
+| Variable | Required | Notes |
+|---|---|---|
+| `TELEGRAM_BOT_TOKEN` | yes | from @BotFather |
+| `PYCLAUDIR_OWNER_ID` | yes | your numeric Telegram user id |
+| `PYCLAUDIR_MODEL` | yes | e.g. `claude-opus-4-7` |
+| `PYCLAUDIR_EFFORT` | yes | `low` / `medium` / `high` / `max` |
+
+Credentials for any external MCP you wire in live in `.env` and are
+pulled into `plugins.json` via `${VAR}` references. 
+
+### Access
+Access lives in `access.json` at the repo root (hot-reloaded). One `policy`
+gates DMs and groups: `owner_only` (default, owner DM only) · `allowlist`
+(`allowed_users` for DMs, `allowed_chats` for groups) · `open` (everyone).
+Owner-only commands: `/access`, `/allow`, `/deny`, `/policy`, `/kill`, `/health`, `/audit`.
+Details: [docs/documentation.md](docs/documentation.md).
 
 ## What pyclaudir can do
 
@@ -197,58 +221,6 @@ The system prompt is two files: [prompts/system.md](prompts/system.md)
 (generic pyclaudir behaviour, shipped) and `prompts/project.md`
 (your overlay — gitignored, copy from
 [prompts/project.md.example](prompts/project.md.example)).
-
-## Layout
-
-```
-pyclaudir/
-├── prompts/        system.md (shipped) + project.md (yours)
-├── skills/         operator-curated playbooks
-├── data/           gitignored — SQLite, memories, attachments, renders, CC logs
-├── scripts/        sync + maintenance helpers
-├── pyclaudir/
-│   ├── __main__.py        entrypoint
-│   ├── tools/             one file per tool
-|   |── db/                database migrations
-└── tests/
-```
-
-## Configuration
-
-All settings come from environment variables (or `.env`). Full list in
-[pyclaudir/config.py](pyclaudir/config.py). The ones you'll touch:
-
-| Variable | Required | Notes |
-|---|---|---|
-| `TELEGRAM_BOT_TOKEN` | yes | from @BotFather |
-| `PYCLAUDIR_OWNER_ID` | yes | your numeric Telegram user id |
-| `PYCLAUDIR_MODEL` | yes | e.g. `claude-opus-4-6` |
-| `PYCLAUDIR_EFFORT` | yes | `low` / `medium` / `high` / `max` |
-| `PYCLAUDIR_DATA_DIR` | no | defaults to `./data` |
-
-**Tool-surface toggles** (subagents, shell, code editing, built-in
-tools, MCPs, skills) live in [`plugins.json`](plugins.json.example),
-not in `.env`. Copy `plugins.json.example` → `plugins.json` once and
-edit; restart to apply. See [docs/tools.md](docs/tools.md) for the
-schema.
-
-Credentials for any external MCP you wire in live in `.env` and are
-pulled into `plugins.json` via `${VAR}` references. The keys below
-are referenced by the **sample entries** in `plugins.json.example`
-(Jira / GitLab / GitHub) — keep, edit, or delete those entries
-freely; nothing in pyclaudir's code path treats them as special:
-
-| Variable | Required | Notes |
-|---|---|---|
-| `JIRA_URL` + `JIRA_USERNAME` + `JIRA_API_TOKEN` | no | credentials for Jira via [mcp-atlassian](https://github.com/sooperset/mcp-atlassian); the `mcp-atlassian` entry in `plugins.json` references them via `${VAR}` |
-| `GITLAB_URL` + `GITLAB_TOKEN` | no | credentials for GitLab via [@zereight/mcp-gitlab](https://www.npmjs.com/package/@zereight/mcp-gitlab); referenced from `plugins.json` |
-| `GITHUB_PERSONAL_ACCESS_TOKEN` | no | credentials for GitHub via [@modelcontextprotocol/server-github](https://www.npmjs.com/package/@modelcontextprotocol/server-github); referenced from `plugins.json`. For Enterprise, add `GITHUB_HOST` to the entry's `env` block. |
-
-Access lives in `access.json` at the repo root (hot-reloaded). One `policy`
-gates DMs and groups: `owner_only` (default, owner DM only) · `allowlist`
-(`allowed_users` for DMs, `allowed_chats` for groups) · `open` (everyone).
-Owner-only commands: `/access`, `/allow`, `/deny`, `/policy`, `/kill`, `/health`, `/audit`.
-Details: [docs/documentation.md](docs/documentation.md).
 
 ## Extending
 

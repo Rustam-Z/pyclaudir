@@ -165,45 +165,49 @@ def _interp_str_dict(
     return out, None
 
 
-def _interp_mcp(raw: dict[str, Any], env: Mapping[str, str]) -> tuple[McpPluginSpec | None, str | None]:
-    """Interpolate one MCP entry. Returns ``(spec, None)`` on success,
-    or ``(None, reason)`` if an unresolved ``${VAR}`` was found.
-    """
+def _interp_stdio_mcp(
+    raw: dict[str, Any], env: Mapping[str, str],
+) -> tuple[McpPluginSpec | None, str | None]:
+    """Interpolate the stdio branch. ``raw['command']`` is taken
+    verbatim; ``args`` and ``env`` are ``${VAR}``-substituted."""
     name = raw["name"]
-    transport = raw.get("type", "stdio")
+    args_raw = raw.get("args", []) or []
+    args_out: list[str] = []
+    for i, a in enumerate(args_raw):
+        if not isinstance(a, str):
+            raise PluginsConfigError(
+                f"mcps[{name!r}].args[{i}] must be a string"
+            )
+        sub = _interp_str(a, env)
+        if sub is None:
+            return None, f"args[{i}]"
+        args_out.append(sub)
 
-    if transport == "stdio":
-        args_raw = raw.get("args", []) or []
-        args_out: list[str] = []
-        for i, a in enumerate(args_raw):
-            if not isinstance(a, str):
-                raise PluginsConfigError(
-                    f"mcps[{name!r}].args[{i}] must be a string"
-                )
-            sub = _interp_str(a, env)
-            if sub is None:
-                return None, f"args[{i}]"
-            args_out.append(sub)
+    env_out, missing = _interp_str_dict(
+        raw.get("env", {}) or {}, env, owner=name, field_name="env",
+    )
+    if env_out is None:
+        return None, missing
 
-        env_out, missing = _interp_str_dict(
-            raw.get("env", {}) or {}, env, owner=name, field_name="env",
-        )
-        if env_out is None:
-            return None, missing
+    return (
+        McpPluginSpec(
+            name=name,
+            type="stdio",
+            allowed_tools=tuple(raw["allowed_tools"]),
+            command=raw["command"],
+            args=tuple(args_out),
+            env=env_out,
+        ),
+        None,
+    )
 
-        return (
-            McpPluginSpec(
-                name=name,
-                type=transport,
-                allowed_tools=tuple(raw["allowed_tools"]),
-                command=raw["command"],
-                args=tuple(args_out),
-                env=env_out,
-            ),
-            None,
-        )
 
-    # http / sse — remote server
+def _interp_remote_mcp(
+    raw: dict[str, Any], env: Mapping[str, str], transport: str,
+) -> tuple[McpPluginSpec | None, str | None]:
+    """Interpolate the http/sse branch. ``url`` is required and
+    ``${VAR}``-substituted; ``headers`` likewise."""
+    name = raw["name"]
     url = raw["url"]
     if not isinstance(url, str):
         raise PluginsConfigError(f"mcps[{name!r}].url must be a string")
@@ -227,6 +231,18 @@ def _interp_mcp(raw: dict[str, Any], env: Mapping[str, str]) -> tuple[McpPluginS
         ),
         None,
     )
+
+
+def _interp_mcp(
+    raw: dict[str, Any], env: Mapping[str, str],
+) -> tuple[McpPluginSpec | None, str | None]:
+    """Interpolate one MCP entry. Returns ``(spec, None)`` on success,
+    or ``(None, reason)`` if an unresolved ``${VAR}`` was found.
+    """
+    transport = raw.get("type", "stdio")
+    if transport == "stdio":
+        return _interp_stdio_mcp(raw, env)
+    return _interp_remote_mcp(raw, env, transport)
 
 
 def _validate_top_level(data: Any, path: Path) -> None:
@@ -261,6 +277,112 @@ def _validate_tool_groups(raw: Any, path: Path) -> dict[str, bool]:
     return out
 
 
+def _check_mcp_keys(entry: dict[str, Any], i: int, path: Path) -> None:
+    """Reject unknown keys and ensure every always-required key is present."""
+    unknown = set(entry.keys()) - _MCP_KEYS
+    if unknown:
+        raise PluginsConfigError(
+            f"{path}: mcps[{i}] has unknown key(s): {sorted(unknown)}; "
+            f"allowed: {sorted(_MCP_KEYS)}"
+        )
+    missing = _MCP_REQUIRED - set(entry.keys())
+    if missing:
+        raise PluginsConfigError(
+            f"{path}: mcps[{i}] missing required key(s): {sorted(missing)}"
+        )
+
+
+def _check_mcp_name(
+    entry: dict[str, Any], i: int, seen_names: set[str], path: Path,
+) -> str:
+    """Validate name is a non-empty unique string. Returns the name."""
+    name = entry["name"]
+    if not isinstance(name, str) or not name:
+        raise PluginsConfigError(
+            f"{path}: mcps[{i}].name must be a non-empty string"
+        )
+    if name in seen_names:
+        raise PluginsConfigError(
+            f"{path}: mcps has duplicate name {name!r}; names become the "
+            f"mcp__<name>__ namespace and must be unique"
+        )
+    seen_names.add(name)
+    return name
+
+
+def _check_mcp_transport(entry: dict[str, Any], name: str, path: Path) -> str:
+    """Validate ``type`` is in the supported set and the per-transport
+    key constraints are honoured. Returns the transport string."""
+    transport = entry.get("type", "stdio")
+    if transport not in _MCP_TRANSPORTS:
+        raise PluginsConfigError(
+            f"{path}: mcps[{name!r}].type must be one of "
+            f"{sorted(_MCP_TRANSPORTS)}; got {transport!r}"
+        )
+    present = set(entry.keys())
+    if transport == "stdio":
+        forbidden = present & _REMOTE_ONLY
+        if forbidden:
+            raise PluginsConfigError(
+                f"{path}: mcps[{name!r}] is type=stdio but has "
+                f"remote-only key(s) {sorted(forbidden)}; use "
+                f"command/args/env, not url/headers"
+            )
+    else:
+        forbidden = present & _STDIO_ONLY
+        if forbidden:
+            raise PluginsConfigError(
+                f"{path}: mcps[{name!r}] is type={transport} but has "
+                f"stdio-only key(s) {sorted(forbidden)}; use url/headers, "
+                f"not command/args/env"
+            )
+    return transport
+
+
+def _check_stdio_specifics(entry: dict[str, Any], name: str, path: Path) -> None:
+    if "command" not in entry:
+        raise PluginsConfigError(
+            f"{path}: mcps[{name!r}] (type=stdio) requires 'command'"
+        )
+    if not isinstance(entry["command"], str) or not entry["command"]:
+        raise PluginsConfigError(
+            f"{path}: mcps[{name!r}].command must be a non-empty string"
+        )
+
+
+def _check_remote_specifics(
+    entry: dict[str, Any], name: str, transport: str, path: Path,
+) -> None:
+    if "url" not in entry:
+        raise PluginsConfigError(
+            f"{path}: mcps[{name!r}] (type={transport}) requires 'url'"
+        )
+    if not isinstance(entry["url"], str) or not entry["url"]:
+        raise PluginsConfigError(
+            f"{path}: mcps[{name!r}].url must be a non-empty string"
+        )
+
+
+def _check_mcp_enabled(entry: dict[str, Any], name: str, path: Path) -> None:
+    if not isinstance(entry["enabled"], bool):
+        raise PluginsConfigError(
+            f"{path}: mcps[{name!r}].enabled must be true/false"
+        )
+
+
+def _check_mcp_allowed_tools(entry: dict[str, Any], name: str, path: Path) -> None:
+    allowed = entry["allowed_tools"]
+    if not isinstance(allowed, list) or not allowed:
+        raise PluginsConfigError(
+            f"{path}: mcps[{name!r}].allowed_tools must be a non-empty list"
+        )
+    for j, t in enumerate(allowed):
+        if not isinstance(t, str) or not t:
+            raise PluginsConfigError(
+                f"{path}: mcps[{name!r}].allowed_tools[{j}] must be a non-empty string"
+            )
+
+
 def _validate_mcps(raw: Any, path: Path) -> list[dict[str, Any]]:
     if raw is None:
         return []
@@ -271,81 +393,15 @@ def _validate_mcps(raw: Any, path: Path) -> list[dict[str, Any]]:
     for i, entry in enumerate(raw):
         if not isinstance(entry, dict):
             raise PluginsConfigError(f"{path}: mcps[{i}] must be an object")
-        unknown = set(entry.keys()) - _MCP_KEYS
-        if unknown:
-            raise PluginsConfigError(
-                f"{path}: mcps[{i}] has unknown key(s): {sorted(unknown)}; "
-                f"allowed: {sorted(_MCP_KEYS)}"
-            )
-        missing = _MCP_REQUIRED - set(entry.keys())
-        if missing:
-            raise PluginsConfigError(
-                f"{path}: mcps[{i}] missing required key(s): {sorted(missing)}"
-            )
-        name = entry["name"]
-        if not isinstance(name, str) or not name:
-            raise PluginsConfigError(
-                f"{path}: mcps[{i}].name must be a non-empty string"
-            )
-        if name in seen_names:
-            raise PluginsConfigError(
-                f"{path}: mcps has duplicate name {name!r}; names become the "
-                f"mcp__<name>__ namespace and must be unique"
-            )
-        seen_names.add(name)
-        transport = entry.get("type", "stdio")
-        if transport not in _MCP_TRANSPORTS:
-            raise PluginsConfigError(
-                f"{path}: mcps[{name!r}].type must be one of "
-                f"{sorted(_MCP_TRANSPORTS)}; got {transport!r}"
-            )
-        present = set(entry.keys())
+        _check_mcp_keys(entry, i, path)
+        name = _check_mcp_name(entry, i, seen_names, path)
+        transport = _check_mcp_transport(entry, name, path)
         if transport == "stdio":
-            forbidden = present & _REMOTE_ONLY
-            if forbidden:
-                raise PluginsConfigError(
-                    f"{path}: mcps[{name!r}] is type=stdio but has "
-                    f"remote-only key(s) {sorted(forbidden)}; use "
-                    f"command/args/env, not url/headers"
-                )
-            if "command" not in entry:
-                raise PluginsConfigError(
-                    f"{path}: mcps[{name!r}] (type=stdio) requires 'command'"
-                )
-            if not isinstance(entry["command"], str) or not entry["command"]:
-                raise PluginsConfigError(
-                    f"{path}: mcps[{name!r}].command must be a non-empty string"
-                )
-        else:  # http or sse
-            forbidden = present & _STDIO_ONLY
-            if forbidden:
-                raise PluginsConfigError(
-                    f"{path}: mcps[{name!r}] is type={transport} but has "
-                    f"stdio-only key(s) {sorted(forbidden)}; use url/headers, "
-                    f"not command/args/env"
-                )
-            if "url" not in entry:
-                raise PluginsConfigError(
-                    f"{path}: mcps[{name!r}] (type={transport}) requires 'url'"
-                )
-            if not isinstance(entry["url"], str) or not entry["url"]:
-                raise PluginsConfigError(
-                    f"{path}: mcps[{name!r}].url must be a non-empty string"
-                )
-        if not isinstance(entry["enabled"], bool):
-            raise PluginsConfigError(
-                f"{path}: mcps[{name!r}].enabled must be true/false"
-            )
-        allowed = entry["allowed_tools"]
-        if not isinstance(allowed, list) or not allowed:
-            raise PluginsConfigError(
-                f"{path}: mcps[{name!r}].allowed_tools must be a non-empty list"
-            )
-        for j, t in enumerate(allowed):
-            if not isinstance(t, str) or not t:
-                raise PluginsConfigError(
-                    f"{path}: mcps[{name!r}].allowed_tools[{j}] must be a non-empty string"
-                )
+            _check_stdio_specifics(entry, name, path)
+        else:
+            _check_remote_specifics(entry, name, transport, path)
+        _check_mcp_enabled(entry, name, path)
+        _check_mcp_allowed_tools(entry, name, path)
         out.append(entry)
     return out
 
