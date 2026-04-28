@@ -198,6 +198,13 @@ Details: [docs/documentation.md](docs/documentation.md).
 
 **what can't do:** generate images. Send voice messages, GIFs, animations, stickers. Read voice / video / video notes / stickers (they arrive empty — ask for a screenshot or description). Moderate (mute / ban / kick / unban / member lists). Make phone calls or watch videos.
 
+**How to make AI assistant more proactive?**
+- Event subscribers: GitHub webhooks, file watchers, or a CI poller feed into the same engine as Telegram messages. The bot pings you when a PR review lands or a build fails, instead of you asking.
+- Scheduled check-ins
+- More reminders 
+- Idle-time sweeps: if no Telegram message for N hours, run a low-stakes routine (lint, dep audit, memory cleanup) and only ping if it finds something.
+- Self-followups
+
 Per-tool descriptions, the `plugins.json` schema, and how to add a new MCP / disable a built-in tool / hide a skill: [docs/tools.md](docs/tools.md).
 
 ## Architecture

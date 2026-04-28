@@ -652,96 +652,109 @@ class Engine:
     # ------------------------------------------------------------------
 
     async def _control_loop(self) -> None:
-        """Wait for each turn to finish and decide what to do next."""
+        """Wait for each turn to finish and decide what to do next.
+
+        NOTE: ``_run_one_turn`` blocks the engine until the current turn
+        completes. Messages arriving from other chats during a
+        long-running turn (e.g. code review) queue in ``_pending`` and
+        are dispatched only after the turn returns. See README "Known
+        limitations — Single-turn blocking".
+        """
         try:
             while not self._stop.is_set():
                 if not self._is_processing.is_set():
                     await asyncio.sleep(0.05)
                     continue
-
-                # NOTE: this blocks the engine until the current turn
-                # completes. Messages arriving from other chats during a
-                # long-running turn (e.g. code review) queue in _pending
-                # and are dispatched only after this returns. See README
-                # "Known limitations — Single-turn blocking".
-                progress_task = asyncio.create_task(
-                    self._progress_notify_after(self._progress_notify_seconds),
-                    name="pyclaudir-progress-notify",
-                )
-                try:
-                    try:
-                        result: TurnResult = await self._worker.wait_for_result()
-                    except Exception as exc:
-                        # CC subprocess died mid-turn. The worker's
-                        # supervisor will handle respawning; our job is
-                        # to tell the user.
-                        log.error("turn failed: %s", exc)
-                        self._is_processing.clear()
-                        await self._stop_typing()
-                        await self._notify_error_to_chats(
-                            "⚠️ Sorry, I ran into a temporary issue. "
-                            "I'm restarting and will be back in a few seconds."
-                        )
-                        self._active_chats.clear()
-                        self._active_triggers.clear()
-                        continue
-
-                    self._is_processing.clear()
-                    await self._stop_typing()
-
-                    if result.aborted_reason == "tool-error-limit":
-                        # Worker tripped its tool-error circuit breaker
-                        # and has scheduled subprocess termination. Don't
-                        # notify here — ``_on_cc_crash`` will tell the
-                        # user when the subprocess exits. We leave
-                        # ``_active_chats`` alone so the callback knows
-                        # who to notify.
-                        log.error("turn aborted: tool-error-limit")
-                        continue
-
-                    action = result.control.action if result.control else None
-                    log.info(
-                        "turn done (action=%s, dropped_text=%s, text_blocks=%d)",
-                        action, result.dropped_text, len(result.text_blocks),
-                    )
-
-                    # Best-effort classification: if stderr tells us the
-                    # failure mode (rate-limit, auth, quota…), surface a
-                    # targeted message. This is orthogonal to dropped_text
-                    # handling — a turn can be both rate-limited AND
-                    # dropped_text, but we only notify once per turn.
-                    stderr_classification = classify_cc_failure(result.stderr_tail)
-                    if stderr_classification is not None:
-                        await self._notify_error_to_chats(
-                            stderr_classification.user_message
-                        )
-
-                    if result.dropped_text:
-                        await self._handle_dropped_text(result)
-                        continue
-
-                    # Successful turn — reset the dropped-text retry counter.
-                    self._dropped_text_retries = 0
-
-                    self._active_chats.clear()
-                    self._active_triggers.clear()
-
-                    if action == "sleep" and result.control and result.control.sleep_ms:
-                        await asyncio.sleep(result.control.sleep_ms / 1000)
-
-                    # If new messages arrived while we were processing, kick them now.
-                    async with self._lock:
-                        has_pending = bool(self._pending)
-                    if has_pending:
-                        await self._kick()
-                finally:
-                    if not progress_task.done():
-                        progress_task.cancel()
-                    try:
-                        await progress_task
-                    except (asyncio.CancelledError, Exception):
-                        pass
+                await self._run_one_turn()
         except asyncio.CancelledError:
             raise
         except Exception:  # pragma: no cover
             log.exception("engine control loop crashed")
+
+    async def _run_one_turn(self) -> None:
+        """Arm the progress watchdog, wait for the worker's result,
+        dispatch on the outcome. The outer loop just iterates."""
+        progress_task = asyncio.create_task(
+            self._progress_notify_after(self._progress_notify_seconds),
+            name="pyclaudir-progress-notify",
+        )
+        try:
+            try:
+                result: TurnResult = await self._worker.wait_for_result()
+            except Exception as exc:
+                await self._handle_worker_failure(exc)
+                return
+            await self._handle_turn_result(result)
+        finally:
+            if not progress_task.done():
+                progress_task.cancel()
+            try:
+                await progress_task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+    async def _handle_worker_failure(self, exc: Exception) -> None:
+        """CC subprocess died mid-turn. The worker's supervisor handles
+        respawning; our job is to tell the user."""
+        log.error("turn failed: %s", exc)
+        self._is_processing.clear()
+        await self._stop_typing()
+        await self._notify_error_to_chats(
+            "⚠️ Sorry, I ran into a temporary issue. "
+            "I'm restarting and will be back in a few seconds."
+        )
+        self._active_chats.clear()
+        self._active_triggers.clear()
+
+    async def _handle_turn_result(self, result: "TurnResult") -> None:
+        """Process a successfully-returned :class:`TurnResult`.
+
+        Four outcome paths: tool-error-limit abort (worker scheduled
+        termination, ``_on_cc_crash`` notifies), stderr-classified
+        failure (rate-limit/auth/quota), dropped-text (no
+        ``send_message``), or a clean turn — possibly with a follow-up
+        ``sleep`` action and pending messages to kick next.
+        """
+        self._is_processing.clear()
+        await self._stop_typing()
+
+        if result.aborted_reason == "tool-error-limit":
+            # Don't notify here — ``_on_cc_crash`` will tell the user
+            # when the subprocess exits. Leave ``_active_chats`` alone
+            # so the callback knows who to notify.
+            log.error("turn aborted: tool-error-limit")
+            return
+
+        action = result.control.action if result.control else None
+        log.info(
+            "turn done (action=%s, dropped_text=%s, text_blocks=%d)",
+            action, result.dropped_text, len(result.text_blocks),
+        )
+
+        # Best-effort classification: if stderr tells us the failure mode
+        # (rate-limit, auth, quota…), surface a targeted message. This is
+        # orthogonal to dropped_text handling — a turn can be both
+        # rate-limited AND dropped_text, but we only notify once per turn.
+        stderr_classification = classify_cc_failure(result.stderr_tail)
+        if stderr_classification is not None:
+            await self._notify_error_to_chats(
+                stderr_classification.user_message
+            )
+
+        if result.dropped_text:
+            await self._handle_dropped_text(result)
+            return
+
+        # Successful turn — reset the dropped-text retry counter.
+        self._dropped_text_retries = 0
+        self._active_chats.clear()
+        self._active_triggers.clear()
+
+        if action == "sleep" and result.control and result.control.sleep_ms:
+            await asyncio.sleep(result.control.sleep_ms / 1000)
+
+        # If new messages arrived while we were processing, kick them now.
+        async with self._lock:
+            has_pending = bool(self._pending)
+        if has_pending:
+            await self._kick()
