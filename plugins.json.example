@@ -21,7 +21,9 @@
       "env": {
         "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}"
       },
-      "allowed_tools": ["mcp__github"],
+      "allowed_tools": [
+        "mcp__github"
+      ],
       "enabled": false
     },
     {
@@ -32,7 +34,9 @@
         "GITLAB_PERSONAL_ACCESS_TOKEN": "${GITLAB_TOKEN}",
         "GITLAB_API_URL": "${GITLAB_URL}/api/v4"
       },
-      "allowed_tools": ["mcp__mcp-gitlab"],
+      "allowed_tools": [
+        "mcp__mcp-gitlab"
+      ],
       "enabled": false
     },
     {
@@ -45,8 +49,7 @@
         "JIRA_API_TOKEN": "${JIRA_API_TOKEN}"
       },
       "allowed_tools": [
-        "mcp__mcp-atlassian__jira_*",
-        "mcp__mcp-atlassian__confluence_*"
+        "mcp__mcp-atlassian",
       ],
       "enabled": false
     }

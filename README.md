@@ -208,14 +208,8 @@ pyclaudir/
 ├── scripts/        sync + maintenance helpers
 ├── pyclaudir/
 │   ├── __main__.py        entrypoint
-│   ├── config.py          single source of env vars
-│   ├── telegram_io.py     *listener
-│   ├── engine.py          *main logic: debounce + buffer + inject
-│   ├── cc_worker.py       *Claude subprocess + crash recovery
-│   ├── mcp_server.py      FastMCP host + tool auto-discovery
-│   ├── access.py          hot-reload access gate
 │   ├── tools/             one file per tool
-│   └── scripts/trace.py   replay a session
+|   |── db/                database migrations
 └── tests/
 ```
 
