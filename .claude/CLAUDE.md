@@ -7,7 +7,8 @@
 - If a limit blocks the task, stop and ask.
 
 ## Documentation
-Update README and docs/ if needed. Keep alaways direct, concise, short. 
+- Update README.md and docs/documentation.md if needed. Keep documentation direct, concise, and short. 
+- README.md should be human readable, don't use difficult termins/words.
 
 ## Style
 - Type hints on every signature. `from __future__ import annotations`.

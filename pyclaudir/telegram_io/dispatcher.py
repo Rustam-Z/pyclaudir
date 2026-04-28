@@ -359,80 +359,15 @@ class TelegramDispatcher:
             cm.chat_id, cm.message_id,
         )
 
-        # Download photos / documents BEFORE persistence so the marker line
-        # lands in the same row as the user's caption (or stands alone when
-        # the user sent only a file). Rejected attachments still produce a
-        # marker — the model decides how to apologise.
-        msg = update.effective_message
-        if msg is not None and (msg.photo or msg.document is not None):
-            markers = await _process_attachments(self.bot, msg, self.config)
-            if markers:
-                marker_block = "\n".join(markers)
-                cm.text = f"{cm.text}\n{marker_block}" if cm.text else marker_block
-
+        await self._attach_attachment_markers(update, cm)
         self._remember_chat_title(update)
-
-        # 1. Persist *every* message we receive — even from disallowed chats —
-        #    so we have an audit trail.
-        await insert_message(self.db, cm)
-        await upsert_user(
-            self.db,
-            chat_id=cm.chat_id,
-            user_id=cm.user_id,
-            username=cm.username,
-            first_name=cm.first_name,
-            timestamp=cm.timestamp,
-        )
-
-        # Hot-reload access config on every message.
-        access = load_access(self.config.access_path)
-        allowed = gate(
-            access=access,
-            owner_id=self.config.owner_id,
-            chat_id=cm.chat_id,
-            user_id=cm.user_id,
-            chat_type=update.effective_chat.type if update.effective_chat else None,
-        )
-        log_inbound(
-            chat_id=cm.chat_id,
-            chat_type=update.effective_chat.type if update.effective_chat else None,
-            chat_titles=self.chat_titles,
-            user_id=cm.user_id,
-            user_name=cm.first_name or cm.username,
-            message_id=cm.message_id,
-            reply_to_id=cm.reply_to_id,
-            text=cm.text,
-            allowed=allowed,
-        )
-
-        # 2. Forward only allowed chats to the engine. Everything else is
-        #    a silent drop — no refusal reply, no owner alert. Strangers
-        #    learn nothing about the bot (not even that it exists), and
-        #    they can't burn Telegram API quota by flooding us.
-        if not allowed:
-            return
+        await self._persist_inbound(cm)
 
         chat_type = update.effective_chat.type if update.effective_chat else None
-
-        # 3. Per-user DM rate limit. Owner is exempt (enforced inside the
-        #    limiter). Group messages skip the check — noisy group users
-        #    are the group's problem, not ours.
-        if self.rate_limiter is not None and chat_type == "private":
-            try:
-                await self.rate_limiter.check_and_record(cm.user_id)
-            except RateLimitExceeded as exc:
-                if exc.notify:
-                    try:
-                        await self.bot.send_message(
-                            chat_id=cm.chat_id,
-                            text=(
-                                f"⏳ You're sending messages too fast ({exc.limit}/min). "
-                                f"Try again in ~{exc.retry_after_s}s."
-                            ),
-                        )
-                    except Exception:
-                        log.warning("rate-limit notice send failed for user %s", cm.user_id)
-                return
+        if not self._check_access(cm, chat_type):
+            return
+        if not await self._check_rate_limit(cm, chat_type):
+            return
 
         if self.engine is None:
             log.error("dispatcher received message before engine was attached")
@@ -448,6 +383,88 @@ class TelegramDispatcher:
             int((time.monotonic() - received_at) * 1000),
         )
         await self.engine.submit(cm)
+
+    async def _attach_attachment_markers(
+        self, update: Update, cm: ChatMessage,
+    ) -> None:
+        """Download photos/documents BEFORE persistence so the marker line
+        lands in the same row as the user's caption (or stands alone when
+        the user sent only a file). Rejected attachments still produce a
+        marker — the model decides how to apologise."""
+        msg = update.effective_message
+        if msg is None or not (msg.photo or msg.document is not None):
+            return
+        markers = await _process_attachments(self.bot, msg, self.config)
+        if not markers:
+            return
+        marker_block = "\n".join(markers)
+        cm.text = f"{cm.text}\n{marker_block}" if cm.text else marker_block
+
+    async def _persist_inbound(self, cm: ChatMessage) -> None:
+        """Persist *every* message we receive — even from disallowed chats —
+        so we have an audit trail."""
+        await insert_message(self.db, cm)
+        await upsert_user(
+            self.db,
+            chat_id=cm.chat_id,
+            user_id=cm.user_id,
+            username=cm.username,
+            first_name=cm.first_name,
+            timestamp=cm.timestamp,
+        )
+
+    def _check_access(self, cm: ChatMessage, chat_type: str | None) -> bool:
+        """Hot-reload the access config and gate the message. Disallowed
+        chats are a silent drop — no refusal reply, no owner alert.
+        Strangers learn nothing about the bot, and they can't burn
+        Telegram API quota by flooding us. Returns ``True`` to forward."""
+        access = load_access(self.config.access_path)
+        allowed = gate(
+            access=access,
+            owner_id=self.config.owner_id,
+            chat_id=cm.chat_id,
+            user_id=cm.user_id,
+            chat_type=chat_type,
+        )
+        log_inbound(
+            chat_id=cm.chat_id,
+            chat_type=chat_type,
+            chat_titles=self.chat_titles,
+            user_id=cm.user_id,
+            user_name=cm.first_name or cm.username,
+            message_id=cm.message_id,
+            reply_to_id=cm.reply_to_id,
+            text=cm.text,
+            allowed=allowed,
+        )
+        return allowed
+
+    async def _check_rate_limit(
+        self, cm: ChatMessage, chat_type: str | None,
+    ) -> bool:
+        """Per-user DM rate limit. Owner is exempt (enforced inside the
+        limiter). Group messages skip the check — noisy group users are
+        the group's problem, not ours. Returns ``True`` to forward."""
+        if self.rate_limiter is None or chat_type != "private":
+            return True
+        try:
+            await self.rate_limiter.check_and_record(cm.user_id)
+        except RateLimitExceeded as exc:
+            if exc.notify:
+                try:
+                    await self.bot.send_message(
+                        chat_id=cm.chat_id,
+                        text=(
+                            f"⏳ You're sending messages too fast ({exc.limit}/min). "
+                            f"Try again in ~{exc.retry_after_s}s."
+                        ),
+                    )
+                except Exception:
+                    log.warning(
+                        "rate-limit notice send failed for user %s", cm.user_id,
+                    )
+            return False
+        return True
 
     async def _on_reaction(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle ``MessageReactionUpdated``.

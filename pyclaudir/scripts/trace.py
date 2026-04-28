@@ -163,86 +163,115 @@ def trunc(text: str, max_chars: int) -> str:
     return text[:max_chars] + f"…[+{len(text) - max_chars}]"
 
 
-def render_event(event: dict, max_chars: int) -> list[str]:
-    """Return zero or more pretty-printed lines for one JSONL event."""
+#: Top-level event types we treat as transcript noise and drop entirely.
+_BORING_EVENT_TYPES = frozenset({"queue-operation", "summary", "system"})
+
+
+def _render_user_text_block(block: dict, ts: str, max_chars: int) -> list[str]:
+    """Three flavours of user text: a Telegram batch (<msg ...>), an
+    engine correction (<error>...), or a plain message."""
+    txt = block.get("text", "")
+    if txt.startswith("<msg "):
+        lines = [f"{ts}  ← user (telegram batch)"]
+        for line in txt.splitlines():
+            lines.append(f"             {trunc(line, max_chars)}")
+        return lines
+    if txt.startswith("<error>"):
+        return [f"{ts}  ← engine correction: {trunc(txt, max_chars)}"]
+    return [f"{ts}  ← user: {trunc(txt, max_chars)}"]
+
+
+def _render_tool_result_block(block: dict, ts: str, max_chars: int) -> str:
+    raw = block.get("content")
+    if isinstance(raw, list):
+        text = " ".join(
+            (b.get("text", "") if isinstance(b, dict) else str(b))
+            for b in raw
+        )
+    else:
+        text = "" if raw is None else str(raw)
+    err = " ✗" if block.get("is_error") else " ✓"
+    tid = str(block.get("tool_use_id", ""))[:8]
+    return f"{ts}  ← tool_result{err} id={tid}: {trunc(text, max_chars)}"
+
+
+def _render_user_event(event: dict, ts: str, max_chars: int) -> list[str]:
     out: list[str] = []
-    etype = event.get("type")
-
-    # Skip internal queue/init bookkeeping; they're noise for a transcript.
-    if etype in {"queue-operation", "summary", "system"}:
-        return out
-
-    ts = event.get("timestamp", "")[:19].replace("T", " ")
-
-    if etype == "user":
-        msg = event.get("message", {}) or {}
-        for block in msg.get("content") or []:
-            btype = block.get("type") if isinstance(block, dict) else None
-            if btype == "text":
-                txt = block.get("text", "")
-                if txt.startswith("<msg "):
-                    out.append(f"{ts}  ← user (telegram batch)")
-                    for line in txt.splitlines():
-                        out.append(f"             {trunc(line, max_chars)}")
-                elif txt.startswith("<error>"):
-                    out.append(f"{ts}  ← engine correction: {trunc(txt, max_chars)}")
-                else:
-                    out.append(f"{ts}  ← user: {trunc(txt, max_chars)}")
-            elif btype == "tool_result":
-                raw = block.get("content")
-                if isinstance(raw, list):
-                    text = " ".join(
-                        (b.get("text", "") if isinstance(b, dict) else str(b))
-                        for b in raw
-                    )
-                else:
-                    text = "" if raw is None else str(raw)
-                err = " ✗" if block.get("is_error") else " ✓"
-                tid = str(block.get("tool_use_id", ""))[:8]
-                out.append(f"{ts}  ← tool_result{err} id={tid}: {trunc(text, max_chars)}")
-        return out
-
-    if etype == "assistant":
-        msg = event.get("message", {}) or {}
-        for block in msg.get("content") or []:
-            btype = block.get("type") if isinstance(block, dict) else None
-            if btype == "text":
-                txt = block.get("text", "")
-                if txt:
-                    out.append(f"{ts}  → assistant text: {trunc(txt, max_chars)}")
-            elif btype == "thinking":
-                txt = block.get("thinking", "")
-                out.append(f"{ts}  → thinking: {trunc(txt, max_chars)}")
-            elif btype == "tool_use":
-                name = block.get("name", "?")
-                tid = str(block.get("id", ""))[:8]
-                args = block.get("input", {})
-                try:
-                    args_str = json.dumps(args, ensure_ascii=False)
-                except Exception:
-                    args_str = str(args)
-                out.append(
-                    f"{ts}  → tool_use: {name}({trunc(args_str, max_chars)}) id={tid}"
-                )
-        return out
-
-    if etype == "result":
-        result = event.get("result")
-        if isinstance(result, str):
-            try:
-                result = json.loads(result)
-            except json.JSONDecodeError:
-                pass
-        if isinstance(result, dict):
-            action = result.get("action", "?")
-            reason = result.get("reason", "")
-            out.append(f"{ts}  ✦ turn done: action={action} reason={trunc(reason, max_chars)}")
-        else:
-            out.append(f"{ts}  ✦ turn done: {trunc(str(result), max_chars)}")
-        out.append("")  # blank line between turns
-        return out
-
+    msg = event.get("message", {}) or {}
+    for block in msg.get("content") or []:
+        btype = block.get("type") if isinstance(block, dict) else None
+        if btype == "text":
+            out.extend(_render_user_text_block(block, ts, max_chars))
+        elif btype == "tool_result":
+            out.append(_render_tool_result_block(block, ts, max_chars))
     return out
+
+
+def _render_tool_use_block(block: dict, ts: str, max_chars: int) -> str:
+    name = block.get("name", "?")
+    tid = str(block.get("id", ""))[:8]
+    args = block.get("input", {})
+    try:
+        args_str = json.dumps(args, ensure_ascii=False)
+    except Exception:
+        args_str = str(args)
+    return f"{ts}  → tool_use: {name}({trunc(args_str, max_chars)}) id={tid}"
+
+
+def _render_assistant_event(event: dict, ts: str, max_chars: int) -> list[str]:
+    out: list[str] = []
+    msg = event.get("message", {}) or {}
+    for block in msg.get("content") or []:
+        btype = block.get("type") if isinstance(block, dict) else None
+        if btype == "text":
+            txt = block.get("text", "")
+            if txt:
+                out.append(f"{ts}  → assistant text: {trunc(txt, max_chars)}")
+        elif btype == "thinking":
+            txt = block.get("thinking", "")
+            out.append(f"{ts}  → thinking: {trunc(txt, max_chars)}")
+        elif btype == "tool_use":
+            out.append(_render_tool_use_block(block, ts, max_chars))
+    return out
+
+
+def _render_result_event(event: dict, ts: str, max_chars: int) -> list[str]:
+    result = event.get("result")
+    if isinstance(result, str):
+        try:
+            result = json.loads(result)
+        except json.JSONDecodeError:
+            pass
+    if isinstance(result, dict):
+        action = result.get("action", "?")
+        reason = result.get("reason", "")
+        line = f"{ts}  ✦ turn done: action={action} reason={trunc(reason, max_chars)}"
+    else:
+        line = f"{ts}  ✦ turn done: {trunc(str(result), max_chars)}"
+    return [line, ""]  # blank line between turns
+
+
+_RENDERERS = {
+    "user": _render_user_event,
+    "assistant": _render_assistant_event,
+    "result": _render_result_event,
+}
+
+
+def render_event(event: dict, max_chars: int) -> list[str]:
+    """Return zero or more pretty-printed lines for one JSONL event.
+
+    Internal queue/init bookkeeping is skipped — those events are noise
+    for a transcript. Unknown types also produce no output.
+    """
+    etype = event.get("type")
+    if etype in _BORING_EVENT_TYPES:
+        return []
+    handler = _RENDERERS.get(etype)
+    if handler is None:
+        return []
+    ts = event.get("timestamp", "")[:19].replace("T", " ")
+    return handler(event, ts, max_chars)
 
 
 def replay(path: Path, max_chars: int) -> None:

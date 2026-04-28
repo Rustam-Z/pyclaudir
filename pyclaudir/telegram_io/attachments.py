@@ -16,6 +16,7 @@ either Read the file (image/pdf/text) or apologise for the rejection.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 
 from telegram import Message
@@ -24,6 +25,25 @@ from ..config import Config
 from ..secrets_scrubber import scrub
 
 log = logging.getLogger("pyclaudir.telegram_io")
+
+#: Fallback MIME type when the descriptor doesn't carry one. Keyed by the
+#: kind returned from :func:`_classify_attachment`.
+_DEFAULT_MIME: dict[str, str] = {
+    "image": "image/jpeg",
+    "pdf": "application/pdf",
+    "text": "text/plain",
+}
+
+
+@dataclass(frozen=True)
+class _AttachmentDescriptor:
+    """One inbound attachment we might download. Photos and documents
+    both reduce to this shape; ``filename`` is synthesized for photos."""
+
+    file_id: str
+    filename: str
+    mime: str | None
+    size: int | None
 
 #: Image extensions Read can render natively.
 _IMAGE_EXTS = {"jpg", "jpeg", "png", "webp", "gif"}
@@ -78,6 +98,109 @@ def _classify_attachment(ext: str, mime: str | None) -> str | None:
     return None
 
 
+def _descriptors_for(msg: Message) -> list[_AttachmentDescriptor]:
+    """Reduce ``msg.photo`` (largest resolution) + ``msg.document`` to
+    a flat list of descriptors. Filenames are synthesised for photos."""
+    descriptors: list[_AttachmentDescriptor] = []
+    if msg.photo:
+        # Photos arrive as a list of resolutions; pick the largest.
+        largest = msg.photo[-1]
+        descriptors.append(_AttachmentDescriptor(
+            file_id=largest.file_id,
+            filename=f"photo_{msg.message_id}.jpg",
+            mime="image/jpeg",
+            size=largest.file_size,
+        ))
+    if msg.document is not None:
+        doc = msg.document
+        descriptors.append(_AttachmentDescriptor(
+            file_id=doc.file_id,
+            filename=doc.file_name or f"document_{msg.message_id}",
+            mime=doc.mime_type,
+            size=doc.file_size,
+        ))
+    return descriptors
+
+
+async def _download_to(bot, file_id: str, dest: Path) -> str | None:
+    """Download ``file_id`` to ``dest``. Returns the exception type name on
+    failure, ``None`` on success — caller turns that into a marker."""
+    try:
+        tg_file = await bot.get_file(file_id)
+        await tg_file.download_to_drive(dest)
+        return None
+    except Exception as exc:
+        return type(exc).__name__
+
+
+def _scrub_text_attachment(dest: Path) -> None:
+    """Mirror the inbound-text scrub in the dispatcher — secrets in files
+    must not survive on disk where Read could surface them. Best effort."""
+    try:
+        raw = dest.read_text(encoding="utf-8", errors="replace")
+        cleaned = scrub(raw)
+        if cleaned != raw:
+            dest.write_text(cleaned, encoding="utf-8")
+    except Exception as exc:  # pragma: no cover - best effort
+        log.warning("attachment scrub failed path=%s err=%s", dest, exc)
+
+
+def _pre_download_reject(
+    d: _AttachmentDescriptor, msg: Message, max_bytes: int,
+) -> tuple[str | None, str | None]:
+    """Classify the descriptor and apply the size cap. Returns
+    ``(kind, None)`` when accepted, or ``(None, marker)`` when rejected."""
+    ext = _ext_of(d.filename)
+    kind = _classify_attachment(ext, d.mime)
+    if kind is None:
+        log.info(
+            "attachment rejected chat=%s msg=%s filename=%s mime=%s reason=unsupported_type",
+            msg.chat_id, msg.message_id, d.filename, d.mime,
+        )
+        return None, f"[attachment rejected: filename={d.filename} reason=unsupported_type]"
+    if d.size is not None and d.size > max_bytes:
+        log.info(
+            "attachment rejected chat=%s msg=%s filename=%s size=%d reason=too_large",
+            msg.chat_id, msg.message_id, d.filename, d.size,
+        )
+        return None, f"[attachment rejected: filename={d.filename} reason=too_large size={_human_size(d.size)}]"
+    return kind, None
+
+
+async def _process_one_descriptor(
+    bot,
+    msg: Message,
+    d: _AttachmentDescriptor,
+    config: Config,
+) -> str:
+    """Classify, size-check, download, scrub-if-text, build marker — for
+    one descriptor. Returns the marker string for the caller to collect."""
+    kind, reject_marker = _pre_download_reject(d, msg, config.attachment_max_bytes)
+    if reject_marker is not None:
+        return reject_marker
+
+    safe_name = _safe_filename(d.filename, fallback=f"file_{msg.message_id}")
+    dest = config.attachments_dir / str(msg.chat_id) / f"{msg.message_id}_{safe_name}"
+    download_err = await _download_to(bot, d.file_id, dest)
+    if download_err is not None:
+        log.warning(
+            "attachment download failed chat=%s msg=%s filename=%s err=%s",
+            msg.chat_id, msg.message_id, d.filename, download_err,
+        )
+        return f"[attachment download failed: filename={d.filename} reason={download_err}]"
+
+    if kind == "text":
+        _scrub_text_attachment(dest)
+
+    actual_size = dest.stat().st_size if dest.exists() else (d.size or 0)
+    type_str = d.mime or _DEFAULT_MIME[kind]
+    log.info(
+        "attachment saved chat=%s msg=%s path=%s size=%d kind=%s",
+        msg.chat_id, msg.message_id, dest, actual_size, kind,
+    )
+    return f"[attachment: {dest} type={type_str} size={_human_size(actual_size)} filename={d.filename}]"
+
+
 async def _process_attachments(
     bot,
     msg: Message,
@@ -90,100 +213,12 @@ async def _process_attachments(
     user. Errors during download produce a third marker shape so we never
     silently lose attachments.
     """
-    markers: list[str] = []
-    descriptors: list[tuple[str, str, str | None, int | None]] = []
-    # (file_id, filename, mime, size). Filename is synthesized for photos.
-
-    if msg.photo:
-        # Photos arrive as a list of resolutions; pick the largest.
-        largest = msg.photo[-1]
-        descriptors.append(
-            (
-                largest.file_id,
-                f"photo_{msg.message_id}.jpg",
-                "image/jpeg",
-                largest.file_size,
-            )
-        )
-    if msg.document is not None:
-        doc = msg.document
-        descriptors.append(
-            (
-                doc.file_id,
-                doc.file_name or f"document_{msg.message_id}",
-                doc.mime_type,
-                doc.file_size,
-            )
-        )
-
+    descriptors = _descriptors_for(msg)
     if not descriptors:
-        return markers
-
+        return []
     chat_dir: Path = config.attachments_dir / str(msg.chat_id)
     chat_dir.mkdir(parents=True, exist_ok=True)
-
-    for file_id, filename, mime, size in descriptors:
-        ext = _ext_of(filename)
-        kind = _classify_attachment(ext, mime)
-        if kind is None:
-            markers.append(
-                f"[attachment rejected: filename={filename} reason=unsupported_type]"
-            )
-            log.info(
-                "attachment rejected chat=%s msg=%s filename=%s mime=%s reason=unsupported_type",
-                msg.chat_id, msg.message_id, filename, mime,
-            )
-            continue
-        if size is not None and size > config.attachment_max_bytes:
-            markers.append(
-                f"[attachment rejected: filename={filename} reason=too_large size={_human_size(size)}]"
-            )
-            log.info(
-                "attachment rejected chat=%s msg=%s filename=%s size=%d reason=too_large",
-                msg.chat_id, msg.message_id, filename, size,
-            )
-            continue
-
-        safe_name = _safe_filename(filename, fallback=f"file_{msg.message_id}")
-        dest = chat_dir / f"{msg.message_id}_{safe_name}"
-        try:
-            tg_file = await bot.get_file(file_id)
-            await tg_file.download_to_drive(dest)
-        except Exception as exc:
-            markers.append(
-                f"[attachment download failed: filename={filename} reason={type(exc).__name__}]"
-            )
-            log.warning(
-                "attachment download failed chat=%s msg=%s filename=%s err=%s",
-                msg.chat_id, msg.message_id, filename, exc,
-            )
-            continue
-
-        if kind == "text":
-            # Mirror the inbound-text scrub at telegram_io.py:62 — secrets in
-            # files must not survive on disk where Read could surface them.
-            try:
-                raw = dest.read_text(encoding="utf-8", errors="replace")
-                cleaned = scrub(raw)
-                if cleaned != raw:
-                    dest.write_text(cleaned, encoding="utf-8")
-            except Exception as exc:  # pragma: no cover - best effort
-                log.warning(
-                    "attachment scrub failed path=%s err=%s", dest, exc,
-                )
-
-        actual_size = dest.stat().st_size if dest.exists() else (size or 0)
-        type_str = mime or {
-            "image": "image/jpeg",
-            "pdf": "application/pdf",
-            "text": "text/plain",
-        }[kind]
-        markers.append(
-            f"[attachment: {dest} type={type_str} size={_human_size(actual_size)} filename={filename}]"
-        )
-        log.info(
-            "attachment saved chat=%s msg=%s path=%s size=%d kind=%s",
-            msg.chat_id, msg.message_id, dest, actual_size, kind,
-        )
-
-    return markers
+    return [
+        await _process_one_descriptor(bot, msg, d, config)
+        for d in descriptors
+    ]
