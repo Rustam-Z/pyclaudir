@@ -15,9 +15,13 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from pydantic import BaseModel
+
+from ..db.messages import insert_message
+from ..models import ChatMessage
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..attachments_store import AttachmentStore
@@ -115,3 +119,46 @@ class BaseTool(ABC):
     @abstractmethod
     async def run(self, args: BaseModel) -> ToolResult:  # pragma: no cover - abstract
         ...
+
+
+async def record_outbound(
+    ctx: ToolContext,
+    *,
+    chat_id: int,
+    message_id: int,
+    text: str,
+    reply_to_id: int | None,
+) -> None:
+    """Persist one outbound message row with the bot's identity.
+
+    Used by ``send_message``, ``send_photo``, and ``send_memory_document``
+    after the Telegram API confirms delivery. No-ops when the database
+    or bot is unavailable (tests). Bot-identity fetch failures fall back
+    to safe defaults so a transient ``get_me`` glitch never tanks
+    delivery — the row still lands with ``user_id=0``.
+    """
+    if ctx.database is None or ctx.bot is None:
+        return
+    try:
+        me = await ctx.bot.get_me()
+        bot_user_id = me.id
+        bot_username = me.username
+        bot_first_name = me.first_name
+    except Exception:
+        bot_user_id = 0
+        bot_username = None
+        bot_first_name = "bot"
+    await insert_message(
+        ctx.database,
+        ChatMessage(
+            chat_id=chat_id,
+            message_id=message_id,
+            user_id=bot_user_id,
+            username=bot_username,
+            first_name=bot_first_name,
+            direction="out",
+            timestamp=datetime.now(timezone.utc),
+            text=text,
+            reply_to_id=reply_to_id,
+        ),
+    )

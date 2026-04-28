@@ -3,16 +3,13 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
 from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from ..db.messages import insert_message
 from ..formatting import markdown_to_telegram_html
-from ..models import ChatMessage
 from ..transcript import log_outbound
-from .base import BaseTool, ToolResult
+from .base import BaseTool, ToolResult, record_outbound
 
 log = logging.getLogger(__name__)
 
@@ -128,33 +125,18 @@ class SendMessageTool(BaseTool):
             text=args.text,
         )
 
-        # Persist each delivered chunk as its own row. Fetch bot identity
-        # once outside the loop.
-        if self.ctx.database is not None:
-            try:
-                me = await self.ctx.bot.get_me()
-                bot_user_id = me.id
-                bot_username = me.username
-                bot_first_name = me.first_name
-            except Exception:
-                bot_user_id = 0
-                bot_username = None
-                bot_first_name = "bot"
-            for i, (mid, raw_chunk) in enumerate(zip(message_ids, raw_chunks)):
-                await insert_message(
-                    self.ctx.database,
-                    ChatMessage(
-                        chat_id=args.chat_id,
-                        message_id=mid,
-                        user_id=bot_user_id,
-                        username=bot_username,
-                        first_name=bot_first_name,
-                        direction="out",
-                        timestamp=datetime.now(timezone.utc),
-                        text=raw_chunk,
-                        reply_to_id=args.reply_to_message_id if i == 0 else None,
-                    ),
-                )
+        # Persist each delivered chunk as its own row. ``record_outbound``
+        # internally handles the bot-identity lookup; PTB caches the
+        # ``get_me`` result after the first call, so the N-1 follow-ups
+        # cost a dict read.
+        for i, (mid, raw_chunk) in enumerate(zip(message_ids, raw_chunks)):
+            await record_outbound(
+                self.ctx,
+                chat_id=args.chat_id,
+                message_id=mid,
+                text=raw_chunk,
+                reply_to_id=args.reply_to_message_id if i == 0 else None,
+            )
 
         content = (
             f"sent message_id={first_id}"

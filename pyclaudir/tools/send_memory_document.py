@@ -9,14 +9,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
 
 from pydantic import BaseModel, Field
 
-from ..db.messages import insert_message
-from ..models import ChatMessage
 from ..transcript import log_outbound
-from .base import BaseTool, ToolResult
+from .base import BaseTool, ToolResult, record_outbound
 
 log = logging.getLogger(__name__)
 
@@ -98,30 +95,13 @@ class SendMemoryDocumentTool(BaseTool):
             text=transcript_text,
         )
 
-        if self.ctx.database is not None:
-            try:
-                me = await self.ctx.bot.get_me()
-                bot_user_id = me.id
-                bot_username = me.username
-                bot_first_name = me.first_name
-            except Exception:
-                bot_user_id = 0
-                bot_username = None
-                bot_first_name = "bot"
-            await insert_message(
-                self.ctx.database,
-                ChatMessage(
-                    chat_id=args.chat_id,
-                    message_id=message_id,
-                    user_id=bot_user_id,
-                    username=bot_username,
-                    first_name=bot_first_name,
-                    direction="out",
-                    timestamp=datetime.now(timezone.utc),
-                    text=transcript_text,
-                    reply_to_id=args.reply_to_message_id,
-                ),
-            )
+        await record_outbound(
+            self.ctx,
+            chat_id=args.chat_id,
+            message_id=message_id,
+            text=transcript_text,
+            reply_to_id=args.reply_to_message_id,
+        )
 
         return ToolResult(
             content=f"sent document message_id={message_id} ({resolved.name})",
