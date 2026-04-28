@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
-import pytest
 
 from pyclaudir.access import AccessConfig, gate, load_access, save_access
 

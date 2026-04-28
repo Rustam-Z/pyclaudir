@@ -12,7 +12,7 @@ metadata:
 You are running the **trend-digest playbook**. Goal: a single
 focused digest human can read in under two minutes that
 flags (a) money-making opportunities in tech/finance/AI, and
-(b) Uzbekistan-specific moves worth acting on.
+(b) Uzbekistan-specific moves worth acting on. 
 
 ## Scope
 
@@ -117,6 +117,10 @@ If the synthesis would exceed Telegram's 4096-char ceiling,
 split at section boundaries: send "Top of the day + WORLD"
 first, then "UZBEKISTAN + Money-making angles" as a follow-up.
 Don't truncate mid-bullet.
+
+## Must follow
+
+- Add a reference to every claim. No uncited facts.
 
 ## Don'ts
 

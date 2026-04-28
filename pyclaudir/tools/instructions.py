@@ -11,7 +11,7 @@ import asyncio
 
 from pydantic import BaseModel, Field
 
-from .base import BaseTool, ToolContext, ToolResult
+from .base import BaseTool, ToolResult
 
 
 class ReadInstructionsArgs(BaseModel):

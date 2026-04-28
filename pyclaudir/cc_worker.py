@@ -26,7 +26,6 @@ import json
 import logging
 import os
 import time
-import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, IO
@@ -1008,7 +1007,3 @@ class CcWorker:
 
         # Anything else (tool_use, tool_result, ping) is ignored at this
         # layer — it's already produced its side effects via the MCP server.
-
-
-def make_session_id() -> str:
-    return str(uuid.uuid4())

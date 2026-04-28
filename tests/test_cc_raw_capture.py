@@ -14,10 +14,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 
 from pyclaudir.cc_schema import schema_json
-from pyclaudir.cc_worker import CcSpawnSpec, CcWorker, TurnResult
+from pyclaudir.cc_worker import CcSpawnSpec, CcWorker
 from pyclaudir.config import Config
 
 

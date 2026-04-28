@@ -55,36 +55,6 @@ def _float(name: str, default: float) -> float:
         raise RuntimeError(f"{name} must be a number, got {raw!r}") from exc
 
 
-def _bool(name: str, default: bool) -> bool:
-    raw = _env(name)
-    if raw is None:
-        return default
-    v = raw.strip().lower()
-    if v in ("1", "true", "yes", "on"):
-        return True
-    if v in ("0", "false", "no", "off"):
-        return False
-    raise RuntimeError(f"{name} must be a boolean (true/false), got {raw!r}")
-
-
-def _csv_ints(name: str) -> list[int]:
-    raw = _env(name)
-    if raw is None:
-        return []
-    out: list[int] = []
-    for chunk in raw.split(","):
-        chunk = chunk.strip()
-        if not chunk:
-            continue
-        try:
-            out.append(int(chunk))
-        except ValueError as exc:
-            raise RuntimeError(
-                f"{name} must be a comma-separated list of integers, got {raw!r}"
-            ) from exc
-    return out
-
-
 @dataclass(frozen=True)
 class Config:
     """All settings the bot uses at runtime."""

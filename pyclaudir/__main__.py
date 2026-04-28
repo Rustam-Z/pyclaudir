@@ -16,6 +16,7 @@ import asyncio
 import logging
 import signal
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -328,16 +329,11 @@ async def _async_main() -> None:
     )
 
     async def _typing(chat_id: int) -> None:
-        import time as _t
-
-        t0 = _t.monotonic()
+        t0 = time.monotonic()
         try:
             ok = await dispatcher.bot.send_chat_action(chat_id=chat_id, action="typing")
-            elapsed_ms = int((_t.monotonic() - t0) * 1000)
-            # Temporarily INFO so we can confirm PTB is actually accepting
-            # the call on turn 2 and beyond. Drop back to DEBUG once the
-            # typing visibility issue is conclusively diagnosed.
-            log.info(
+            elapsed_ms = int((time.monotonic() - t0) * 1000)
+            log.debug(
                 "send_chat_action chat=%s returned=%r elapsed=%dms",
                 chat_id, ok, elapsed_ms,
             )

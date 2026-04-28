@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-from pyclaudir.cc_worker import CcWorker
 from pyclaudir.config import Config
 from pyclaudir.db.database import Database
 from pyclaudir.rate_limiter import RateLimitExceeded, RateLimiter

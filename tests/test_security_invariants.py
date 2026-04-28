@@ -14,14 +14,13 @@ import pytest
 
 import pyclaudir
 from pyclaudir.cc_worker import (
-    BASE_ALLOWED_TOOLS,
     BASH_TOOLS,
     CODE_TOOLS,
-    DEFAULT_DISALLOWED_TOOLS,
     FORBIDDEN_FLAG,
     CcSpawnSpec,
     build_argv,
 )
+from pyclaudir.mcp_server import MCP_SERVER_NAME, discover_tool_classes
 
 # Sample tool names from the three integration MCPs we ship by default
 # in ``plugins.json``. The test suite no longer imports the full
@@ -37,8 +36,6 @@ SAMPLE_JIRA_TOOLS = (
 )
 SAMPLE_GITLAB_TOOLS = ("mcp__mcp-gitlab",)
 SAMPLE_GITHUB_TOOLS = ("mcp__github",)
-from pyclaudir.mcp_server import MCP_SERVER_NAME, build_fastmcp, discover_tool_classes
-from pyclaudir.tools.base import ToolContext
 
 PKG_ROOT = Path(pyclaudir.__file__).parent
 TOOLS_DIR = PKG_ROOT / "tools"

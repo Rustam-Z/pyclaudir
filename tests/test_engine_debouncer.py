@@ -488,7 +488,6 @@ async def test_inject_after_notify_restarts_typing() -> None:
         await eng.submit(_msg("first", mid=1))
         await asyncio.sleep(0.1)
         assert len(typing_calls) >= 1
-        calls_after_initial = len(typing_calls)
 
         # send_message lands → notify_chat_replied stops typing
         # (slow turn so MIN_TYPING_VISIBLE_SECONDS doesn't kick in)

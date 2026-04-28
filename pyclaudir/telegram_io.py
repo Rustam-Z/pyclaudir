@@ -15,7 +15,7 @@ import os
 import signal
 import time
 from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable, Protocol
+from typing import Protocol
 
 from pathlib import Path
 
@@ -29,13 +29,12 @@ from telegram.ext import (
     filters,
 )
 
-from .access import AccessConfig, gate, load_access, save_access
+from .access import gate, load_access, save_access
 from .config import Config
 from .db.database import Database
 from .db.messages import (
     apply_user_reaction,
     insert_message,
-    mark_deleted,
     mark_edited,
     upsert_user,
 )

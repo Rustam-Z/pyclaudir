@@ -15,7 +15,6 @@ import pytest
 from pyclaudir.__main__ import _seed_default_reminders
 from pyclaudir.config import Config
 from pyclaudir.db.database import Database
-from pyclaudir.db.reminders import cancel_reminder
 
 
 async def _open(tmp_path: Path) -> Database:

@@ -8,7 +8,6 @@ Results are capped at 100 rows; text columns are truncated to 2000 chars.
 
 from __future__ import annotations
 
-from typing import Any
 
 import sqlglot
 from sqlglot import exp

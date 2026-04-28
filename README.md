@@ -1,6 +1,6 @@
 # pyclaudir
 
-**Run personal AI assistant in Telegram. With your rules.**
+**Run personal self-evolving AI assistant in Telegram. With your rules.**
 
 Most AI tools wait. Pyclaudir doesn't. It lives in your Telegram, remembers every conversation, and pings you the moment something matters — a trend turning, a Jira ticket due, a build that broke at 3am. 
 
@@ -198,6 +198,27 @@ The system prompt is two files: [prompts/system.md](prompts/system.md)
 (your overlay — gitignored, copy from
 [prompts/project.md.example](prompts/project.md.example)).
 
+## Layout
+
+```
+pyclaudir/
+├── prompts/        system.md (shipped) + project.md (yours)
+├── skills/         operator-curated playbooks
+├── data/           gitignored — SQLite, memories, attachments, renders, CC logs
+├── scripts/        sync + maintenance helpers
+├── pyclaudir/
+│   ├── __main__.py        entrypoint
+│   ├── config.py          single source of env vars
+│   ├── telegram_io.py     *listener
+│   ├── engine.py          *main logic: debounce + buffer + inject
+│   ├── cc_worker.py       *Claude subprocess + crash recovery
+│   ├── mcp_server.py      FastMCP host + tool auto-discovery
+│   ├── access.py          hot-reload access gate
+│   ├── tools/             one file per tool
+│   └── scripts/trace.py   replay a session
+└── tests/
+```
+
 ## Configuration
 
 All settings come from environment variables (or `.env`). Full list in
@@ -307,27 +328,6 @@ Enforced in code:
 - **Owner-only commands** check `effective_user.id == PYCLAUDIR_OWNER_ID`.
 - **Wedged subprocesses** are killed and respawned. Crash-loops give
   up after 10 crashes in 10 min and notify the owner.
-
-## Layout
-
-```
-pyclaudir/
-├── prompts/        system.md (shipped) + project.md (yours)
-├── skills/         operator-curated playbooks
-├── data/           gitignored — SQLite, memories, attachments, renders, CC logs
-├── scripts/        sync + maintenance helpers
-├── pyclaudir/
-│   ├── __main__.py        entrypoint
-│   ├── config.py          single source of env vars
-│   ├── telegram_io.py     listener
-│   ├── engine.py          debounce + buffer + inject
-│   ├── cc_worker.py       Claude subprocess + crash recovery
-│   ├── mcp_server.py      FastMCP host + tool auto-discovery
-│   ├── access.py          hot-reload access gate
-│   ├── tools/             one file per tool
-│   └── scripts/trace.py   replay a session
-└── tests/
-```
 
 ## Contributing
 

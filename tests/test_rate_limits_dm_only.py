@@ -16,7 +16,6 @@ import pytest
 from pyclaudir.access import AccessConfig, save_access
 from pyclaudir.config import Config
 from pyclaudir.db.database import Database
-from pyclaudir.models import ChatMessage
 from pyclaudir.rate_limiter import RateLimiter
 from pyclaudir.telegram_io import TelegramDispatcher
 

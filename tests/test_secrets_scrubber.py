@@ -29,9 +29,6 @@ def test_github_token_redacted() -> None:
     text = "push with ghp_aAbBcCdDeEfFgGhHiIjJkKlLmMnNoOpPqQrRsSt123"
     out = scrub(text)
     assert "ghp_" not in out
-    text2 = "fine-grained: github_pat_aAbBcCdDeEfF111GgHhIiJjKkLlMmNnOoPpQqRrSs"
-    # github_pat_ pattern not in our list — that's OK, conservative.
-    # The classic ghp_ token above IS redacted.
 
 
 def test_aws_access_key_redacted() -> None:
