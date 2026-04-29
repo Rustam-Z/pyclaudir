@@ -18,6 +18,8 @@ Out of the box: messaging, memory, reminders, web, vision. Want shell access? Co
 
 ## Quickstart (3 minutes)
 
+Pre-requisite: Login to Claude Code CLI.
+
 ```bash
 git clone https://github.com/Rustam-Z/pyclaudir && cd pyclaudir
 
