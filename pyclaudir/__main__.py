@@ -74,11 +74,6 @@ def _setup_logging() -> None:
 
 _SELF_REFLECTION_KEY = "self-reflection-default"
 
-#: Reminder defer cap — a due reminder that has been overdue longer than
-#: this fires even when the engine is busy, so a continuously-active
-#: deployment never starves the self-reflection loop.
-_REMINDER_MAX_DEFER = 60 * 60  # 1 hour
-
 
 async def _seed_default_reminders(db, config) -> None:
     """Ensure the default self-reflection reminder is active.
@@ -238,18 +233,6 @@ def _load_session_id(config: Config) -> str | None:
     return session_id
 
 
-def _compute_overdue_seconds(trigger_at: str, now_dt: datetime) -> float:
-    """Wall-clock distance from the reminder's trigger to now. Malformed
-    rows return 0.0 so they fire immediately rather than wedging the loop."""
-    try:
-        trigger_dt = datetime.strptime(
-            trigger_at, "%Y-%m-%d %H:%M:%S",
-        ).replace(tzinfo=timezone.utc)
-    except (ValueError, TypeError):
-        return 0.0
-    return (now_dt - trigger_dt).total_seconds()
-
-
 async def _advance_or_close_reminder(db: Database, row: dict) -> None:
     """For a fired reminder: advance the cron schedule if recurring,
     otherwise mark it sent so it doesn't fire again."""
@@ -274,10 +257,23 @@ async def _advance_or_close_reminder(db: Database, row: dict) -> None:
         await mark_reminder_sent(db, row["id"])
 
 
+_BACK_SOON_NOTICE = "⏳ Pausing to handle a scheduled task — back in a moment."
+
+
 async def _fire_one_reminder(db: Database, engine: Engine, row: dict) -> None:
     """Inject one due reminder into the engine as a synthetic message,
-    then advance/close the schedule."""
+    then advance/close the schedule.
+
+    If the engine is mid-turn when the reminder fires, the synthetic
+    message goes into the pending buffer and runs after the current
+    turn ends — silently from the chat's perspective. To make that
+    interruption visible we post a one-line "back soon" notice to the
+    chat first.
+    """
     from .models import ChatMessage
+
+    if engine.is_processing:
+        await engine.send_chat_notice(row["chat_id"], _BACK_SOON_NOTICE)
 
     reminder_xml = (
         f'<reminder id="{row["id"]}" chat_id="{row["chat_id"]}" '
@@ -298,14 +294,14 @@ async def _reminder_loop(db: Database, engine: Engine) -> None:
     """Background reminder scheduler — polls every 60s for due reminders
     and injects them into the engine as synthetic inbound messages.
 
-    **Defer-when-busy policy**: a due reminder is held back if the engine
-    is mid-turn or a real user has been active within
-    ``REMINDER_QUIET_SECONDS`` (5 min). This stops long reminder turns
-    (most importantly the daily self-reflection skill) from preempting
-    active conversations. The reminder stays in the ``pending`` set and
-    is retried on the next 60s poll. To prevent indefinite starvation
-    in a continuously-busy deployment, a reminder overdue more than
-    ``_REMINDER_MAX_DEFER`` fires anyway.
+    Reminders fire unconditionally when due. If the engine is mid-turn
+    the synthetic message gets buffered and runs after the current
+    turn ends; ``_fire_one_reminder`` posts a "back soon" notice in
+    that case so the chat knows an interrupt is coming. Each reminder
+    is fired in its own try/except so a single failure (DB error,
+    submit blow-up) doesn't block subsequent reminders in the same
+    poll cycle, and the failing row's id is logged so it's easy to
+    track down.
     """
     while True:
         await asyncio.sleep(60)
@@ -314,21 +310,22 @@ async def _reminder_loop(db: Database, engine: Engine) -> None:
             due = await fetch_due_reminders(
                 db, now_dt.strftime("%Y-%m-%d %H:%M:%S"),
             )
-            fired = 0
-            for row in due:
-                overdue = _compute_overdue_seconds(row["trigger_at"], now_dt)
-                if overdue < _REMINDER_MAX_DEFER and engine.is_busy():
-                    log.info(
-                        "deferring reminder #%d (overdue %.0fs, engine busy)",
-                        row["id"], overdue,
-                    )
-                    continue
-                await _fire_one_reminder(db, engine, row)
-                fired += 1
-            if fired:
-                log.info("fired %d reminder(s)", fired)
         except Exception:
-            log.exception("reminder loop error")
+            log.exception("reminder loop: fetch_due_reminders failed")
+            continue
+        if not due:
+            log.debug("reminder loop: no due reminders")
+            continue
+        log.info("reminder loop: %d due", len(due))
+        for row in due:
+            try:
+                log.info(
+                    "firing reminder #%d (chat=%s)", row["id"], row["chat_id"],
+                )
+                await _fire_one_reminder(db, engine, row)
+                log.info("fired reminder #%d", row["id"])
+            except Exception:
+                log.exception("failed to fire reminder #%d", row["id"])
 
 
 def _install_signal_handlers(

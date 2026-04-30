@@ -198,60 +198,6 @@ async def test_typing_fires_for_every_chat_in_a_multi_chat_batch() -> None:
 
 
 @pytest.mark.asyncio
-async def test_is_busy_false_for_fresh_engine() -> None:
-    """No turn started, no user activity → not busy."""
-    worker = FakeWorker()
-    eng = Engine(worker, _CFG, debounce_ms=20)
-    assert eng.is_busy() is False
-
-
-@pytest.mark.asyncio
-async def test_is_busy_true_during_turn() -> None:
-    """Engine processing a turn → busy."""
-    worker = FakeWorker()
-    eng = Engine(worker, _CFG, debounce_ms=10)
-    await eng.start()
-    try:
-        await eng.submit(_msg("hi", mid=1))
-        await asyncio.sleep(0.05)  # let debounce + kick fire
-        assert eng.is_busy() is True
-    finally:
-        await eng.stop()
-
-
-@pytest.mark.asyncio
-async def test_is_busy_true_after_recent_user_inbound() -> None:
-    """User just messaged, turn finished → still busy until quiet window."""
-    import pyclaudir.engine as engine_mod
-
-    worker = FakeWorker()
-    eng = Engine(worker, _CFG, debounce_ms=10)
-    # submit a real user message (mid=1) without starting the engine, so
-    # is_processing stays clear; we're only checking the recency clause.
-    await eng.submit(_msg("hi", mid=1))
-    # Drain pending so we can isolate the recency check from "_pending non-empty".
-    eng._pending.clear()
-    assert eng.is_busy() is True
-
-    # Pretend the recency window has elapsed.
-    import time
-    eng._last_user_inbound_at = time.monotonic() - engine_mod.REMINDER_QUIET_SECONDS - 1
-    assert eng.is_busy() is False
-
-
-@pytest.mark.asyncio
-async def test_is_busy_ignores_synthetic_reminder_inbound() -> None:
-    """A reminder inject (mid=0) must NOT update the user-activity clock —
-    otherwise reminders would defer themselves forever."""
-    worker = FakeWorker()
-    eng = Engine(worker, _CFG, debounce_ms=10)
-    await eng.submit(_msg("<reminder>...</reminder>", mid=0))
-    eng._pending.clear()  # isolate from the pending check
-    assert eng._last_user_inbound_at == 0.0
-    assert eng.is_busy() is False
-
-
-@pytest.mark.asyncio
 async def test_no_typing_action_is_safe() -> None:
     """Engine without typing_action should still work — old default."""
     worker = FakeWorker()

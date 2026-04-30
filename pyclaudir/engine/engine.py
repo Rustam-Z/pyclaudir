@@ -45,15 +45,6 @@ TYPING_REFRESH_SECONDS = 5
 #: dismissal until this many seconds have elapsed since typing started.
 MIN_TYPING_VISIBLE_SECONDS = 1
 
-#: How long after the last real user message the engine still considers
-#: itself "busy" for the purpose of firing reminders. Used by
-#: :meth:`Engine.is_busy`. The reminder loop checks this to defer
-#: firing (most importantly the daily self-reflection skill) so it
-#: doesn't preempt active conversations — the user types, the
-#: reminder loop sees recent activity, and pushes the fire by one
-#: poll cycle (60s) until things go quiet.
-REMINDER_QUIET_SECONDS = 5 * 60
-
 #: Async callable shape: ``await typing_action(chat_id)`` should fire one
 #: ``send_chat_action`` to that chat. Engine doesn't import telegram.
 TypingAction = Callable[[int], Awaitable[None]]
@@ -157,11 +148,6 @@ class Engine:
         self._is_processing = asyncio.Event()
         self._debounce_task: asyncio.Task[None] | None = None
         self._control_task: asyncio.Task[None] | None = None
-        #: ``time.monotonic()`` of the last real user inbound (mid > 0).
-        #: 0.0 means "no user has ever messaged this process". Used by
-        #: :meth:`is_busy` to defer reminder firing during active
-        #: conversations.
-        self._last_user_inbound_at: float = 0.0
         self._stop = asyncio.Event()
 
     # ------------------------------------------------------------------
@@ -199,9 +185,6 @@ class Engine:
           inject path is used for *immediate* mid-turn delivery only when
           we're sure CC is mid-stream — see :meth:`_maybe_inject`.
         """
-        if msg.message_id > 0:
-            import time as _t
-            self._last_user_inbound_at = _t.monotonic()
         async with self._lock:
             self._pending.append(msg)
 
@@ -213,23 +196,24 @@ class Engine:
             self._debounce_task.cancel()
         self._debounce_task = asyncio.create_task(self._debounce_then_kick())
 
-    def is_busy(self) -> bool:
-        """True if the engine is mid-turn or a real user has been active
-        within the last :data:`REMINDER_QUIET_SECONDS`.
+    @property
+    def is_processing(self) -> bool:
+        """True while a turn is in flight. The reminder loop uses this
+        to decide whether to post a "back soon" notice before injecting
+        a synthetic reminder into a chat that's mid-conversation."""
+        return self._is_processing.is_set()
 
-        The reminder loop checks this before firing each due reminder so
-        long reminder turns (e.g. self-reflection) don't preempt
-        ongoing user conversations. A reminder that's "too overdue" can
-        bypass this — see the loop in ``__main__._reminder_loop``.
-        """
-        import time as _t
-        if self._is_processing.is_set():
-            return True
-        if self._pending:
-            return True
-        if self._last_user_inbound_at == 0.0:
-            return False
-        return _t.monotonic() - self._last_user_inbound_at < REMINDER_QUIET_SECONDS
+    async def send_chat_notice(self, chat_id: int, text: str) -> None:
+        """Send a one-off notice directly to a chat via the bot, bypassing
+        the MCP layer. Used by the reminder loop to announce an incoming
+        scheduled task while a user turn is still in progress. No-op if
+        no notify callback is wired. Best-effort — failures are logged."""
+        if self._error_notify is None:
+            return
+        try:
+            await self._error_notify(chat_id, text, None)
+        except Exception as exc:
+            log.warning("send_chat_notice to %s failed: %s", chat_id, exc)
 
     async def _debounce_then_kick(self) -> None:
         try:

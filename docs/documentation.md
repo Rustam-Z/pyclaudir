@@ -125,7 +125,7 @@ Telegram listener  →  Engine (buffer + send/inject)  →  Claude worker  →  
    commands (`/kill`, `/health`, `/audit`, the access commands) skip the
    engine and run directly.
 2. **Engine** (`pyclaudir/engine.py`). Holds the pending message buffer,
-   the debounce timer, the "currently busy" flag, and the inject path.
+   the debounce timer, the mid-turn processing flag, and the inject path.
    Bundles messages that arrive close together. If a new message comes in
    while Claude is mid-reply, the engine sends it via `worker.inject()` so
    the running turn picks it up. If a turn ends with text but no
@@ -425,6 +425,12 @@ polls every 60 seconds for due entries and injects them into the engine
 as synthetic inbound messages. The agent then sends the reminder text to
 the appropriate chat. Recurring reminders (cron) automatically advance
 to the next occurrence.
+
+Reminders fire on time even if the bot is mid-conversation. When the
+fire happens during an active turn, the bot first posts a short notice
+to the chat ("Pausing to handle a scheduled task — back in a moment.")
+so the interrupt is visible, then runs the reminder turn after the
+current one ends.
 
 All times are stored in UTC. The system prompt instructs the agent to
 ask users for their timezone and convert to UTC before setting

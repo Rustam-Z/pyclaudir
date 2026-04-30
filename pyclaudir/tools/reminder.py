@@ -54,7 +54,11 @@ class SetReminderTool(BaseTool):
         if self.ctx.database is None:
             return ToolResult(content="database unavailable", is_error=True)
 
-        # Validate trigger_at is parseable and in the future.
+        # Validate trigger_at is parseable and in the future. Normalize
+        # to UTC; the rest of the system stores trigger_at as the naive
+        # ``"%Y-%m-%d %H:%M:%S"`` UTC string used by the auto-seed and
+        # cron-advance paths, so the SQL string-comparison in
+        # ``fetch_due_reminders`` works correctly across all sources.
         try:
             trigger_dt = datetime.fromisoformat(args.trigger_at.replace("Z", "+00:00"))
         except ValueError:
@@ -63,12 +67,21 @@ class SetReminderTool(BaseTool):
                 is_error=True,
             )
 
+        if trigger_dt.tzinfo is None:
+            return ToolResult(
+                content="trigger_at must include a timezone offset (use UTC, e.g. '...Z')",
+                is_error=True,
+            )
+        trigger_dt = trigger_dt.astimezone(timezone.utc)
+
         now = datetime.now(timezone.utc)
         if trigger_dt <= now:
             return ToolResult(
                 content="trigger_at must be in the future",
                 is_error=True,
             )
+
+        trigger_at_canonical = trigger_dt.strftime("%Y-%m-%d %H:%M:%S")
 
         # Validate cron expression if provided.
         if args.cron_expr is not None:
@@ -91,7 +104,7 @@ class SetReminderTool(BaseTool):
             chat_id=args.chat_id,
             user_id=args.user_id,
             text=args.text,
-            trigger_at=args.trigger_at,
+            trigger_at=trigger_at_canonical,
             cron_expr=args.cron_expr,
         )
 

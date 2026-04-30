@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from .engine import (
     MIN_TYPING_VISIBLE_SECONDS,
-    REMINDER_QUIET_SECONDS,
     TYPING_REFRESH_SECONDS,
     Engine,
     ErrorNotify,
@@ -26,7 +25,6 @@ __all__ = [
     "Engine",
     "ErrorNotify",
     "MIN_TYPING_VISIBLE_SECONDS",
-    "REMINDER_QUIET_SECONDS",
     "TYPING_REFRESH_SECONDS",
     "TypingAction",
     "format_messages_as_xml",

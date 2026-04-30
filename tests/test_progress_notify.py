@@ -91,7 +91,7 @@ async def test_progress_notification_fires_on_long_turn() -> None:
         assert len(notifications) == 1
         chat_id, text, reply_to = notifications[0]
         assert chat_id == -100
-        assert "Working on this" in text
+        assert "One moment" in text
         # The notice must be threaded to the user's own triggering
         # message — this is what guarantees it routes to the right
         # chat regardless of what other chats were active.
