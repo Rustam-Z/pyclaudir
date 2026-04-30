@@ -6,10 +6,9 @@
 #   ./scripts/sync-memories.sh pull user@server                  # default ssh
 #   ./scripts/sync-memories.sh pull user@server --key ~/.ssh/k   # custom key
 #   ./scripts/sync-memories.sh pull user@server --password       # ssh prompts
-#   ./scripts/sync-memories.sh push user@server                  # same flags
 #
 # The remote path defaults to ~/pyclaudir. Override with REMOTE_DIR:
-#   REMOTE_DIR=/opt/pyclaudir ./scripts/sync-memories.sh pull user@server
+#   REMOTE_DIR='~/pyclaudir' ./scripts/sync-memories.sh pull user@server
 
 set -euo pipefail
 
