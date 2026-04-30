@@ -27,6 +27,7 @@ corruption.
 
 from __future__ import annotations
 
+import errno
 import json
 import logging
 from dataclasses import dataclass, field
@@ -85,14 +86,24 @@ def load_access(path: Path) -> AccessConfig:
 
 
 def save_access(path: Path, config: AccessConfig) -> None:
-    """Atomically write ``access.json`` via tmp+rename."""
+    """Atomically write ``access.json`` via tmp+rename.
+
+    Falls back to in-place write when ``path`` is a single-file Docker
+    bind mount, where ``rename(2)`` onto the mount target returns
+    ``EBUSY``. ``load_access`` recovers from a torn write by renaming
+    the corrupt file aside and returning defaults.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(config.to_dict(), indent=2, ensure_ascii=False) + "\n"
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(
-        json.dumps(config.to_dict(), indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
-    tmp.rename(path)
+    tmp.write_text(payload, encoding="utf-8")
+    try:
+        tmp.rename(path)
+    except OSError as exc:
+        if exc.errno != errno.EBUSY:
+            raise
+        path.write_text(payload, encoding="utf-8")
+        tmp.unlink(missing_ok=True)
 
 
 def gate(

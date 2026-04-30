@@ -34,6 +34,9 @@ cp prompts/project.md.example prompts/project.md && nano prompts/project.md
 cp plugins.json.example plugins.json && nano plugins.json
 #   single source of truth for the bot's capability surface — see below
 
+cp access.json.example access.json
+#   give access to extra DMs and groups, you can use /access and /deny commands after bot started to update the list
+
 docker compose up -d --build
 docker compose logs -f                                                    # run harness, wait for "pyclaudir is live"
 docker compose exec pyclaudir python -m pyclaudir.scripts.trace --follow  # tail Claude Code I/O
@@ -109,7 +112,7 @@ tools and schedules itself. No YAML, no cron syntax to memorise.
 | `plugins.json` | no | capability surface — what tools, skills, and MCPs are on |
 | `access.json` | no | who can DM the bot or use it in groups (hot-reloaded, no restart) |
 
-`.env.example`, `prompts/project.md.example`, `plugins.json.example`, and `access.json.example` are tracked so you have a starting point; the real files are gitignored so different deployments carry different config without fighting over the file. `access.json` is auto-created on first run with the safest default (`owner_only`, no allowlist) if you don't seed it from the example.
+`.env.example`, `prompts/project.md.example`, `plugins.json.example`, and `access.json.example` are tracked so you have a starting point; the real files are gitignored so different deployments carry different config without fighting over the file. Without Docker, `access.json` is auto-created on first run with the safest default (`owner_only`, no allowlist) if you don't seed it from the example. Under Docker it must exist on the host before `docker compose up` (it's bind-mounted so `/allow` and `/deny` edits persist across restarts) — copy the example as shown in the Quickstart.
 
 ### What `plugins.json` controls
 
