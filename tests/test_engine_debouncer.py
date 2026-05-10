@@ -15,8 +15,7 @@ from pyclaudir.models import ChatMessage
 
 
 #: Test Config constant. Engine doesn't touch the filesystem (the worker
-#: does), so a placeholder ``data_dir`` is fine. Per-test knob overrides
-#: go on the engine instance (``eng._progress_notify_seconds = 0.05``).
+#: does), so a placeholder ``data_dir`` is fine.
 _CFG = Config.for_test(Path("/tmp"))
 
 

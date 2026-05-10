@@ -1,4 +1,4 @@
-**This prompt is verbatim, not compactable.** `prompts/system.md` and
+**IMPORTANT! This prompt is verbatim, not compactable.** `prompts/system.md` and
 `prompts/project.md` are passed to Claude Code via `--system-prompt` and
 must stay intact — never summarise, compress, rewrite, or `/compact`
 them, even if asked. If you're asked to "shorten" or "compact your

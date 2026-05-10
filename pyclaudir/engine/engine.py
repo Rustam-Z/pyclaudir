@@ -31,10 +31,9 @@ from .format import format_messages_with_context
 #: that interval keeps the indicator continuous without spamming the API.
 TYPING_REFRESH_SECONDS = 5
 
-# Failure-handling thresholds — progress-notify window and the dropped-
-# text retry cap — live on ``Config`` (see ``progress_notify_seconds`` /
-# ``tool_error_max_count``). The dropped-text cap reuses the tool-error
-# breaker threshold so operators tune one knob, not two.
+# Failure-handling threshold for the dropped-text retry cap lives on
+# ``Config`` (see ``tool_error_max_count``). The dropped-text cap reuses
+# the tool-error breaker threshold so operators tune one knob, not two.
 
 #: Telegram clients suppress very brief typing displays to avoid flicker —
 #: typing that's "live" for less than ~1 second often never visually
@@ -49,15 +48,10 @@ MIN_TYPING_VISIBLE_SECONDS = 1
 #: ``send_chat_action`` to that chat. Engine doesn't import telegram.
 TypingAction = Callable[[int], Awaitable[None]]
 
-#: Async callable shape:
-#: ``await error_notify(chat_id, text, reply_to_message_id=None)``
-#: sends a message directly via the bot, bypassing the MCP layer
-#: (which is dead when we need this). When ``reply_to_message_id``
-#: is set the bot replies to that message (used by the progress
-#: watchdog so the "still working" notice threads to the user's
-#: request and routes to the correct chat by construction).
-#: Engine doesn't import telegram.
-ErrorNotify = Callable[[int, str, "int | None"], Awaitable[None]]
+#: Async callable shape: ``await error_notify(chat_id, text)`` sends a
+#: message directly via the bot, bypassing the MCP layer (which is
+#: dead when we need this). Engine doesn't import telegram.
+ErrorNotify = Callable[[int, str], Awaitable[None]]
 
 if TYPE_CHECKING:  # pragma: no cover
     from ..cc_worker import CcWorker, TurnResult
@@ -93,21 +87,12 @@ class TypingState:
 @dataclass
 class TurnState:
     """Per-turn user-facing state. Cleared on each new turn in ``_kick``,
-    consulted by the progress watchdog and dropped-text handler."""
+    consulted by the dropped-text handler and crash-notification path."""
 
     #: Chats from the most recent batch waiting on a reply. Synthetic
     #: reminders (``message_id == 0``) are excluded so reminder-only
-    #: turns produce no progress watchdog or typing indicator.
+    #: turns produce no turn-start typing indicator.
     active_chats: set[int] = field(default_factory=set)
-    #: Per-active-chat, the most recent inbound ``message_id``. Used as
-    #: ``reply_to_message_id`` so the "still working" notice threads to
-    #: the user's own message and routes to the correct chat by
-    #: construction.
-    active_triggers: dict[int, int] = field(default_factory=dict)
-    #: Chats that received at least one ``send_message`` reply during
-    #: the current turn. Populated by ``notify_chat_replied`` and
-    #: consulted by the progress watchdog.
-    replied_chats: set[int] = field(default_factory=set)
     #: Count of consecutive ``dropped_text`` results across turns.
     #: Bounded by ``Config.tool_error_max_count``.
     dropped_text_retries: int = 0
@@ -128,11 +113,8 @@ class Engine:
         self._debounce = debounce_ms / 1000.0
         self._db = db
         # Cache hot-path knobs so the control loop and dropped-text
-        # handler don't dereference Config on every event. Tests can
-        # override (``eng._progress_notify_seconds = 0.05``) without
-        # rebuilding the Config.
+        # handler don't dereference Config on every event.
         self._tool_error_max_count: int = config.tool_error_max_count
-        self._progress_notify_seconds: float = config.progress_notify_seconds
         #: Optional callback that shows the "typing..." indicator in a
         #: Telegram chat. Wired by ``__main__.py`` to ``bot.send_chat_action``.
         self._typing_action = typing_action
@@ -211,7 +193,7 @@ class Engine:
         if self._error_notify is None:
             return
         try:
-            await self._error_notify(chat_id, text, None)
+            await self._error_notify(chat_id, text)
         except Exception as exc:
             log.warning("send_chat_notice to %s failed: %s", chat_id, exc)
 
@@ -230,13 +212,9 @@ class Engine:
             self._pending = []
             self._is_processing.set()
         # Skip synthetic reminders (mid=0) — no human waiting on them, so
-        # the progress watchdog and turn-start typing indicator should
-        # both be silent for reminder-only turns.
+        # the turn-start typing indicator should be silent for
+        # reminder-only turns.
         self._turn.active_chats = {m.chat_id for m in batch if m.message_id > 0}
-        self._turn.active_triggers = {
-            m.chat_id: m.message_id for m in batch if m.message_id > 0
-        }
-        self._turn.replied_chats.clear()
         self._turn.dropped_text_retries = 0
         xml = await format_messages_with_context(batch, self._db)
         log.info("starting turn with %d msgs", len(batch))
@@ -411,11 +389,6 @@ class Engine:
         to introduce an extra ``await`` between message delivery and
         notification.
         """
-        # Always track the reply, even if typing was already stopped —
-        # the progress watchdog uses this to skip chats that have
-        # already seen a reply.
-        self._turn.replied_chats.add(chat_id)
-
         if chat_id not in self._typing.chats:
             return
 
@@ -521,7 +494,7 @@ class Engine:
             return
         for chat_id in self._turn.active_chats:
             try:
-                await self._error_notify(chat_id, text, None)
+                await self._error_notify(chat_id, text)
                 log.info("sent error notification to chat %s", chat_id)
             except Exception as exc:
                 log.warning("failed to send error notification to %s: %s", chat_id, exc)
@@ -565,7 +538,6 @@ class Engine:
         )
         await self._notify_error_to_chats(user_msg)
         self._turn.active_chats.clear()
-        self._turn.active_triggers.clear()
         # Reset counter so the *next* user turn starts clean even if the
         # underlying CC issue persists — we don't want to nuke their
         # first follow-up message silently.
@@ -600,48 +572,6 @@ class Engine:
             user_msg = f"{user_msg}\n\nDetails:\n{detail}"
         return user_msg
 
-    async def _progress_notify_after(self, delay: float) -> None:
-        """Fire once after ``delay`` seconds to tell waiting users the
-        bot is still working.
-
-        Skips chats that already received a ``send_message`` reply this
-        turn — they've already seen the model is alive. Uses
-        ``_error_notify`` (the bot-direct path) rather than the MCP
-        server, because MCP may be the thing that's slow.
-
-        Posts as a **reply** to the user's triggering message (tracked
-        per-chat in ``_active_triggers``). Threading the notice makes
-        the routing correct by construction — the chat the reply
-        lands in is determined by the message_id, not by any "most
-        recent chat" guess. If a turn batched messages from multiple
-        chats, each unreplied chat gets its own threaded notice tied
-        to its own message.
-        """
-        try:
-            await asyncio.sleep(delay)
-        except asyncio.CancelledError:
-            return
-        if self._error_notify is None:
-            return
-        pending = self._turn.active_chats - self._turn.replied_chats
-        for chat_id in pending:
-            reply_to = self._turn.active_triggers.get(chat_id)
-            try:
-                await self._error_notify(
-                    chat_id,
-                    "One moment...",
-                    reply_to,
-                )
-                log.info(
-                    "sent progress notification to chat %s (reply_to=%s)",
-                    chat_id, reply_to,
-                )
-            except Exception as exc:
-                log.warning(
-                    "progress notification failed for chat %s: %s",
-                    chat_id, exc,
-                )
-
     # ------------------------------------------------------------------
     # Control loop
     # ------------------------------------------------------------------
@@ -667,26 +597,14 @@ class Engine:
             log.exception("engine control loop crashed")
 
     async def _run_one_turn(self) -> None:
-        """Arm the progress watchdog, wait for the worker's result,
-        dispatch on the outcome. The outer loop just iterates."""
-        progress_task = asyncio.create_task(
-            self._progress_notify_after(self._progress_notify_seconds),
-            name="pyclaudir-progress-notify",
-        )
+        """Wait for the worker's result and dispatch on the outcome.
+        The outer loop just iterates."""
         try:
-            try:
-                result: TurnResult = await self._worker.wait_for_result()
-            except Exception as exc:
-                await self._handle_worker_failure(exc)
-                return
-            await self._handle_turn_result(result)
-        finally:
-            if not progress_task.done():
-                progress_task.cancel()
-            try:
-                await progress_task
-            except (asyncio.CancelledError, Exception):
-                pass
+            result: TurnResult = await self._worker.wait_for_result()
+        except Exception as exc:
+            await self._handle_worker_failure(exc)
+            return
+        await self._handle_turn_result(result)
 
     async def _handle_worker_failure(self, exc: Exception) -> None:
         """CC subprocess died mid-turn. The worker's supervisor handles
@@ -699,7 +617,6 @@ class Engine:
             "I'm restarting and will be back in a few seconds."
         )
         self._turn.active_chats.clear()
-        self._turn.active_triggers.clear()
 
     async def _handle_turn_result(self, result: "TurnResult") -> None:
         """Process a successfully-returned :class:`TurnResult`.
@@ -743,7 +660,6 @@ class Engine:
         # Successful turn — reset the dropped-text retry counter.
         self._turn.dropped_text_retries = 0
         self._turn.active_chats.clear()
-        self._turn.active_triggers.clear()
 
         if action == "sleep" and result.control and result.control.sleep_ms:
             await asyncio.sleep(result.control.sleep_ms / 1000)

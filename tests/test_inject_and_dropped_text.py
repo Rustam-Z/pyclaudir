@@ -91,10 +91,10 @@ async def test_dropped_text_retry_limit_notifies_user() -> None:
     max_retries = _CFG.tool_error_max_count
 
     worker = FakeWorker()
-    notifications: list[tuple[int, str, int | None]] = []
+    notifications: list[tuple[int, str]] = []
 
-    async def capture_notify(chat_id: int, text: str, reply_to: int | None) -> None:
-        notifications.append((chat_id, text, reply_to))
+    async def capture_notify(chat_id: int, text: str) -> None:
+        notifications.append((chat_id, text))
 
     eng = Engine(worker, _CFG, debounce_ms=20, error_notify=capture_notify)
     await eng.start()
@@ -124,7 +124,7 @@ async def test_dropped_text_retry_limit_notifies_user() -> None:
         assert len(corrective) == max_retries - 1
 
         assert len(notifications) == 1
-        chat_id, text, _reply_to = notifications[0]
+        chat_id, text = notifications[0]
         assert chat_id == -100
         # The classifier recognised the model-access pattern, so the
         # message is targeted (mentions PYCLAUDIR_MODEL) rather than
@@ -143,10 +143,10 @@ async def test_dropped_text_counter_resets_on_new_turn() -> None:
     below_cap = max_retries - 1
 
     worker = FakeWorker()
-    notifications: list[tuple[int, str, int | None]] = []
+    notifications: list[tuple[int, str]] = []
 
-    async def capture_notify(chat_id: int, text: str, reply_to: int | None) -> None:
-        notifications.append((chat_id, text, reply_to))
+    async def capture_notify(chat_id: int, text: str) -> None:
+        notifications.append((chat_id, text))
 
     eng = Engine(worker, _CFG, debounce_ms=20, error_notify=capture_notify)
     await eng.start()

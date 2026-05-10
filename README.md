@@ -16,6 +16,8 @@ It learns you. Every day it reflects on what worked and writes new rules into it
 
 Out of the box: messaging, memory, reminders, web, vision. Want shell access? Code editing? Plug in any other MCP server — GitHub, Jira, Notion, Slack, your own — same one-entry pattern, stdio or remote HTTP/SSE with auth headers. Runs on your laptop or any small VPS. Works with your existing Claude Code subscription.
 
+**Try it live:** a running instance lives in the [@rustamz_workshop](https://t.me/rustamz_workshop) Telegram group — join and message the bot to see it in action before you install.
+
 ## Quickstart (3 minutes)
 
 Pre-requisite: Login to Claude Code CLI.

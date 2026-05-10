@@ -86,7 +86,6 @@ into a `Config` field.
 | `PYCLAUDIR_LIVENESS_POLL_SECONDS` | no | `30` | how often the watcher wakes up to check the timeout above. |
 | `PYCLAUDIR_TOOL_ERROR_MAX_COUNT` | no | `3` | how many tool errors trigger a stop. Used in two places: (a) failed tool calls in one turn — too many ends the turn; (b) turns where Claude wrote text but didn't call `send_message` — too many in a row makes the bot show the underlying error to the user. Stops the bot from looping forever on a broken tool or a broken model setup. |
 | `PYCLAUDIR_TOOL_ERROR_WINDOW_SECONDS` | no | `30` | if errors keep arriving for this many seconds after the first one in a turn, end the turn — even below the count above. |
-| `PYCLAUDIR_PROGRESS_NOTIFY_SECONDS` | no | `60` | if Claude hasn't sent anything to a chat after this many seconds, the bot posts "Still on it — one moment." as a reply to the user's original message. Skipped for chats that already got a reply this turn. |
 | `PYCLAUDIR_CRASH_BACKOFF_BASE` | no | `2` | seconds to wait before the first restart after Claude crashes. Doubles after each crash, up to `CRASH_BACKOFF_CAP`. |
 | `PYCLAUDIR_CRASH_BACKOFF_CAP` | no | `64` | maximum wait between restarts. Once the wait reaches this, it stops growing. |
 | `PYCLAUDIR_CRASH_LIMIT` | no | `10` | how many crashes within `CRASH_WINDOW_SECONDS` count as "too many". When reached, the bot tells the owner and active chats, then exits — and something outside (systemd, docker) is expected to restart the whole bot. |
@@ -775,23 +774,6 @@ is enforced by code, not by hope, and tested in
   user-facing messages. Used by the engine's post-turn stderr sweep,
   the dropped-text handler, the on_crash hook, and the on_giveup
   hook. Add a new failure mode = append one `CcFailurePattern`.
-- **Long-turn progress notification.** If a turn hasn't produced a
-  `send_message` to a chat within
-  `PYCLAUDIR_PROGRESS_NOTIFY_SECONDS` (default 60s), the engine
-  sends a one-shot `"Still on it — one moment."` via the bot-direct
-  path, posted as a Telegram **reply to the user's triggering
-  message** (`reply_to_message_id` taken from the per-chat
-  `_active_triggers` dict populated at turn start). Threading makes
-  the routing correct by construction — the notice lands in the
-  chat of the replied-to message, not whichever chat a separate
-  chat_id field happens to point at. If a turn batched messages
-  from multiple chats, each unreplied chat gets its own threaded
-  notice tied to its own message. Chats that already received a
-  reply this turn are skipped. The model is also instructed (see
-  `prompts/system.md § Long tasks`) to warn up-front when it knows
-  a task will be slow — the model's own `send_message` suppresses
-  the harness fallback because it updates
-  `_replied_chats_this_turn`.
 - **Instruction tools are owner-only (any chat).** Two tools —
   `read_instructions` and `append_instructions` — expose
   `prompts/project.md` (and only that file) to the bot. system.md is
