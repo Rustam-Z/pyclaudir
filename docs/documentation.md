@@ -426,10 +426,14 @@ the appropriate chat. Recurring reminders (cron) automatically advance
 to the next occurrence.
 
 Reminders fire on time even if the bot is mid-conversation. When the
-fire happens during an active turn, the bot first posts a short notice
-to the chat ("Pausing to handle a scheduled task — back in a moment.")
-so the interrupt is visible, then runs the reminder turn after the
-current one ends.
+fire happens during an active turn, the synthetic reminder message is
+queued and runs as soon as the current turn ends.
+
+A reminder row is only marked `sent` (or its cron advanced) once the
+CC subprocess has actually consumed the turn. If CC crashes or wedges
+mid-turn, the row stays `pending` and the next 60s loop tick re-fires
+it — without this, a wedged subprocess would silently lose the
+reminder.
 
 All times are stored in UTC. The system prompt instructs the agent to
 ask users for their timezone and convert to UTC before setting

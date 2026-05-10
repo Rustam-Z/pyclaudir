@@ -257,37 +257,48 @@ async def _advance_or_close_reminder(db: Database, row: dict) -> None:
         await mark_reminder_sent(db, row["id"])
 
 
-_BACK_SOON_NOTICE = "⏳ Pausing to handle a scheduled task — back in a moment."
+def _make_reminder_on_success(db: Database, row: dict):
+    """Build the engine ``on_success`` hook that commits a reminder
+    once CC has actually processed the turn (#22)."""
+
+    async def _on_success() -> None:
+        await _advance_or_close_reminder(db, row)
+        log.info("delivered reminder #%d", row["id"])
+
+    return _on_success
 
 
 async def _fire_one_reminder(db: Database, engine: Engine, row: dict) -> None:
-    """Inject one due reminder into the engine as a synthetic message,
-    then advance/close the schedule.
+    """Inject one due reminder into the engine as a synthetic message.
+
+    The schedule advance / one-shot close is deferred to an
+    ``on_success`` callback the engine fires after CC actually consumes
+    the turn. If the CC subprocess crashes or wedges before processing
+    the reminder XML, the callback never fires and the row stays
+    ``pending`` — the next 60s reminder loop tick re-fires it. Without
+    this, a wedged subprocess would silently drop the reminder (#22).
 
     If the engine is mid-turn when the reminder fires, the synthetic
     message goes into the pending buffer and runs after the current
-    turn ends — silently from the chat's perspective. To make that
-    interruption visible we post a one-line "back soon" notice to the
-    chat first.
+    turn ends.
     """
     from .models import ChatMessage
-
-    if engine.is_processing:
-        await engine.send_chat_notice(row["chat_id"], _BACK_SOON_NOTICE)
 
     reminder_xml = (
         f'<reminder id="{row["id"]}" chat_id="{row["chat_id"]}" '
         f'user_id="{row["user_id"]}">{row["text"]}</reminder>'
     )
-    await engine.submit(ChatMessage(
-        chat_id=row["chat_id"],
-        message_id=0,
-        user_id=row["user_id"],
-        direction="in",
-        timestamp=datetime.now(timezone.utc),
-        text=reminder_xml,
-    ))
-    await _advance_or_close_reminder(db, row)
+    await engine.submit(
+        ChatMessage(
+            chat_id=row["chat_id"],
+            message_id=0,
+            user_id=row["user_id"],
+            direction="in",
+            timestamp=datetime.now(timezone.utc),
+            text=reminder_xml,
+        ),
+        on_success=_make_reminder_on_success(db, row),
+    )
 
 
 async def _reminder_loop(db: Database, engine: Engine) -> None:
@@ -296,12 +307,10 @@ async def _reminder_loop(db: Database, engine: Engine) -> None:
 
     Reminders fire unconditionally when due. If the engine is mid-turn
     the synthetic message gets buffered and runs after the current
-    turn ends; ``_fire_one_reminder`` posts a "back soon" notice in
-    that case so the chat knows an interrupt is coming. Each reminder
-    is fired in its own try/except so a single failure (DB error,
-    submit blow-up) doesn't block subsequent reminders in the same
-    poll cycle, and the failing row's id is logged so it's easy to
-    track down.
+    turn ends. Each reminder is fired in its own try/except so a single
+    failure (DB error, submit blow-up) doesn't block subsequent
+    reminders in the same poll cycle, and the failing row's id is
+    logged so it's easy to track down.
     """
     while True:
         await asyncio.sleep(60)
@@ -323,7 +332,10 @@ async def _reminder_loop(db: Database, engine: Engine) -> None:
                     "firing reminder #%d (chat=%s)", row["id"], row["chat_id"],
                 )
                 await _fire_one_reminder(db, engine, row)
-                log.info("fired reminder #%d", row["id"])
+                # NB: not "fired" — the row stays ``pending`` until the
+                # engine's on_success callback runs after CC processes
+                # the turn. See ``_fire_one_reminder`` for the rationale.
+                log.info("queued reminder #%d", row["id"])
             except Exception:
                 log.exception("failed to fire reminder #%d", row["id"])
 

@@ -126,6 +126,18 @@ class Engine:
         #: Typing-indicator state — see :class:`TypingState`.
         self._typing = TypingState()
         self._pending: list[ChatMessage] = []
+        #: Per-submit ``on_success`` hooks queued alongside ``_pending``.
+        #: Transferred to ``_turn_callbacks`` when the buffer drains into
+        #: a turn (``_kick`` / ``_maybe_inject``). The reminder loop hangs
+        #: ``mark_sent`` / ``advance_recurring`` off these so a subprocess
+        #: crash mid-turn doesn't silently lose the reminder — see #22.
+        self._pending_callbacks: list[Callable[[], Awaitable[None]]] = []
+        #: Callbacks bound to the in-flight turn. Fired in
+        #: ``_handle_turn_result`` once the turn definitively ends;
+        #: discarded by ``_handle_worker_failure`` so the caller (reminder
+        #: loop) sees the reminder still ``pending`` and retries on the
+        #: next 60s tick.
+        self._turn_callbacks: list[Callable[[], Awaitable[None]]] = []
         self._lock = asyncio.Lock()
         self._is_processing = asyncio.Event()
         self._debounce_task: asyncio.Task[None] | None = None
@@ -152,12 +164,22 @@ class Engine:
             except (asyncio.CancelledError, Exception):
                 pass
         await self._stop_typing()
+        # Drop any queued reminder callbacks — DB rows stay ``pending``
+        # and the next process startup re-fires them via the reminder
+        # loop, which is the right behaviour for a clean shutdown.
+        self._pending_callbacks = []
+        self._turn_callbacks = []
 
     # ------------------------------------------------------------------
     # Inbound
     # ------------------------------------------------------------------
 
-    async def submit(self, msg: ChatMessage) -> None:
+    async def submit(
+        self,
+        msg: ChatMessage,
+        *,
+        on_success: Callable[[], Awaitable[None]] | None = None,
+    ) -> None:
         """Add an inbound message to the pending buffer.
 
         - If the engine is *not* currently processing a turn we (re)start the
@@ -166,9 +188,18 @@ class Engine:
           control loop will drain whatever's in the buffer between turns. The
           inject path is used for *immediate* mid-turn delivery only when
           we're sure CC is mid-stream — see :meth:`_maybe_inject`.
+
+        ``on_success``: optional async hook run after the turn that
+        consumes this message ends with a result from CC. The reminder
+        loop uses this to defer the ``mark_sent`` / ``advance_recurring``
+        DB write until CC has actually processed the reminder XML — a
+        subprocess crash mid-turn discards the hook, leaving the reminder
+        ``pending`` for the next 60s loop tick (see #22).
         """
         async with self._lock:
             self._pending.append(msg)
+            if on_success is not None:
+                self._pending_callbacks.append(on_success)
 
         if self._is_processing.is_set():
             await self._maybe_inject()
@@ -177,25 +208,6 @@ class Engine:
         if self._debounce_task and not self._debounce_task.done():
             self._debounce_task.cancel()
         self._debounce_task = asyncio.create_task(self._debounce_then_kick())
-
-    @property
-    def is_processing(self) -> bool:
-        """True while a turn is in flight. The reminder loop uses this
-        to decide whether to post a "back soon" notice before injecting
-        a synthetic reminder into a chat that's mid-conversation."""
-        return self._is_processing.is_set()
-
-    async def send_chat_notice(self, chat_id: int, text: str) -> None:
-        """Send a one-off notice directly to a chat via the bot, bypassing
-        the MCP layer. Used by the reminder loop to announce an incoming
-        scheduled task while a user turn is still in progress. No-op if
-        no notify callback is wired. Best-effort — failures are logged."""
-        if self._error_notify is None:
-            return
-        try:
-            await self._error_notify(chat_id, text)
-        except Exception as exc:
-            log.warning("send_chat_notice to %s failed: %s", chat_id, exc)
 
     async def _debounce_then_kick(self) -> None:
         try:
@@ -210,6 +222,8 @@ class Engine:
                 return
             batch = self._pending
             self._pending = []
+            self._turn_callbacks.extend(self._pending_callbacks)
+            self._pending_callbacks = []
             self._is_processing.set()
         # Skip synthetic reminders (mid=0) — no human waiting on them, so
         # the turn-start typing indicator should be silent for
@@ -249,6 +263,8 @@ class Engine:
                 return
             batch = self._pending
             self._pending = []
+            self._turn_callbacks.extend(self._pending_callbacks)
+            self._pending_callbacks = []
         xml = await format_messages_with_context(batch, self._db)
         await self._worker.inject(xml)
 
@@ -542,6 +558,9 @@ class Engine:
         # underlying CC issue persists — we don't want to nuke their
         # first follow-up message silently.
         self._turn.dropped_text_retries = 0
+        # Cap-hit ends the turn. CC saw the message — retrying won't
+        # help — so fire callbacks to mark reminders sent.
+        await self._fire_turn_callbacks()
 
     @staticmethod
     def _build_dropped_text_user_message(result: "TurnResult") -> str:
@@ -608,15 +627,44 @@ class Engine:
 
     async def _handle_worker_failure(self, exc: Exception) -> None:
         """CC subprocess died mid-turn. The worker's supervisor handles
-        respawning; our job is to tell the user."""
+        respawning; our job is to tell the user.
+
+        Any queued ``on_success`` callbacks are dropped without firing so
+        the caller (reminder loop) sees the row still ``pending`` and
+        retries — without this, a reminder injected into a turn that
+        crashed before CC consumed it would be silently lost (#22).
+        """
         log.error("turn failed: %s", exc)
         self._is_processing.clear()
         await self._stop_typing()
+        if self._turn_callbacks:
+            log.info(
+                "discarding %d turn callback(s) on worker failure — caller will retry",
+                len(self._turn_callbacks),
+            )
+            self._turn_callbacks = []
         await self._notify_error_to_chats(
             "⚠️ Sorry, I ran into a temporary issue. "
             "I'm restarting and will be back in a few seconds."
         )
         self._turn.active_chats.clear()
+
+    async def _fire_turn_callbacks(self) -> None:
+        """Run every ``on_success`` hook queued for the just-ended turn.
+
+        Called from ``_handle_turn_result`` once the turn definitively
+        ends — clean stop, dropped-text cap-hit, or tool-error-limit
+        abort. The recoverable dropped-text branch leaves callbacks
+        queued because that turn continues. Each callback is independent;
+        one failing doesn't suppress the rest. See #22.
+        """
+        callbacks = self._turn_callbacks
+        self._turn_callbacks = []
+        for cb in callbacks:
+            try:
+                await cb()
+            except Exception:
+                log.exception("turn-success callback failed")
 
     async def _handle_turn_result(self, result: "TurnResult") -> None:
         """Process a successfully-returned :class:`TurnResult`.
@@ -635,6 +683,9 @@ class Engine:
             # when the subprocess exits. Leave ``_active_chats`` alone
             # so the callback knows who to notify.
             log.error("turn aborted: tool-error-limit")
+            # CC saw the messages before the abort — fire callbacks so
+            # reminders advance and don't loop on a poisoned state.
+            await self._fire_turn_callbacks()
             return
 
         action = result.control.action if result.control else None
@@ -660,6 +711,7 @@ class Engine:
         # Successful turn — reset the dropped-text retry counter.
         self._turn.dropped_text_retries = 0
         self._turn.active_chats.clear()
+        await self._fire_turn_callbacks()
 
         if action == "sleep" and result.control and result.control.sleep_ms:
             await asyncio.sleep(result.control.sleep_ms / 1000)
