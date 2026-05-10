@@ -22,6 +22,7 @@ Steps 9 and 10.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import logging
 import os
@@ -46,6 +47,18 @@ from .spec import CcSpawnSpec, FORBIDDEN_FLAG, build_argv
 # ``"pyclaudir.cc_worker"`` (e.g. tests/test_cc_worker_mcp_init.py) keep
 # matching after the module split.
 log = logging.getLogger("pyclaudir.cc_worker")
+
+#: Substrings that, when seen in CC's stderr, indicate the resumed
+#: ``session_id`` is unusable — either pruned/expired (first pattern)
+#: or malformed / not a known session title (second pattern). Both
+#: cases are recoverable by dropping the persisted id and starting a
+#: fresh session. Match is case-sensitive substring; expand only when
+#: a different wording is observed in the wild. Verified against
+#: claude 2.1.138.
+STALE_SESSION_PATTERNS: tuple[str, ...] = (
+    "No conversation found with session ID",
+    "--resume requires a valid session ID",
+)
 
 
 class CcWorker:
@@ -73,6 +86,13 @@ class CcWorker:
     #: re-raised so the callback can notify the owner/users.
     #: Signature: ``async on_giveup(crash_count: int)``
     OnGiveup = Any  # Callable[[int], Awaitable[None]] | None
+    #: Optional callback fired when the supervisor sees CC reject the
+    #: resumed ``session_id`` as stale (see :data:`STALE_SESSION_PATTERNS`).
+    #: Called *before* the fresh respawn so the callback can drop any
+    #: persisted id and notify the owner. Stale recoveries do not
+    #: consume the crash budget.
+    #: Signature: ``async on_stale_session(stale_id: str)``
+    OnStaleSession = Any  # Callable[[str], Awaitable[None]] | None
 
     def __init__(
         self,
@@ -82,6 +102,7 @@ class CcWorker:
         heartbeat: Heartbeat | None = None,
         on_crash: OnCrash = None,
         on_giveup: OnGiveup = None,
+        on_stale_session: OnStaleSession = None,
     ) -> None:
         self.spec = spec
         self.heartbeat = heartbeat or Heartbeat()
@@ -113,6 +134,7 @@ class CcWorker:
         self._stop_supervisor = asyncio.Event()
         self._on_crash = on_crash
         self._on_giveup = on_giveup
+        self._on_stale_session = on_stale_session
         #: ``time.monotonic()`` of the last successfully parsed stdout
         #: event. Together with ``heartbeat.last_activity`` (bumped on
         #: every MCP tool call) this tells the liveness monitor whether
@@ -400,6 +422,25 @@ class CcWorker:
             self._supervisor_abort_reason = "liveness-wedge"
             await self._terminate_proc()
 
+    def _stderr_indicates_stale_session(self) -> bool:
+        """Scan the recent stderr tail for any stale-session marker."""
+        return any(
+            pat in line for line in self._stderr_tail for pat in STALE_SESSION_PATTERNS
+        )
+
+    async def _drain_readers(self) -> None:
+        """Wait briefly for stdout/stderr readers to hit EOF after the
+        subprocess exits, so any final stderr bytes (e.g. the stale-id
+        marker) land in ``_stderr_tail`` before we classify the exit.
+        """
+        for task in (self._stdout_task, self._stderr_task):
+            if task is None or task.done():
+                continue
+            try:
+                await asyncio.wait_for(asyncio.shield(task), timeout=1.0)
+            except (asyncio.TimeoutError, Exception):
+                pass
+
     async def _supervise_loop(self) -> None:
         while not self._stop_supervisor.is_set():
             if self._proc is None:
@@ -408,6 +449,8 @@ class CcWorker:
             rc = await self._proc.wait()
             if self._stop_supervisor.is_set():
                 return
+
+            await self._drain_readers()
 
             intentional = self._supervisor_abort_reason
             self._supervisor_abort_reason = None
@@ -421,41 +464,76 @@ class CcWorker:
                 await self.start()
                 continue
 
-            log.error(
-                "cc subprocess exited rc=%s; recent stderr=%s",
-                rc, self._stderr_tail[-5:],
-            )
+            if (
+                self.spec.session_id is not None
+                and self._stderr_indicates_stale_session()
+            ):
+                await self._run_stale_recovery(self.spec.session_id)
+                continue
 
-            now = time.monotonic()
-            self._crash_times = [
-                t for t in self._crash_times if now - t < self._crash_window_seconds
-            ]
-            self._crash_times.append(now)
-            if len(self._crash_times) >= self._crash_limit:
-                if self._on_giveup is not None:
-                    try:
-                        await self._on_giveup(len(self._crash_times))
-                    except Exception:
-                        log.debug("on_giveup callback failed", exc_info=True)
-                raise CrashLoop(
-                    f"cc subprocess crashed {self._crash_limit} times in "
-                    f"{self._crash_window_seconds:.0f}s; bailing out"
-                )
+            await self._run_crash_recovery(rc)
 
-            attempt = len(self._crash_times)
-            backoff = min(
-                self._crash_backoff_cap,
-                self._crash_backoff_base * (2 ** (attempt - 1)),
-            )
-            log.error("respawning cc in %.1fs (attempt %d)", backoff, attempt)
-            if self._on_crash is not None:
+    async def _run_stale_recovery(self, stale_id: str) -> None:
+        """Drop the rejected ``session_id`` and respawn with a fresh session.
+
+        Called from :meth:`_supervise_loop` when CC's stderr matches
+        :data:`STALE_SESSION_PATTERNS` after an unexpected exit. Does
+        *not* consume the crash budget — a stale id is a recoverable
+        configuration drift, not a real crash.
+        """
+        log.warning(
+            "cc subprocess rejected stale session_id=%s; "
+            "dropping it and respawning with a fresh session",
+            stale_id,
+        )
+        if self._on_stale_session is not None:
+            try:
+                await self._on_stale_session(stale_id)
+            except Exception:
+                log.debug("on_stale_session callback failed", exc_info=True)
+        self.spec = dataclasses.replace(self.spec, session_id=None)
+        self._session_id = None
+        await asyncio.sleep(self._crash_backoff_base)
+        await self._terminate_proc()
+        await self.start()
+
+    async def _run_crash_recovery(self, rc: int | None) -> None:
+        """Record one crash, fire ``on_crash`` / ``on_giveup``, respawn or
+        raise :class:`CrashLoop` if the budget is exhausted."""
+        log.error(
+            "cc subprocess exited rc=%s; recent stderr=%s",
+            rc, self._stderr_tail[-5:],
+        )
+        now = time.monotonic()
+        self._crash_times = [
+            t for t in self._crash_times if now - t < self._crash_window_seconds
+        ]
+        self._crash_times.append(now)
+        if len(self._crash_times) >= self._crash_limit:
+            if self._on_giveup is not None:
                 try:
-                    await self._on_crash(attempt, backoff)
+                    await self._on_giveup(len(self._crash_times))
                 except Exception:
-                    log.debug("on_crash callback failed", exc_info=True)
-            await asyncio.sleep(backoff)
-            await self._terminate_proc()
-            await self.start()
+                    log.debug("on_giveup callback failed", exc_info=True)
+            raise CrashLoop(
+                f"cc subprocess crashed {self._crash_limit} times in "
+                f"{self._crash_window_seconds:.0f}s; bailing out"
+            )
+
+        attempt = len(self._crash_times)
+        backoff = min(
+            self._crash_backoff_cap,
+            self._crash_backoff_base * (2 ** (attempt - 1)),
+        )
+        log.error("respawning cc in %.1fs (attempt %d)", backoff, attempt)
+        if self._on_crash is not None:
+            try:
+                await self._on_crash(attempt, backoff)
+            except Exception:
+                log.debug("on_crash callback failed", exc_info=True)
+        await asyncio.sleep(backoff)
+        await self._terminate_proc()
+        await self.start()
 
     # ------------------------------------------------------------------
     # Send / receive

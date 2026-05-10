@@ -6,6 +6,8 @@ end-to-end check described in the README.
 
 from __future__ import annotations
 
+import asyncio
+import dataclasses
 import json
 from pathlib import Path
 
@@ -364,3 +366,98 @@ def test_structured_output_with_text_blocks_is_not_dropped_text(spec: CcSpawnSpe
     # Has text blocks BUT also has control → NOT dropped text
     assert queued.text_blocks == ["Let me think..."]
     assert queued.dropped_text is False
+
+
+def test_stale_session_pattern_detection(spec: CcSpawnSpec, cfg: Config) -> None:
+    """``_stderr_indicates_stale_session`` matches the known CC wording
+    and nothing else. False positives would silently drop live sessions
+    on unrelated crashes; false negatives reintroduce the issue-#29
+    crash-loop, so the matcher is pinned tightly."""
+    worker = CcWorker(spec, cfg)
+
+    worker._stderr_tail = []
+    assert worker._stderr_indicates_stale_session() is False
+
+    worker._stderr_tail = ["oom killed", "segfault"]
+    assert worker._stderr_indicates_stale_session() is False
+
+    worker._stderr_tail = [
+        "No conversation found with session ID: abc-123",
+    ]
+    assert worker._stderr_indicates_stale_session() is True
+
+    # Substring match — claude may prefix with a timestamp or wrap the
+    # message; we still want to catch it.
+    worker._stderr_tail = [
+        "2025-05-09T10:00 No conversation found with session ID: abc trailing",
+    ]
+    assert worker._stderr_indicates_stale_session() is True
+
+    # Malformed-id wording (observed in the wild against claude 2.1.138
+    # when the persisted id was corrupted on disk).
+    worker._stderr_tail = [
+        'Error: --resume requires a valid session ID or session title '
+        'when used with --print. Usage: claude -p --resume '
+        '<session-id|title>. Provided value "c649fda5-...19sd" is not '
+        "a UUID and does not match any session title.",
+    ]
+    assert worker._stderr_indicates_stale_session() is True
+
+
+def test_run_stale_recovery_drops_session_and_fires_callback(
+    spec: CcSpawnSpec, cfg: Config
+) -> None:
+    """``_run_stale_recovery`` invokes ``on_stale_session`` with the
+    rejected id, clears ``spec.session_id`` and the cached
+    ``_session_id``, and does NOT consume the crash budget. Mirrors the
+    style of ``test_on_giveup_fires_before_crashloop_raises``: drives
+    the recovery branch directly without spawning a real subprocess."""
+    spec_with_session = dataclasses.replace(spec, session_id="abc-123")
+    seen: list[str] = []
+
+    async def record(stale_id: str) -> None:
+        seen.append(stale_id)
+
+    worker = CcWorker(spec_with_session, cfg, on_stale_session=record)
+    # _run_stale_recovery awaits sleep + _terminate_proc + start; stub
+    # the process-touching bits and zero the backoff so the test is fast.
+    worker._crash_backoff_base = 0.0
+
+    async def _noop() -> None:
+        return
+
+    worker._terminate_proc = _noop  # type: ignore[assignment]
+    worker.start = _noop  # type: ignore[assignment]
+
+    asyncio.run(worker._run_stale_recovery("abc-123"))
+
+    assert seen == ["abc-123"]
+    assert worker.spec.session_id is None
+    assert worker._session_id is None
+    assert worker._crash_times == []
+
+
+def test_drain_readers_waits_for_pending_stderr_line(
+    spec: CcSpawnSpec, cfg: Config
+) -> None:
+    """The race that ``_drain_readers`` exists to fix: a reader that
+    has not yet appended its final line to ``_stderr_tail`` when
+    ``proc.wait()`` returns. Simulate it with a reader task that
+    sleeps briefly, appends, then exits — the drain must wait for
+    that append to land."""
+    worker = CcWorker(spec, cfg)
+
+    async def slow_reader() -> None:
+        await asyncio.sleep(0.05)
+        worker._stderr_tail.append(
+            "No conversation found with session ID: abc-123"
+        )
+
+    async def run() -> None:
+        worker._stderr_task = asyncio.create_task(slow_reader())
+        await worker._drain_readers()
+        # After draining the stale-session line must be visible to the
+        # supervisor's classifier.
+        assert worker._stderr_indicates_stale_session() is True
+
+    asyncio.run(run())

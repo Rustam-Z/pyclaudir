@@ -446,6 +446,23 @@ async def _async_main() -> None:
             except Exception:
                 log.warning("crash notify to owner failed", exc_info=True)
 
+    async def _on_cc_stale_session(stale_id: str) -> None:
+        try:
+            config.session_id_path.unlink(missing_ok=True)
+        except OSError:
+            log.exception("failed to delete stale session_id file")
+        try:
+            await dispatcher.bot.send_message(
+                chat_id=config.owner_id,
+                text=(
+                    "ℹ️ Previous Claude Code session expired — "
+                    "starting a fresh one. Your last message may need "
+                    "to be resent."
+                ),
+            )
+        except Exception:
+            log.warning("stale-session notify to owner failed", exc_info=True)
+
     async def _on_cc_giveup(crash_count: int) -> None:
         user_text = (
             f"⚠️ Shutting down — Claude Code failed {crash_count} times. "
@@ -467,7 +484,9 @@ async def _async_main() -> None:
     worker = CcWorker(
         spec, config,
         heartbeat=ctx.heartbeat,
-        on_crash=_on_cc_crash, on_giveup=_on_cc_giveup,
+        on_crash=_on_cc_crash,
+        on_giveup=_on_cc_giveup,
+        on_stale_session=_on_cc_stale_session,
     )
     await worker.start()
     await worker.supervise()
