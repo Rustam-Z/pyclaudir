@@ -8,7 +8,7 @@
 
 ---
 
-The goal is a [Jarvis](https://www.youtube.com/watch?v=Qav7NJIsKL4&t=2s) — an AI that lives with you, monitors what matters, and acts on your behalf. pyclaudir is the foundation.
+> **Try it live:** a running instance lives in the [@rustamz_workshop](https://t.me/rustamz_workshop) Telegram group — join and message Luna, assistant running on top of pyclaudir, to see it in action before you install.
 
 **pyclaudir** runs a persistent AI assistant in your Telegram. Not a chatbot — an agent that has memory, runs scheduled tasks, can monitor things, and can be extended with any tool you wire up.
 
@@ -24,7 +24,7 @@ It is extendable: add MCPs to connect it to anything: GitHub, Jira, email, calen
 
 Runs on a laptop or small VPS.
 
-> **Try it live:** a running instance lives in the [@rustamz_workshop](https://t.me/rustamz_workshop) Telegram group — join and message Luna, assistant running on top of pyclaudir, to see it in action before you install.
+The goal is a [Jarvis](https://www.youtube.com/watch?v=Qav7NJIsKL4&t=2s) — an AI that lives with you, monitors what matters, and acts on your behalf. pyclaudir is the foundation.
 
 ## Quickstart (3 minutes)
 
