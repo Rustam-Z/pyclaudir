@@ -3,10 +3,12 @@
 </p>
 
 <p align="center">
-  **pyclaudir** is a framework for running your own persistent AI companion/assistant on Telegram — one you fully own, control, can extend, one that learns from you.
+  <b>pyclaudir</b> is a framework for running your own persistent AI companion on Telegram — one you fully own, control, can extend, one that learns from you.
 </p>
 
 ---
+
+The goal is a [Jarvis](https://www.youtube.com/watch?v=Qav7NJIsKL4&t=2s) — an AI that lives with you, monitors what matters, and acts on your behalf. pyclaudir is the foundation.
 
 **pyclaudir** runs a persistent AI assistant in your Telegram. Not a chatbot — an agent that has memory, runs scheduled tasks, can monitor things, and can be extended with any tool you wire up.
 
@@ -19,8 +21,6 @@ Out of the box it:
 - Remembers context across restarts via file-based memory
 
 It is extendable: add MCPs to connect it to anything: GitHub, Jira, email, calendar, your own APIs. Add skills, build custom tools.
-
-The goal is a [Jarvis](https://www.youtube.com/watch?v=Qav7NJIsKL4&t=2s) — an AI that lives with you, monitors what matters, and acts on your behalf. pyclaudir is the foundation.
 
 Runs on a laptop or small VPS.
 
