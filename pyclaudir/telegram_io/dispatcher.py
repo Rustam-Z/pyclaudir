@@ -395,15 +395,15 @@ class TelegramDispatcher:
             cm.message_id,
         )
 
-        await self._attach_attachment_markers(update, cm)
         self._remember_chat_title(update)
-        await self._persist_inbound(cm)
-
         chat_type = update.effective_chat.type if update.effective_chat else None
         if not self._check_access(cm, chat_type):
             return
         if not await self._check_rate_limit(cm, chat_type):
             return
+
+        await self._attach_attachment_markers(update, cm)
+        await self._persist_inbound(cm)
 
         if self.engine is None:
             log.error("dispatcher received message before engine was attached")
@@ -440,8 +440,9 @@ class TelegramDispatcher:
         cm.text = f"{cm.text}\n{marker_block}" if cm.text else marker_block
 
     async def _persist_inbound(self, cm: ChatMessage) -> None:
-        """Persist *every* message we receive — even from disallowed chats —
-        so we have an audit trail."""
+        """Persist an inbound message. Callers must gate on
+        ``_check_access`` first — disallowed chats are dropped upstream
+        and never reach this method."""
         await insert_message(self.db, cm)
         await upsert_user(
             self.db,
@@ -452,19 +453,28 @@ class TelegramDispatcher:
             timestamp=cm.timestamp,
         )
 
-    def _check_access(self, cm: ChatMessage, chat_type: str | None) -> bool:
-        """Hot-reload the access config and gate the message. Disallowed
-        chats are a silent drop — no refusal reply, no owner alert.
-        Strangers learn nothing about the bot, and they can't burn
-        Telegram API quota by flooding us. Returns ``True`` to forward."""
+    def _is_allowed(self, chat_id: int, user_id: int, chat_type: str | None) -> bool:
+        """Hot-reload ``access.json`` and return the gate decision.
+
+        No side effects — callers that want a transcript log line should
+        use ``_check_access`` instead.
+        """
         access = load_access(self.config.access_path)
-        allowed = gate(
+        return gate(
             access=access,
             owner_id=self.config.owner_id,
-            chat_id=cm.chat_id,
-            user_id=cm.user_id,
+            chat_id=chat_id,
+            user_id=user_id,
             chat_type=chat_type,
         )
+
+    def _check_access(self, cm: ChatMessage, chat_type: str | None) -> bool:
+        """Gate an inbound message and log the attempt. Disallowed chats
+        are a silent drop — no refusal reply, no owner alert, no DB or
+        memory write. Strangers learn nothing about the bot, and they
+        can't burn Telegram API quota by flooding us. Returns ``True``
+        to forward."""
+        allowed = self._is_allowed(cm.chat_id, cm.user_id, chat_type)
         log_inbound(
             chat_id=cm.chat_id,
             chat_type=chat_type,
@@ -522,6 +532,9 @@ class TelegramDispatcher:
         if evt is None or evt.user is None:
             return
         self._remember_chat_title(update)
+        chat_type = evt.chat.type if evt.chat else None
+        if not self._is_allowed(evt.chat.id, evt.user.id, chat_type):
+            return
 
         def _emojis(reactions) -> list[str]:
             out: list[str] = []
@@ -545,6 +558,10 @@ class TelegramDispatcher:
         if msg is None:
             return
         self._remember_chat_title(update)
+        chat_type = msg.chat.type if msg.chat else None
+        user_id = msg.from_user.id if msg.from_user else 0
+        if not self._is_allowed(msg.chat_id, user_id, chat_type):
+            return
         await mark_edited(self.db, msg.chat_id, msg.message_id, msg.text or "")
         log_inbound_edit(
             chat_id=msg.chat_id,

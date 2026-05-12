@@ -206,11 +206,10 @@ empty allowlists.
 | `allowlist` | Owner + `allowed_users` | `allowed_chats` |
 | `open` | Anyone | Any group |
 
-The owner is always allowed in DMs. Blocked messages are still persisted
-to SQLite (audit trail), then dropped before the engine sees them.
-Non-allowlisted DMs receive: *"You don't have access to this bot. To
-request access, message the owner (Telegram user ID: N)."* Groups stay
-silent.
+The owner is always allowed in DMs. Blocked messages are dropped
+silently at the dispatcher boundary — no DB write, no memory write, no
+reply. Server-side logs still record the attempt so the owner can spot
+abuse via `/audit`.
 
 ### Owner commands
 

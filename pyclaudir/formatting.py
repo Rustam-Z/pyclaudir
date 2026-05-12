@@ -17,7 +17,8 @@ def markdown_to_telegram_html(text: str) -> str:
 
     Handles: bold, italic, strikethrough, inline code, fenced code blocks,
     inline links, bare URLs, and blockquotes.  Unsupported constructs
-    (headings, lists, images) are simplified to plain text equivalents.
+    (headings, lists, images, tables, horizontal rules) are simplified to
+    plain text equivalents.
     """
 
     # Step 1: extract fenced code blocks so inner content isn't processed
@@ -35,9 +36,7 @@ def markdown_to_telegram_html(text: str) -> str:
             code_blocks.append(f"<pre>{code}</pre>")
         return f"\x00CODEBLOCK{idx}\x00"
 
-    text = re.sub(
-        r"```(\w+)?\n?(.*?)```", _stash_code_block, text, flags=re.DOTALL
-    )
+    text = re.sub(r"```(\w+)?\n?(.*?)```", _stash_code_block, text, flags=re.DOTALL)
 
     # Step 2: extract inline code spans
     inline_codes: list[str] = []
@@ -48,6 +47,9 @@ def markdown_to_telegram_html(text: str) -> str:
         return f"\x00INLINECODE{idx}\x00"
 
     text = re.sub(r"`([^`]+)`", _stash_inline_code, text)
+
+    # Step 2.5: strip/convert markdown constructs Telegram can't render
+    text = _sanitize_unsupported_markdown(text)
 
     # Step 3: HTML-escape the remaining text
     text = escape(text)
@@ -96,3 +98,64 @@ def markdown_to_telegram_html(text: str) -> str:
         text = text.replace(f"\x00INLINECODE{idx}\x00", code)
 
     return text
+
+
+_HR_RE = re.compile(r"^[ \t]*(?:-{3,}|={3,}|\*{3,})[ \t]*$", re.MULTILINE)
+_LIST_RE = re.compile(r"^([ \t]*)[-*+] ", re.MULTILINE)
+_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
+_SEP_CELL_RE = re.compile(r"[ \t]*:?-+:?[ \t]*")
+
+
+def _sanitize_unsupported_markdown(text: str) -> str:
+    """Convert constructs Telegram's HTML parser cannot render.
+
+    Tables become `•` bullet rows, horizontal rules become blank lines,
+    `-`/`*`/`+` list markers become `•`, images become plain links.
+    Runs on raw text after code spans are stashed.
+    """
+    text = _convert_tables_to_bullets(text)
+    text = _HR_RE.sub("", text)
+    text = _LIST_RE.sub(r"\1• ", text)
+    text = _IMAGE_RE.sub(r"[\1](\2)", text)
+    return text
+
+
+def _convert_tables_to_bullets(text: str) -> str:
+    """Replace pipe-tables (`| a | b |` + separator row) with `•` rows."""
+    lines = text.split("\n")
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        if (
+            i + 1 < len(lines)
+            and _is_table_row(lines[i])
+            and _is_separator_row(lines[i + 1])
+        ):
+            j = i
+            while j < len(lines) and _is_table_row(lines[j]):
+                if not _is_separator_row(lines[j]):
+                    out.append(_row_to_bullet(lines[j]))
+                j += 1
+            i = j
+            continue
+        out.append(lines[i])
+        i += 1
+    return "\n".join(out)
+
+
+def _is_table_row(line: str) -> bool:
+    s = line.strip()
+    return len(s) >= 2 and s.startswith("|") and s.endswith("|")
+
+
+def _is_separator_row(line: str) -> bool:
+    s = line.strip()
+    if not (len(s) >= 2 and s.startswith("|") and s.endswith("|")):
+        return False
+    return all(_SEP_CELL_RE.fullmatch(c) for c in s[1:-1].split("|"))
+
+
+def _row_to_bullet(line: str) -> str:
+    cells = [c.strip() for c in line.strip()[1:-1].split("|")]
+    cells = [c for c in cells if c]
+    return "• " + " — ".join(cells)

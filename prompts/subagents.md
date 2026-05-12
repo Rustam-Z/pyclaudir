@@ -23,3 +23,22 @@ prompt you wrote — your system-prompt rules don't travel to it. So:
   `WebFetch` / `read_memory`).
 - Subagents are slow (10–60s+) and can't stream. Per the "Long tasks"
   rule, send a `send_message` heads-up before spawning one.
+
+## Formatting
+
+Subagent output is **data, not a finished message.** Subagents don't see
+your `system.md` formatting rules, so they will produce markdown tables,
+`#` headings, `-` bullets — none of which Telegram renders.
+
+Two options, pick per task:
+
+- **Reformat before send.** Quote the salient facts into your own message
+  using the rules from `system.md` (`•` bullets, no tables, `render_html`
+  for tabular data). Default choice — preserves your tone.
+- **Brief the subagent.** Include a one-liner in the prompt: "Format reply
+  as plain prose with `•` bullets; no markdown tables or `#` headings."
+  Use when you'll forward the result largely as-is.
+
+The sanitizer in `pyclaudir/formatting.py` strips tables and `---` lines
+as a safety net, but data is lost if you rely on it. Reformat at the
+source.

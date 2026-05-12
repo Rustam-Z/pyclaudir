@@ -75,7 +75,9 @@ def load_access(path: Path) -> AccessConfig:
 
     policy = raw.get("policy", "owner_only")
     if policy not in _VALID_POLICIES:
-        log.warning("invalid policy %r in access.json, defaulting to owner_only", policy)
+        log.warning(
+            "invalid policy %r in access.json, defaulting to owner_only", policy
+        )
         policy = "owner_only"
 
     return AccessConfig(
@@ -114,11 +116,11 @@ def gate(
     user_id: int,
     chat_type: str | None,
 ) -> bool:
-    """Decide whether an inbound message should be forwarded to the engine.
+    """Decide whether an inbound message should be accepted.
 
-    Returns ``True`` (deliver) or ``False`` (drop). Every message is
-    persisted to SQLite regardless — this only controls whether the agent
-    sees it.
+    Returns ``True`` (accept — persist and forward to the engine) or
+    ``False`` (drop completely — no DB write, no memory write, no engine
+    submit). The dispatcher enforces this at the message boundary.
     """
     is_group = chat_type in ("group", "supergroup", "channel")
 

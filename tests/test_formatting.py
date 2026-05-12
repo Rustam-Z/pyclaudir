@@ -24,7 +24,10 @@ def test_inline_code():
 
 
 def test_inline_code_html_escaped():
-    assert markdown_to_telegram_html("`<b>tag</b>`") == "<code>&lt;b&gt;tag&lt;/b&gt;</code>"
+    assert (
+        markdown_to_telegram_html("`<b>tag</b>`")
+        == "<code>&lt;b&gt;tag&lt;/b&gt;</code>"
+    )
 
 
 def test_fenced_code_block():
@@ -75,7 +78,9 @@ def test_sources_with_links():
         "- [AWS Blog — Post](https://aws.amazon.com/blog/post)"
     )
     result = markdown_to_telegram_html(md)
-    assert '<a href="https://venturebeat.com/article">VentureBeat — Article</a>' in result
+    assert (
+        '<a href="https://venturebeat.com/article">VentureBeat — Article</a>' in result
+    )
     assert '<a href="https://aws.amazon.com/blog/post">AWS Blog — Post</a>' in result
 
 
@@ -124,3 +129,91 @@ def test_plain_gt_not_at_line_start():
     result = markdown_to_telegram_html("a > b")
     assert result == "a &gt; b"
     assert "<blockquote>" not in result
+
+
+def test_markdown_table_converted_to_bullets():
+    md = "| col1 | col2 |\n|------|------|\n| a    | b    |"
+    result = markdown_to_telegram_html(md)
+    assert "|" not in result
+    assert "• col1 — col2" in result
+    assert "• a — b" in result
+
+
+def test_markdown_table_three_columns():
+    md = "| a | b | c |\n|---|---|---|\n| 1 | 2 | 3 |"
+    result = markdown_to_telegram_html(md)
+    assert "• a — b — c" in result
+    assert "• 1 — 2 — 3" in result
+
+
+def test_horizontal_rule_dash_stripped():
+    result = markdown_to_telegram_html("before\n---\nafter")
+    assert "---" not in result
+    assert "before" in result
+    assert "after" in result
+
+
+def test_horizontal_rule_equals_stripped():
+    result = markdown_to_telegram_html("before\n===\nafter")
+    assert "===" not in result
+
+
+def test_horizontal_rule_stars_stripped():
+    result = markdown_to_telegram_html("before\n***\nafter")
+    assert "***" not in result
+
+
+def test_dash_list_marker_converted_to_bullet():
+    result = markdown_to_telegram_html("- foo\n- bar")
+    assert "• foo" in result
+    assert "• bar" in result
+    assert "- foo" not in result
+
+
+def test_asterisk_list_marker_converted_to_bullet():
+    result = markdown_to_telegram_html("* foo\n* bar")
+    assert "• foo" in result
+    assert "• bar" in result
+
+
+def test_plus_list_marker_converted_to_bullet():
+    result = markdown_to_telegram_html("+ foo")
+    assert "• foo" in result
+
+
+def test_nested_list_indent_preserved():
+    result = markdown_to_telegram_html("  - foo")
+    assert "  • foo" in result
+
+
+def test_image_converted_to_link():
+    md = "![alt text](https://example.com/img.png)"
+    result = markdown_to_telegram_html(md)
+    assert result == '<a href="https://example.com/img.png">alt text</a>'
+
+
+def test_table_inside_code_block_preserved():
+    md = "```\n| a | b |\n|---|---|\n| 1 | 2 |\n```"
+    result = markdown_to_telegram_html(md)
+    assert "| a | b |" in result
+    assert "|---|---|" in result
+
+
+def test_dash_inside_code_block_preserved():
+    md = "```\n---\n```"
+    result = markdown_to_telegram_html(md)
+    assert "---" in result
+
+
+def test_dash_list_inside_code_block_preserved():
+    md = "```\n- foo\n```"
+    result = markdown_to_telegram_html(md)
+    assert "- foo" in result
+    assert "• foo" not in result
+
+
+def test_single_pipe_line_not_treated_as_table():
+    """A lone `| ... |` line without a separator row should pass through."""
+    result = markdown_to_telegram_html("| just text |")
+    assert "• just text" not in result
+    assert "| just text |" in result
