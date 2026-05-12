@@ -36,6 +36,7 @@ from ..db.messages import (
     mark_edited,
     upsert_user,
 )
+from ..db.unauthorized import chat_has_refusal, insert_unauthorized_message
 from ..input_normalizer import normalize_inbound
 from ..models import ChatMessage
 from ..rate_limiter import RateLimitExceeded, RateLimiter
@@ -398,6 +399,7 @@ class TelegramDispatcher:
         self._remember_chat_title(update)
         chat_type = update.effective_chat.type if update.effective_chat else None
         if not self._check_access(cm, chat_type):
+            await self._handle_unauthorized(cm, chat_type)
             return
         if not await self._check_rate_limit(cm, chat_type):
             return
@@ -487,6 +489,35 @@ class TelegramDispatcher:
             allowed=allowed,
         )
         return allowed
+
+    async def _handle_unauthorized(
+        self, cm: ChatMessage, chat_type: str | None
+    ) -> None:
+        """Log a denied message to ``unauthorized_messages`` and, in DMs
+        only, send the one-time refusal reply. Groups stay silent. The
+        row is written first so a failed send still records the attempt
+        and won't trigger a retry on the next message."""
+        should_reply = chat_type == "private" and not await chat_has_refusal(
+            self.db, cm.chat_id
+        )
+        await insert_unauthorized_message(
+            self.db,
+            cm=cm,
+            chat_type=chat_type,
+            refusal_sent=should_reply,
+        )
+        if not should_reply:
+            return
+        try:
+            await self.bot.send_message(
+                chat_id=cm.chat_id,
+                text=(
+                    "This is a private assistant. "
+                    "Please contact the owner if you want an access."
+                ),
+            )
+        except Exception:
+            log.warning("unauthorized refusal send failed for chat %s", cm.chat_id)
 
     async def _check_rate_limit(
         self,

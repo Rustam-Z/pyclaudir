@@ -58,7 +58,9 @@ async def insert_message(db: Database, msg: ChatMessage) -> None:
     )
 
 
-async def mark_edited(db: Database, chat_id: int, message_id: int, new_text: str) -> None:
+async def mark_edited(
+    db: Database, chat_id: int, message_id: int, new_text: str
+) -> None:
     await db.execute(
         "UPDATE messages SET text=?, edited=1 WHERE chat_id=? AND message_id=?",
         (new_text, chat_id, message_id),
@@ -119,7 +121,14 @@ async def insert_tool_call(
         INSERT INTO tool_calls(tool_name, args_json, result_json, error, duration_ms, created_at)
         VALUES (?, ?, ?, ?, ?, ?)
         """,
-        (tool_name, args_json, result_json, error, duration_ms, _iso(datetime.now(timezone.utc))),
+        (
+            tool_name,
+            args_json,
+            result_json,
+            error,
+            duration_ms,
+            _iso(datetime.now(timezone.utc)),
+        ),
     )
 
 

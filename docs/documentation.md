@@ -206,10 +206,17 @@ empty allowlists.
 | `allowlist` | Owner + `allowed_users` | `allowed_chats` |
 | `open` | Anyone | Any group |
 
-The owner is always allowed in DMs. Blocked messages are dropped
-silently at the dispatcher boundary — no DB write, no memory write, no
-reply. Server-side logs still record the attempt so the owner can spot
-abuse via `/audit`.
+The owner is always allowed in DMs. Blocked messages never reach the
+`messages` or `users` tables and never trigger memory writes, tool
+calls, or engine work. They are logged to a separate
+`unauthorized_messages` table (chat_id, user_id, text, timestamp, …)
+so the owner can review demand without polluting the main history.
+
+In DMs only, the first blocked message from a new chat receives a
+one-time canned reply: `"This is a private assistant. Please contact
+the owner if you want an access."` Subsequent messages from the same
+chat are silently dropped (still logged). Unauthorized groups stay
+fully silent. Server-side logs continue to record every attempt.
 
 ### Owner commands
 

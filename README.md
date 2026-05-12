@@ -99,6 +99,10 @@ Use as an **automation layer.** Wire up MCPs and schedule agents to do real work
 
 Out of the box: messaging, memory, reminders, web, vision. Want shell access? Code editing? Plug in any other MCP server — GitHub, Jira, Notion, Slack, your own — same one-entry pattern, stdio or remote HTTP/SSE with auth headers.
 
+### Telegram @BotFather configs
+- Disable "Allow groups" if you don't want others to add bot in groups. 
+- Enable "Bot to bot communication" so that bot can see other bot's messages.
+
 ### The four setup files
 
 | File | Tracked in git? | What it controls |
@@ -177,6 +181,9 @@ Access lives in `access.json` at the repo root (hot-reloaded). One `policy`
 gates DMs and groups: `owner_only` (default, owner DM only) · `allowlist`
 (`allowed_users` for DMs, `allowed_chats` for groups) · `open` (everyone).
 Owner-only commands: `/access`, `/allow`, `/deny`, `/policy`, `/kill`, `/health`, `/audit`.
+Blocked DMs get one canned "this is a private assistant" reply on their
+first message; blocked groups stay silent.
+
 Details: [docs/documentation.md](docs/documentation.md).
 
 ## What pyclaudir can do
