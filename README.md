@@ -86,7 +86,7 @@ Use as an **automation layer.** Wire up MCPs and schedule agents to do real work
 - *"pull the top AI stories from Hacker News and send me a briefing"* — `WebFetch` + `WebSearch`, default tools.
 - *"watch https://example.com/changelog hourly and ping me the moment a new entry mentions 'pricing'."* — cron `set_reminder` + `WebFetch`. Diff state lives in a memory file.
 - *"review this week's git log on `~/code/myapp` and open a PR if the README has drifted."* — needs `tool_groups.bash: true` and `tool_groups.code: true` in `plugins.json`, plus `GITHUB_PERSONAL_ACCESS_TOKEN` in `.env` for the PR.
-- *"every morning at 7am, DM me my Jira tickets due this week, grouped by project."* — needs `JIRA_*` env vars.
+- *"every morning at 7am, DM me my Jira tickets due this week, grouped by project."* — needs the `mcp-atlassian` entry enabled (Atlassian's remote MCP, OAuth set up on the host).
 
 <!-- TODO: 30s GIF demo for the README header once we have one -->
 
@@ -107,7 +107,7 @@ Out of the box: messaging, memory, reminders, web, vision. Want shell access? Co
 
 | File | Tracked in git? | What it controls |
 |---|---|---|
-| `.env` | no | secrets — Telegram bot token, owner id, plus any credentials your `plugins.json` entries reference via `${VAR}` (the example file's Jira / GitLab / GitHub entries demonstrate the pattern) |
+| `.env` | no | secrets — Telegram bot token, owner id, plus any credentials your `plugins.json` entries reference via `${VAR}` (the example file's GitLab / GitHub entries demonstrate the pattern) |
 | `prompts/project.md` | no | persona — bot name, language, house rules, owner-specific instructions; appended to the shipped `prompts/system.md` |
 | `plugins.json` | no | capability surface — what tools, skills, and MCPs are on |
 | `access.json` | no | who can DM the bot or use it in groups (hot-reloaded, no restart) |

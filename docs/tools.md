@@ -127,14 +127,9 @@ Changes to either take effect on container restart.
   "mcps": [
     {
       "name": "mcp-atlassian",
-      "command": "mcp-atlassian",
-      "args": [],
-      "env": {
-        "JIRA_URL": "${JIRA_URL}",
-        "JIRA_USERNAME": "${JIRA_USERNAME}",
-        "JIRA_API_TOKEN": "${JIRA_API_TOKEN}"
-      },
-      "allowed_tools": ["mcp__mcp-atlassian__jira_search", "..."],
+      "type": "sse",
+      "url": "https://mcp.atlassian.com/v1/sse",
+      "allowed_tools": ["mcp__mcp-atlassian"],
       "enabled": true
     }
   ],
@@ -311,23 +306,21 @@ Restart. `list_skills` no longer surfaces it and `read_skill` raises
 "not found", so envelope-driven invocations
 (`<skill name="...">`) can't bypass the toggle either.
 
-### Jira — derived from `JIRA_URL` + `JIRA_USERNAME` + `JIRA_API_TOKEN`
+### Jira — Atlassian's remote MCP over SSE
 
-The default `plugins.json` ships an `mcp-atlassian` entry that
-references all three vars. When they're set in `.env`, the
-`mcp-atlassian` server spawns *and* its 40 Jira tools are added to
-`--allowedTools`. To stop advertising Jira while keeping credentials,
-flip `enabled: false` on the entry.
+The default `plugins.json` ships an `mcp-atlassian` entry pointed at
+Atlassian's official remote MCP (`https://mcp.atlassian.com/v1/sse`,
+`type: sse`). It's `enabled: false` by default — flip it to `true` to
+advertise the `mcp__mcp-atlassian` tools on `--allowedTools`.
 
-Categories: search / CRUD / comments / worklog / transitions /
-projects / users / watchers / links / attachments / agile (boards,
-sprints) / versions. Confluence, JSM, ProForma, Compass, Bitbucket
-tools are **not** allowed (mcp-atlassian bundles them all in one
-server, so we list each Jira tool explicitly rather than using a
-prefix).
+**Auth is OAuth, not env vars.** The remote server authenticates via
+OAuth, which pyclaudir does not manage. Establish the grant once on the
+host with Claude Code (`claude mcp add --transport sse atlassian
+https://mcp.atlassian.com/v1/sse`, then complete the browser login);
+Claude Code reuses the stored token. The headless bot can't run the
+browser flow itself, so the OAuth grant must already exist on the host.
 
-For the canonical Jira tool list see upstream
-<https://github.com/sooperset/mcp-atlassian>.
+For the tool list and capabilities see Atlassian's remote MCP docs.
 
 ### GitLab — derived from `GITLAB_URL` + `GITLAB_TOKEN`
 

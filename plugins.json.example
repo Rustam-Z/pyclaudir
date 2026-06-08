@@ -41,13 +41,8 @@
     },
     {
       "name": "mcp-atlassian",
-      "command": "mcp-atlassian",
-      "args": [],
-      "env": {
-        "JIRA_URL": "${JIRA_URL}",
-        "JIRA_USERNAME": "${JIRA_USERNAME}",
-        "JIRA_API_TOKEN": "${JIRA_API_TOKEN}"
-      },
+      "type": "sse",
+      "url": "https://mcp.atlassian.com/v1/sse",
       "allowed_tools": [
         "mcp__mcp-atlassian"
       ],

@@ -529,11 +529,10 @@ def test_repo_example_plugins_json_loads(tmp_path: Path) -> None:
     assert plugins.builtin_tools_disabled == frozenset()
 
 
-def test_repo_example_plugins_json_with_creds(tmp_path: Path) -> None:
-    """With Jira creds set and mcp-atlassian flipped to enabled, the
-    plugin should resolve and advertise its allowlist (the example uses
-    the ``mcp__mcp-atlassian`` server-prefix wildcard, which Claude Code
-    expands to every tool the server exposes).
+def test_repo_example_plugins_json_atlassian_sse(tmp_path: Path) -> None:
+    """The shipped ``mcp-atlassian`` entry is Atlassian's remote MCP over
+    SSE (auth is OAuth, handled by Claude Code — no ``${VAR}`` creds), so
+    flipping it to enabled resolves unconditionally with an empty env.
 
     The shipped ``plugins.json.example`` ships with every MCP disabled
     by default — operators flip the ones they want. We mirror that flip
@@ -549,22 +548,15 @@ def test_repo_example_plugins_json_with_creds(tmp_path: Path) -> None:
     p = tmp_path / "plugins.json"
     p.write_text(json.dumps(data))
 
-    plugins = load_plugins(
-        p,
-        env={
-            "JIRA_URL": "https://x.atlassian.net",
-            "JIRA_USERNAME": "u@x",
-            "JIRA_API_TOKEN": "t",
-        },
-    )
+    plugins = load_plugins(p, env={})
     by_name = {m.name: m for m in plugins.mcps}
     assert "mcp-atlassian" in by_name
-    assert by_name["mcp-atlassian"].allowed_tools == ("mcp__mcp-atlassian",)
-    assert by_name["mcp-atlassian"].env == {
-        "JIRA_URL": "https://x.atlassian.net",
-        "JIRA_USERNAME": "u@x",
-        "JIRA_API_TOKEN": "t",
-    }
+    spec = by_name["mcp-atlassian"]
+    assert spec.type == "sse"
+    assert spec.url == "https://mcp.atlassian.com/v1/sse"
+    assert spec.command is None
+    assert spec.env == {}
+    assert spec.allowed_tools == ("mcp__mcp-atlassian",)
 
 
 def test_missing_file_with_example_present_logs_hint(tmp_path: Path, caplog) -> None:

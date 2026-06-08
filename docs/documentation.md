@@ -96,9 +96,6 @@ spawn; clear them to silently skip its MCP at boot.
 
 | Variable | Required | Default | Notes |
 |---|---|---|---|
-| `JIRA_URL` | no | — | Jira site URL — referenced by the `mcp-atlassian` plugin entry |
-| `JIRA_USERNAME` | no | — | Jira username — same |
-| `JIRA_API_TOKEN` | no | — | Jira API token — same |
 | `GITLAB_URL` | no | — | GitLab URL — referenced by the `mcp-gitlab` plugin entry |
 | `GITLAB_TOKEN` | no | — | GitLab personal access token — same |
 | `GITHUB_PERSONAL_ACCESS_TOKEN` | no | — | GitHub PAT — referenced by the `github` plugin entry. For Enterprise, add `GITHUB_HOST` to the entry's `env` block in `plugins.json` and set it here too. |
@@ -467,8 +464,9 @@ is just an entry in `plugins.json` `mcps[]`. The shipped
 `plugins.json.example` includes three sample entries you can keep,
 edit, or delete — they're starting points, not first-class:
 
-- **Jira** via [mcp-atlassian](https://github.com/sooperset/mcp-atlassian)
-  (stdio) — set `JIRA_URL`, `JIRA_USERNAME`, `JIRA_API_TOKEN` in `.env`.
+- **Jira** via Atlassian's remote MCP (`https://mcp.atlassian.com/v1/sse`,
+  SSE) — auth is OAuth, established once on the host with Claude Code (no
+  `.env` credentials). See `docs/tools.md` for the OAuth setup.
 - **GitLab** via
   [@zereight/mcp-gitlab](https://www.npmjs.com/package/@zereight/mcp-gitlab)
   (stdio) — set `GITLAB_URL`, `GITLAB_TOKEN` in `.env`.
