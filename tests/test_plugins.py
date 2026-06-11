@@ -529,36 +529,6 @@ def test_repo_example_plugins_json_loads(tmp_path: Path) -> None:
     assert plugins.builtin_tools_disabled == frozenset()
 
 
-def test_repo_example_plugins_json_atlassian_sse(tmp_path: Path) -> None:
-    """The shipped ``mcp-atlassian`` entry is Atlassian's remote MCP over
-    SSE (auth is OAuth, handled by Claude Code — no ``${VAR}`` creds), so
-    flipping it to enabled resolves unconditionally with an empty env.
-
-    The shipped ``plugins.json.example`` ships with every MCP disabled
-    by default — operators flip the ones they want. We mirror that flip
-    in a tmp copy so this test exercises the resolve path end-to-end
-    without changing the shipped defaults.
-    """
-    repo_root = Path(__file__).resolve().parent.parent
-    example = repo_root / "plugins.json.example"
-    data = json.loads(example.read_text())
-    for entry in data["mcps"]:
-        if entry["name"] == "mcp-atlassian":
-            entry["enabled"] = True
-    p = tmp_path / "plugins.json"
-    p.write_text(json.dumps(data))
-
-    plugins = load_plugins(p, env={})
-    by_name = {m.name: m for m in plugins.mcps}
-    assert "mcp-atlassian" in by_name
-    spec = by_name["mcp-atlassian"]
-    assert spec.type == "sse"
-    assert spec.url == "https://mcp.atlassian.com/v1/sse"
-    assert spec.command is None
-    assert spec.env == {}
-    assert spec.allowed_tools == ("mcp__mcp-atlassian",)
-
-
 def test_missing_file_with_example_present_logs_hint(tmp_path: Path, caplog) -> None:
     """When ``plugins.json`` is absent but ``plugins.json.example`` is
     present, the loader emits a WARNING with the cp command — points

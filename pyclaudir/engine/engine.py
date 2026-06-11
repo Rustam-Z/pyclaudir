@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Awaitable, Callable
 
@@ -234,8 +235,7 @@ class Engine:
         log.info("starting turn with %d msgs", len(batch))
         # Show "typing..." in every chat involved in this batch.
         await self._start_typing(set(self._turn.active_chats))
-        import time as _t
-        now = _t.monotonic()
+        now = time.monotonic()
         oldest_receipt = min(
             (m.received_at_monotonic for m in batch if m.received_at_monotonic is not None),
             default=now,
@@ -268,8 +268,7 @@ class Engine:
         xml = await format_messages_with_context(batch, self._db)
         await self._worker.inject(xml)
 
-        import time as _t
-        now = _t.monotonic()
+        now = time.monotonic()
         oldest_receipt = min(
             (m.received_at_monotonic for m in batch if m.received_at_monotonic is not None),
             default=now,
@@ -318,7 +317,6 @@ class Engine:
         """
         if self._typing_action is None:
             return
-        import time
 
         is_new_chat = chat_id not in self._typing.chats
         if not self._typing.chats:
@@ -363,7 +361,6 @@ class Engine:
         )
         if self._typing_action is None or not chat_ids:
             return
-        import time
 
         loop_running = self._typing.task is not None and not self._typing.task.done()
         if loop_running:
@@ -408,7 +405,6 @@ class Engine:
         if chat_id not in self._typing.chats:
             return
 
-        import time
 
         elapsed = time.monotonic() - self._typing.started_at
         remaining = MIN_TYPING_VISIBLE_SECONDS - elapsed

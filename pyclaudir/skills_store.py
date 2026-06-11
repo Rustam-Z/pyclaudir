@@ -35,6 +35,8 @@ from pathlib import Path
 
 import yaml
 
+from .storage.path_safety import resolve_under_root
+
 
 class SkillsError(ValueError):
     """Raised when a skill name is rejected or a file is missing."""
@@ -138,6 +140,12 @@ class SkillsStore:
     # ------------------------------------------------------------------
 
     def _resolve_skill_md(self, name: str) -> Path:
+        """Resolve ``skills/<name>/SKILL.md``, traversal-hardened.
+
+        Name validation is local (single-component names only); the
+        symlink and containment hardening is shared with the storage
+        stores via :func:`resolve_under_root`.
+        """
         if name is None or name == "":
             raise SkillsError("skill name must be a non-empty string")
         if os.path.isabs(name):
@@ -150,35 +158,9 @@ class SkillsStore:
             raise SkillsError(
                 f"skill name must be a single directory name, got {name!r}"
             )
-
-        skill_dir = self._root / parts[0]
-        # Reject symlinks at the skill dir or its SKILL.md.
-        try:
-            if skill_dir.is_symlink():
-                raise SkillsError(f"symlink in skills path: {skill_dir}")
-        except OSError as exc:
-            raise SkillsError(f"could not stat {skill_dir}: {exc}") from exc
-
-        skill_md = skill_dir / "SKILL.md"
-        try:
-            if skill_md.is_symlink():
-                raise SkillsError(f"symlink in skills path: {skill_md}")
-        except OSError as exc:
-            raise SkillsError(f"could not stat {skill_md}: {exc}") from exc
-
-        # Final containment check.
-        try:
-            resolved = skill_md.resolve(strict=False)
-        except (OSError, RuntimeError) as exc:
-            raise SkillsError(f"could not resolve {skill_md}: {exc}") from exc
-        try:
-            resolved.relative_to(self._root)
-        except ValueError as exc:
-            raise SkillsError(
-                f"resolved skill path escapes root: {resolved} not under {self._root}"
-            ) from exc
-
-        return resolved
+        return resolve_under_root(
+            self._root, f"{name}/SKILL.md", SkillsError, "skill"
+        )
 
     # ------------------------------------------------------------------
     # Read API

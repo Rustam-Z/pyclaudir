@@ -358,13 +358,25 @@ def _install_signal_handlers(
         loop.add_signal_handler(sig, _stop)
 
 
-async def _async_main() -> None:
-    _setup_logging()
+@dataclass
+class _App:
+    """Long-lived components, assigned in construction order by
+    ``_async_main``. The worker's crash callbacks are built before the
+    engine and dispatcher exist and read them from here via late
+    binding — by the time the worker invokes a callback, both are wired.
+    """
 
-    config = Config.from_env()
-    config.ensure_dirs()
-    _bootstrap_access(config)
+    config: Config
+    db: Database
+    mcp: McpServer | None = None
+    worker: CcWorker | None = None
+    dispatcher: TelegramDispatcher | None = None
+    engine: Engine | None = None
+    reminder_task: asyncio.Task | None = None
 
+
+async def _open_db_and_stores(config: Config) -> tuple[Database, Plugins, _Stores]:
+    """Open the database, load plugins, and warm every disk-backed store."""
     db = await Database.open(config.db_path)
     log.info("database ready at %s", config.db_path)
 
@@ -381,14 +393,22 @@ async def _async_main() -> None:
 
     stores = _build_stores(config, db, plugins)
     await _seed_default_reminders(db, config)
+    return db, plugins, stores
+
+
+async def _start_mcp_server(
+    db: Database,
+    stores: _Stores,
+    plugins: Plugins,
+    chat_titles: dict[int, str],
+) -> tuple[ToolContext, McpServer]:
+    """Build the shared ToolContext and bring the MCP server live."""
 
     async def db_logger(**kwargs):  # called by every MCP tool wrapper
         await insert_tool_call(db, **kwargs)
 
-    # Shared between dispatcher (writer) and outbound tools (reader).
-    chat_titles: dict[int, str] = {}
     ctx = ToolContext(
-        bot=None,  # filled in below once dispatcher exists
+        bot=None,  # filled in once the dispatcher exists
         database=db,
         memory_store=stores.memory,
         instructions_store=stores.instructions,
@@ -397,7 +417,6 @@ async def _async_main() -> None:
         render_store=stores.renders,
         chat_titles=chat_titles,
     )
-
     mcp = McpServer(
         ctx,
         db_logger=db_logger,
@@ -405,7 +424,15 @@ async def _async_main() -> None:
     )
     await mcp.start()
     log.info("mcp server live at %s", mcp.url)
+    return ctx, mcp
 
+
+def _build_cc_spec(config: Config, plugins: Plugins, mcp: McpServer) -> CcSpawnSpec:
+    """Write the schema + MCP config to a tmpdir and assemble the spawn spec.
+
+    Tool-group toggles flow through ``plugins.json`` exclusively — edit
+    the file and restart to flip.
+    """
     tmpdir = Path(tempfile.mkdtemp(prefix="pyclaudir-"))
     schema_path = tmpdir / "schema.json"
     schema_path.write_text(schema_json())
@@ -415,9 +442,7 @@ async def _async_main() -> None:
     )
     log.info("mcp config written to %s", mcp_config_path)
 
-    # Tool-group toggles flow through ``plugins.json`` exclusively —
-    # edit the file and restart to flip.
-    spec = CcSpawnSpec(
+    return CcSpawnSpec(
         binary=config.claude_code_bin,
         model=config.model,
         system_prompt_path=Path("prompts/system.md").resolve(),
@@ -434,9 +459,13 @@ async def _async_main() -> None:
         mcp_allowed_tools=tuple(mcp_allowed_tools),
     )
 
-    # Crash-callback closures reference ``engine`` / ``dispatcher`` via
-    # late binding; the worker only invokes them after both are built.
+
+def _make_on_cc_crash(app: _App):
+    """Crash notifier: tell waiting chats (and always the owner) that CC
+    is restarting."""
+
     async def _on_cc_crash(attempt: int, backoff: float) -> None:
+        engine = app.engine
         user_text = (
             f"⚠️ Technical issue, restarting "
             f"(attempt {attempt}, retrying in {backoff:.0f}s). "
@@ -445,27 +474,33 @@ async def _async_main() -> None:
         if engine is not None and engine._turn.active_chats:
             for chat_id in engine._turn.active_chats:
                 try:
-                    await dispatcher.bot.send_message(chat_id=chat_id, text=user_text)
+                    await app.dispatcher.bot.send_message(chat_id=chat_id, text=user_text)
                 except Exception:
                     log.warning("crash notify to %s failed", chat_id, exc_info=True)
-        owner_chat = config.owner_id
+        owner_chat = app.config.owner_id
         if owner_chat not in (engine._turn.active_chats if engine else set()):
             try:
-                await dispatcher.bot.send_message(
+                await app.dispatcher.bot.send_message(
                     chat_id=owner_chat,
                     text=f"CC error (attempt {attempt}). Check logs.",
                 )
             except Exception:
                 log.warning("crash notify to owner failed", exc_info=True)
 
+    return _on_cc_crash
+
+
+def _make_on_cc_stale_session(app: _App):
+    """Stale-session notifier: drop the persisted id and tell the owner."""
+
     async def _on_cc_stale_session(stale_id: str) -> None:
         try:
-            config.session_id_path.unlink(missing_ok=True)
+            app.config.session_id_path.unlink(missing_ok=True)
         except OSError:
             log.exception("failed to delete stale session_id file")
         try:
-            await dispatcher.bot.send_message(
-                chat_id=config.owner_id,
+            await app.dispatcher.bot.send_message(
+                chat_id=app.config.owner_id,
                 text=(
                     "ℹ️ Previous Claude Code session expired — "
                     "starting a fresh one. Your last message may need "
@@ -475,39 +510,40 @@ async def _async_main() -> None:
         except Exception:
             log.warning("stale-session notify to owner failed", exc_info=True)
 
+    return _on_cc_stale_session
+
+
+def _make_on_cc_giveup(app: _App):
+    """Give-up notifier: tell every waiting chat + the owner that CC is
+    down for good and the operator must intervene."""
+
     async def _on_cc_giveup(crash_count: int) -> None:
         user_text = (
             f"⚠️ Shutting down — Claude Code failed {crash_count} times. "
             "The operator needs to intervene."
         )
         chats_to_notify: set[int] = set()
-        if engine is not None and engine._turn.active_chats:
-            chats_to_notify.update(engine._turn.active_chats)
-        chats_to_notify.add(config.owner_id)
+        if app.engine is not None and app.engine._turn.active_chats:
+            chats_to_notify.update(app.engine._turn.active_chats)
+        chats_to_notify.add(app.config.owner_id)
         for chat_id in chats_to_notify:
             try:
-                await dispatcher.bot.send_message(chat_id=chat_id, text=user_text)
+                await app.dispatcher.bot.send_message(chat_id=chat_id, text=user_text)
             except Exception:
                 log.warning("giveup notify to %s failed", chat_id, exc_info=True)
 
-    # Engine is declared here but constructed after dispatcher.
-    engine = None  # type: ignore[assignment]
+    return _on_cc_giveup
 
-    worker = CcWorker(
-        spec, config,
-        heartbeat=ctx.heartbeat,
-        on_crash=_on_cc_crash,
-        on_giveup=_on_cc_giveup,
-        on_stale_session=_on_cc_stale_session,
-    )
-    await worker.start()
-    await worker.supervise()
 
-    # The dispatcher owns the bot, so we build it first, then hand a
-    # closure into the engine for the typing indicator.
+def _build_dispatcher_and_engine(
+    app: _App,
+    stores: _Stores,
+    chat_titles: dict[int, str],
+) -> tuple[TelegramDispatcher, Engine]:
+    """Construct the dispatcher (bot owner), then the engine wired to it."""
     dispatcher = TelegramDispatcher(  # type: ignore[arg-type]
-        config,
-        db,
+        app.config,
+        app.db,
         engine=None,
         chat_titles=chat_titles,
         rate_limiter=stores.rate_limiter,
@@ -532,44 +568,74 @@ async def _async_main() -> None:
             log.warning("error notify failed for chat %s: %s", chat_id, exc)
 
     engine = Engine(
-        worker, config,
-        debounce_ms=config.debounce_ms,
-        db=db,
+        app.worker, app.config,
+        debounce_ms=app.config.debounce_ms,
+        db=app.db,
         typing_action=_typing,
         error_notify=_error_notify,
     )
-    await engine.start()
+    return dispatcher, engine
 
-    reminder_task = asyncio.create_task(
-        _reminder_loop(db, engine), name="pyclaudir-reminders",
-    )
 
-    dispatcher.engine = engine
-    ctx.bot = dispatcher.bot
-    # Wire send_message → engine notification so the typing indicator
-    # stops the moment the user has the message in their hand, not when
-    # the entire CC turn officially ends.
-    ctx.on_chat_replied = engine.notify_chat_replied
-    await dispatcher.start()
-    log.info("pyclaudir is live")
-
+async def _run_until_stopped(app: _App) -> None:
+    """Block until SIGINT/SIGTERM, then tear down opposite to construction."""
     stop_event = asyncio.Event()
-    _install_signal_handlers(worker, stop_event)
-
+    _install_signal_handlers(app.worker, stop_event)
     try:
         await stop_event.wait()
     finally:
-        # Persist session id, then tear everything down in the order
-        # opposite to construction. Clean shutdown — _stop already set.
-        if worker.session_id:
-            config.session_id_path.write_text(worker.session_id)
-        reminder_task.cancel()
-        await dispatcher.stop()
-        await engine.stop()
-        await worker.stop()
-        await mcp.stop()
-        await db.close()
+        # Persist session id first so the next start resumes it.
+        if app.worker.session_id:
+            app.config.session_id_path.write_text(app.worker.session_id)
+        app.reminder_task.cancel()
+        await app.dispatcher.stop()
+        await app.engine.stop()
+        await app.worker.stop()
+        await app.mcp.stop()
+        await app.db.close()
         log.info("clean shutdown complete")
+
+
+async def _async_main() -> None:
+    _setup_logging()
+
+    config = Config.from_env()
+    config.ensure_dirs()
+    _bootstrap_access(config)
+
+    db, plugins, stores = await _open_db_and_stores(config)
+    app = _App(config=config, db=db)
+
+    chat_titles: dict[int, str] = {}  # dispatcher writes, outbound tools read
+    ctx, app.mcp = await _start_mcp_server(db, stores, plugins, chat_titles)
+    spec = _build_cc_spec(config, plugins, app.mcp)
+
+    app.worker = CcWorker(
+        spec, config,
+        heartbeat=ctx.heartbeat,
+        on_crash=_make_on_cc_crash(app),
+        on_giveup=_make_on_cc_giveup(app),
+        on_stale_session=_make_on_cc_stale_session(app),
+    )
+    await app.worker.start()
+    await app.worker.supervise()
+
+    app.dispatcher, app.engine = _build_dispatcher_and_engine(
+        app, stores, chat_titles,
+    )
+    await app.engine.start()
+    app.reminder_task = asyncio.create_task(
+        _reminder_loop(db, app.engine), name="pyclaudir-reminders",
+    )
+
+    app.dispatcher.engine = app.engine
+    ctx.bot = app.dispatcher.bot
+    # Stops the typing indicator the moment the user has a reply in hand.
+    ctx.on_chat_replied = app.engine.notify_chat_replied
+    await app.dispatcher.start()
+    log.info("pyclaudir is live")
+
+    await _run_until_stopped(app)
 
 
 def main() -> None:

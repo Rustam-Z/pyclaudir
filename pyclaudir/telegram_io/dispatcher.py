@@ -249,39 +249,46 @@ class TelegramDispatcher:
         if not self._is_owner(update):
             return
         lines: list[str] = ["*pyclaudir audit*"]
-        # Recent failed tool calls.
+        lines += await self._audit_tool_failures()
+        lines += self._audit_prompt_backups()
+        lines += self._audit_memory_footprint()
+        await update.effective_message.reply_text(
+            "\n".join(lines), parse_mode="Markdown"
+        )
+
+    async def _audit_tool_failures(self) -> list[str]:
+        """Audit section: the last 5 failed tool calls, newest first."""
         try:
             rows = await self.db.fetch_all(
                 "SELECT tool_name, error, created_at FROM tool_calls "
                 "WHERE error IS NOT NULL AND error != '' "
                 "ORDER BY id DESC LIMIT 5"
             )
-            if rows:
-                lines.append("*recent tool failures:*")
-                for r in rows:
-                    err = (r["error"] or "")[:80]
-                    lines.append(f"  • `{r['created_at']}` {r['tool_name']} — {err}")
-            else:
-                lines.append("*recent tool failures:* none")
         except Exception as exc:
-            lines.append(f"*recent tool failures:* query error ({exc})")
-        # Prompt backup count.
+            return [f"*recent tool failures:* query error ({exc})"]
+        if not rows:
+            return ["*recent tool failures:* none"]
+        lines = ["*recent tool failures:*"]
+        for r in rows:
+            err = (r["error"] or "")[:80]
+            lines.append(f"  • `{r['created_at']}` {r['tool_name']} — {err}")
+        return lines
+
+    def _audit_prompt_backups(self) -> list[str]:
+        """Audit section: how many prompt backup files exist."""
         try:
             backups_dir = self.config.data_dir / "prompt_backups"
-            if backups_dir.exists():
-                files = [
-                    p
-                    for p in backups_dir.iterdir()
-                    if p.is_file() and p.suffix == ".md"
-                ]
-                lines.append(
-                    f"*prompt backups:* {len(files)} file(s) in `{backups_dir}`"
-                )
-            else:
-                lines.append("*prompt backups:* (none yet)")
+            if not backups_dir.exists():
+                return ["*prompt backups:* (none yet)"]
+            files = [
+                p for p in backups_dir.iterdir() if p.is_file() and p.suffix == ".md"
+            ]
+            return [f"*prompt backups:* {len(files)} file(s) in `{backups_dir}`"]
         except Exception as exc:
-            lines.append(f"*prompt backups:* error ({exc})")
-        # Memory footprint.
+            return [f"*prompt backups:* error ({exc})"]
+
+    def _audit_memory_footprint(self) -> list[str]:
+        """Audit section: total bytes stored under the memories root."""
         try:
             mem_dir = self.config.memories_dir
             total_bytes = (
@@ -289,14 +296,9 @@ class TelegramDispatcher:
                 if mem_dir.exists()
                 else 0
             )
-            lines.append(
-                f"*memory footprint:* {total_bytes:,} bytes under `data/memories/`"
-            )
+            return [f"*memory footprint:* {total_bytes:,} bytes under `data/memories/`"]
         except Exception as exc:
-            lines.append(f"*memory footprint:* error ({exc})")
-        await update.effective_message.reply_text(
-            "\n".join(lines), parse_mode="Markdown"
-        )
+            return [f"*memory footprint:* error ({exc})"]
 
     # ------------------------------------------------------------------
     # Access management commands (owner-only)

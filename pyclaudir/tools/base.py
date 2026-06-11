@@ -13,6 +13,7 @@ context is a passive container.
 
 from __future__ import annotations
 
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -42,13 +43,9 @@ class Heartbeat:
     __slots__ = ("_last",)
 
     def __init__(self) -> None:
-        import time
-
         self._last = time.monotonic()
 
     def beat(self) -> None:
-        import time
-
         self._last = time.monotonic()
 
     @property
