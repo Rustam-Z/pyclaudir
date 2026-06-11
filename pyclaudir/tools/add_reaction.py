@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from ..db.messages import add_bot_reaction
 from ..transcript import log_reaction
-from .base import BaseTool, ToolResult
+from .base import BaseTool, ToolResult, bot_identity
 
 # Telegram's Bot API only accepts this fixed set of emojis for
 # ReactionTypeEmoji. Source:
@@ -70,12 +70,7 @@ class AddReactionTool(BaseTool):
             emoji=emoji,
         )
         if self.ctx.database is not None:
-            bot_id = 0
-            try:
-                me = await self.ctx.bot.get_me()
-                bot_id = me.id
-            except Exception:
-                pass
+            bot_id, _, _ = await bot_identity(self.ctx.bot)
             await add_bot_reaction(
                 self.ctx.database,
                 chat_id=args.chat_id,

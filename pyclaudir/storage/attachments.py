@@ -21,9 +21,10 @@ model into reading an arbitrary binary blob through this surface.
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from pathlib import Path
+
+from .path_safety import resolve_under_root
 
 #: Maximum bytes returned for a text-like attachment in one read. Larger
 #: files are truncated and the truncation is marked in the returned string
@@ -74,43 +75,14 @@ class AttachmentStore:
         return self._root
 
     def resolve_path(self, relative: str) -> Path:
-        """Same hardened resolution as :class:`MemoryStore.resolve_path`.
+        """Resolve ``relative`` inside the attachments root, hardened.
 
-        Rejects empty / absolute paths, ``..`` components, symlinks anywhere
-        on the path, and anything that ultimately escapes the attachments
-        root.
+        See :func:`pyclaudir.storage.path_safety.resolve_under_root` for
+        the rules; any failure raises :class:`AttachmentPathError`.
         """
-        if relative is None or relative == "":
-            raise AttachmentPathError("attachment path must be a non-empty string")
-        if os.path.isabs(relative):
-            raise AttachmentPathError(
-                f"attachment path must be relative to {self._root}, got {relative!r}"
-            )
-        parts = Path(relative).parts
-        if any(p == ".." for p in parts):
-            raise AttachmentPathError(
-                f"attachment path may not contain '..': {relative!r}"
-            )
-        check = self._root
-        for part in parts:
-            check = check / part
-            try:
-                if check.is_symlink():
-                    raise AttachmentPathError(f"symlink in attachment path: {check}")
-            except OSError as exc:
-                raise AttachmentPathError(f"could not stat {check}: {exc}") from exc
-        candidate = self._root.joinpath(*parts)
-        try:
-            resolved = candidate.resolve(strict=False)
-        except (OSError, RuntimeError) as exc:
-            raise AttachmentPathError(f"could not resolve {candidate}: {exc}") from exc
-        try:
-            resolved.relative_to(self._root)
-        except ValueError as exc:
-            raise AttachmentPathError(
-                f"resolved attachment path escapes root: {resolved} not under {self._root}"
-            ) from exc
-        return resolved
+        return resolve_under_root(
+            self._root, relative, AttachmentPathError, "attachment"
+        )
 
     @staticmethod
     def _ext(path: Path) -> str:

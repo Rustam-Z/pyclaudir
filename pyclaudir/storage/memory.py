@@ -21,9 +21,10 @@ The "read paths" set lives in this instance and resets on process restart.
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from pathlib import Path
+
+from .path_safety import resolve_under_root
 
 
 class MemoryPathError(ValueError):
@@ -71,55 +72,10 @@ class MemoryStore:
     def resolve_path(self, relative: str) -> Path:
         """Resolve ``relative`` inside the memories root, hardened.
 
-        Rules (any failure raises :class:`MemoryPathError`):
-
-        1. ``relative`` must not be empty.
-        2. ``relative`` must not be absolute.
-        3. ``relative`` must not contain a ``..`` component (literal — even
-           if benign-looking, we reject it; safer than reasoning about it).
-        4. The candidate full path's canonical form must remain inside the
-           memories root.
-        5. None of the components leading to the file may be a symlink.
+        See :func:`pyclaudir.storage.path_safety.resolve_under_root` for
+        the rules; any failure raises :class:`MemoryPathError`.
         """
-        if relative is None or relative == "":
-            raise MemoryPathError("memory path must be a non-empty string")
-        if os.path.isabs(relative):
-            raise MemoryPathError(f"memory path must be relative, got {relative!r}")
-
-        # Normalize separators *without* using os.path.normpath, which would
-        # silently collapse ``..``. We split manually and check.
-        parts = Path(relative).parts
-        if any(p == ".." for p in parts):
-            raise MemoryPathError(f"memory path may not contain '..': {relative!r}")
-
-        candidate = self._root.joinpath(*parts)
-
-        # Walk every parent up to the root and reject symlinks. We can't use
-        # ``Path.resolve(strict=True)`` because that would silently follow
-        # symlinks; we explicitly want to refuse them.
-        check = self._root
-        for part in parts:
-            check = check / part
-            try:
-                if check.is_symlink():
-                    raise MemoryPathError(f"symlink in memory path: {check}")
-            except OSError as exc:
-                raise MemoryPathError(f"could not stat {check}: {exc}") from exc
-
-        # Final containment check via canonical resolution.
-        try:
-            resolved = candidate.resolve(strict=False)
-        except (OSError, RuntimeError) as exc:
-            raise MemoryPathError(f"could not resolve {candidate}: {exc}") from exc
-
-        try:
-            resolved.relative_to(self._root)
-        except ValueError as exc:
-            raise MemoryPathError(
-                f"resolved memory path escapes root: {resolved} not under {self._root}"
-            ) from exc
-
-        return resolved
+        return resolve_under_root(self._root, relative, MemoryPathError, "memory")
 
     # ------------------------------------------------------------------
     # Read API (read-only in v1 — no write/delete/edit methods exist)

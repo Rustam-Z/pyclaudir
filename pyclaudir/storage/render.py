@@ -10,12 +10,13 @@ Operator handles cleanup; this module never deletes.
 
 from __future__ import annotations
 
-import os
 import re
 import secrets
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+
+from .path_safety import resolve_under_root
 
 
 class RenderPathError(ValueError):
@@ -53,35 +54,12 @@ class RenderStore:
         self._root.mkdir(parents=True, exist_ok=True)
 
     def resolve_path(self, relative: str) -> Path:
-        if relative is None or relative == "":
-            raise RenderPathError("render path must be a non-empty string")
-        if os.path.isabs(relative):
-            raise RenderPathError(
-                f"render path must be relative to {self._root}, got {relative!r}"
-            )
-        parts = Path(relative).parts
-        if any(p == ".." for p in parts):
-            raise RenderPathError(f"render path may not contain '..': {relative!r}")
-        check = self._root
-        for part in parts:
-            check = check / part
-            try:
-                if check.is_symlink():
-                    raise RenderPathError(f"symlink in render path: {check}")
-            except OSError as exc:
-                raise RenderPathError(f"could not stat {check}: {exc}") from exc
-        candidate = self._root.joinpath(*parts)
-        try:
-            resolved = candidate.resolve(strict=False)
-        except (OSError, RuntimeError) as exc:
-            raise RenderPathError(f"could not resolve {candidate}: {exc}") from exc
-        try:
-            resolved.relative_to(self._root)
-        except ValueError as exc:
-            raise RenderPathError(
-                f"resolved render path escapes root: {resolved} not under {self._root}"
-            ) from exc
-        return resolved
+        """Resolve ``relative`` inside the renders root, hardened.
+
+        See :func:`pyclaudir.storage.path_safety.resolve_under_root` for
+        the rules; any failure raises :class:`RenderPathError`.
+        """
+        return resolve_under_root(self._root, relative, RenderPathError, "render")
 
     def allocate(self, title: str | None = None) -> Path:
         """Reserve an absolute path for a new render. Caller writes the bytes.

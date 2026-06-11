@@ -3,15 +3,12 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
 from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-from ..db.messages import insert_message
-from ..models import ChatMessage
 from ..transcript import log_outbound
-from .base import BaseTool, ToolResult
+from .base import BaseTool, ToolResult, record_outbound
 
 log = logging.getLogger(__name__)
 
@@ -116,33 +113,16 @@ class CreatePollTool(BaseTool):
             text=transcript_text,
         )
 
-        if self.ctx.database is not None:
-            try:
-                me = await self.ctx.bot.get_me()
-                bot_user_id = me.id
-                bot_username = me.username
-                bot_first_name = me.first_name
-            except Exception:
-                bot_user_id = 0
-                bot_username = None
-                bot_first_name = "bot"
-            stored_text = transcript_text + "\n" + "\n".join(
-                f"- {opt}" for opt in args.options
-            )
-            await insert_message(
-                self.ctx.database,
-                ChatMessage(
-                    chat_id=args.chat_id,
-                    message_id=message_id,
-                    user_id=bot_user_id,
-                    username=bot_username,
-                    first_name=bot_first_name,
-                    direction="out",
-                    timestamp=datetime.now(timezone.utc),
-                    text=stored_text,
-                    reply_to_id=args.reply_to_message_id,
-                ),
-            )
+        stored_text = transcript_text + "\n" + "\n".join(
+            f"- {opt}" for opt in args.options
+        )
+        await record_outbound(
+            self.ctx,
+            chat_id=args.chat_id,
+            message_id=message_id,
+            text=stored_text,
+            reply_to_id=args.reply_to_message_id,
+        )
 
         return ToolResult(
             content=f"poll sent message_id={message_id} poll_id={poll_id}",

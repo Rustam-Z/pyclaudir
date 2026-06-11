@@ -121,6 +121,19 @@ class BaseTool(ABC):
         ...
 
 
+async def bot_identity(bot: Any) -> tuple[int, str | None, str]:
+    """The bot's ``(user_id, username, first_name)`` via ``get_me``.
+
+    Falls back to ``(0, None, "bot")`` on failure so a transient
+    ``get_me`` glitch never tanks the delivery being recorded.
+    """
+    try:
+        me = await bot.get_me()
+        return me.id, me.username, me.first_name
+    except Exception:
+        return 0, None, "bot"
+
+
 async def record_outbound(
     ctx: ToolContext,
     *,
@@ -131,23 +144,13 @@ async def record_outbound(
 ) -> None:
     """Persist one outbound message row with the bot's identity.
 
-    Used by ``send_message``, ``send_photo``, and ``send_memory_document``
-    after the Telegram API confirms delivery. No-ops when the database
-    or bot is unavailable (tests). Bot-identity fetch failures fall back
-    to safe defaults so a transient ``get_me`` glitch never tanks
-    delivery — the row still lands with ``user_id=0``.
+    Used by ``send_message``, ``send_photo``, ``send_memory_document``,
+    and ``create_poll`` after the Telegram API confirms delivery. No-ops
+    when the database or bot is unavailable (tests).
     """
     if ctx.database is None or ctx.bot is None:
         return
-    try:
-        me = await ctx.bot.get_me()
-        bot_user_id = me.id
-        bot_username = me.username
-        bot_first_name = me.first_name
-    except Exception:
-        bot_user_id = 0
-        bot_username = None
-        bot_first_name = "bot"
+    bot_user_id, bot_username, bot_first_name = await bot_identity(ctx.bot)
     await insert_message(
         ctx.database,
         ChatMessage(

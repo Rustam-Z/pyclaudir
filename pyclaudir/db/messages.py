@@ -23,20 +23,28 @@ def _iso(dt: datetime) -> str:
 async def insert_message(db: Database, msg: ChatMessage) -> None:
     """Idempotently insert a Telegram message row.
 
-    Edited messages re-fire the handler with the same ``message_id``; we use
-    ``INSERT OR REPLACE`` so the row stays current. The ``edited`` flag is
-    bumped via :func:`mark_edited` from the edited-message handler instead.
+    Edited messages re-fire the handler with the same ``message_id``; the
+    upsert keeps the row current while leaving ``edited``/``deleted`` (not
+    in the SET list) untouched. The ``edited`` flag is bumped via
+    :func:`mark_edited` from the edited-message handler instead.
     """
     await db.execute(
         """
-        INSERT OR REPLACE INTO messages
+        INSERT INTO messages
             (chat_id, message_id, user_id, username, first_name,
              direction, timestamp, text, reply_to_id, reply_to_text,
-             edited, deleted, raw_update_json)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                COALESCE((SELECT edited FROM messages WHERE chat_id=? AND message_id=?), 0),
-                COALESCE((SELECT deleted FROM messages WHERE chat_id=? AND message_id=?), 0),
-                ?)
+             raw_update_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(chat_id, message_id) DO UPDATE SET
+            user_id=excluded.user_id,
+            username=excluded.username,
+            first_name=excluded.first_name,
+            direction=excluded.direction,
+            timestamp=excluded.timestamp,
+            text=excluded.text,
+            reply_to_id=excluded.reply_to_id,
+            reply_to_text=excluded.reply_to_text,
+            raw_update_json=excluded.raw_update_json
         """,
         (
             msg.chat_id,
@@ -49,10 +57,6 @@ async def insert_message(db: Database, msg: ChatMessage) -> None:
             msg.text,
             msg.reply_to_id,
             msg.reply_to_text,
-            msg.chat_id,
-            msg.message_id,
-            msg.chat_id,
-            msg.message_id,
             msg.raw_update_json,
         ),
     )
