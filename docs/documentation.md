@@ -229,7 +229,10 @@ hides the `/` menu from non-owners.
 /deny group <chat_id>        Remove chat
 /policy <owner_only|allowlist|open>
 /kill                        SIGTERM (graceful shutdown)
-/health                      Last send, reminder state, rate-limit notices
+/reset_session               Clear the saved Claude session id and restart —
+                             fresh context, chat history and memories kept
+/health                      Last send, reminder state, rate-limit notices,
+                             current turn duration, queued messages
 /audit                       Recent tool failures, backups, memory footprint
 ```
 

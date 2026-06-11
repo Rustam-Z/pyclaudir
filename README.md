@@ -180,7 +180,7 @@ pulled into `plugins.json` via `${VAR}` references.
 Access lives in `access.json` at the repo root (hot-reloaded). One `policy`
 gates DMs and groups: `owner_only` (default, owner DM only) · `allowlist`
 (`allowed_users` for DMs, `allowed_chats` for groups) · `open` (everyone).
-Owner-only commands: `/access`, `/allow`, `/deny`, `/policy`, `/kill`, `/health`, `/audit`.
+Owner-only commands: `/access`, `/allow`, `/deny`, `/policy`, `/kill`, `/health`, `/audit`, `/reset_session`.
 Blocked DMs get one canned "this is a private assistant" reply on their
 first message; blocked groups stay silent.
 
@@ -244,6 +244,23 @@ The system prompt is two files: [prompts/system.md](prompts/system.md)
 (generic pyclaudir behaviour, shipped) and `prompts/project.md`
 (your overlay — gitignored, copy from
 [prompts/project.md.example](prompts/project.md.example)).
+
+### Known limitations
+
+- **One process per data dir.** Two pyclaudir processes on the same
+  database/bot token will fire reminders twice and fight over the saved
+  Claude session. Run one instance, or give each its own `PYCLAUDIR_DATA_DIR`.
+- **Claude's context grows over days.** The Claude session resumes across
+  restarts, so very long-running chats eventually fill its context window.
+  Send `/reset_session` to start a fresh session — chat history (database)
+  and memories (markdown files) are kept.
+- **Edits don't re-run.** Editing a Telegram message updates the stored
+  copy, but the bot does not re-process the edited text. Send a new message
+  instead.
+- **Groups are not rate-limited.** Only DMs have the per-user message cap;
+  groups are trusted because you allowlist them yourself.
+- **Secret scrubbing covers text only.** API keys inside screenshots or
+  scanned PDFs are stored as-is — don't send secrets as images.
 
 ## Security
 

@@ -97,6 +97,9 @@ class TurnState:
     #: Count of consecutive ``dropped_text`` results across turns.
     #: Bounded by ``Config.tool_error_max_count``.
     dropped_text_retries: int = 0
+    #: ``time.monotonic()`` when the current turn started in ``_kick``.
+    #: Read by :attr:`Engine.turn_elapsed_s` for the /health readout.
+    started_monotonic: float = 0.0
 
 
 class Engine:
@@ -172,6 +175,22 @@ class Engine:
         self._turn_callbacks = []
 
     # ------------------------------------------------------------------
+    # Introspection (read-only, used by /health)
+    # ------------------------------------------------------------------
+
+    @property
+    def pending_count(self) -> int:
+        """Number of buffered messages waiting for the next turn."""
+        return len(self._pending)
+
+    @property
+    def turn_elapsed_s(self) -> float | None:
+        """Seconds the current turn has been running, or None when idle."""
+        if not self._is_processing.is_set():
+            return None
+        return time.monotonic() - self._turn.started_monotonic
+
+    # ------------------------------------------------------------------
     # Inbound
     # ------------------------------------------------------------------
 
@@ -231,6 +250,7 @@ class Engine:
         # reminder-only turns.
         self._turn.active_chats = {m.chat_id for m in batch if m.message_id > 0}
         self._turn.dropped_text_retries = 0
+        self._turn.started_monotonic = time.monotonic()
         xml = await format_messages_with_context(batch, self._db)
         log.info("starting turn with %d msgs", len(batch))
         # Show "typing..." in every chat involved in this batch.

@@ -55,6 +55,12 @@ class EnginePort(Protocol):
 
     def prime_typing(self, chat_id: int) -> None: ...
 
+    @property
+    def pending_count(self) -> int: ...
+
+    @property
+    def turn_elapsed_s(self) -> float | None: ...
+
 
 def _parse_allow_args(
     args: list[str] | None, *, verb: str
@@ -138,6 +144,9 @@ class TelegramDispatcher:
         self.chat_titles: dict[int, str] = (
             chat_titles if chat_titles is not None else {}
         )
+        #: Set by ``/reset_session`` so the shutdown path skips re-persisting
+        #: the live CC session id — the next boot must start a fresh session.
+        self.session_reset_requested: bool = False
         # AIORateLimiter queues outbound calls under Telegram's flood
         # limits and honours 429 retry_after, so a long multi-chunk reply
         # can't trip flood control and abort the turn via the tool-error
@@ -157,6 +166,9 @@ class TelegramDispatcher:
     def _wire_handlers(self) -> None:
         # Owner-only control commands first so they short-circuit the engine.
         self.application.add_handler(CommandHandler("kill", self._cmd_kill))
+        self.application.add_handler(
+            CommandHandler("reset_session", self._cmd_reset_session)
+        )
         self.application.add_handler(CommandHandler("health", self._cmd_health))
         self.application.add_handler(CommandHandler("audit", self._cmd_audit))
         # Owner-only access management commands.
@@ -195,6 +207,29 @@ class TelegramDispatcher:
         log.warning("/kill received from owner; shutting down")
         try:
             await update.effective_message.reply_text("Shutting down…")
+        except Exception:
+            pass
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    async def _cmd_reset_session(
+        self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        """Owner-only: drop the persisted CC session id and restart.
+
+        The escape hatch for unbounded context growth — the next boot
+        spawns Claude Code without ``--resume``, i.e. a fresh, empty
+        context. Chat history (SQLite) and memories (markdown) survive.
+        """
+        if not self._is_owner(update):
+            return
+        log.warning("/reset_session received from owner; clearing session and restarting")
+        self.session_reset_requested = True
+        self.config.session_id_path.unlink(missing_ok=True)
+        try:
+            await update.effective_message.reply_text(
+                "Session cleared — restarting with a fresh context. "
+                "Chat history and memories are preserved."
+            )
         except Exception:
             pass
         os.kill(os.getpid(), signal.SIGTERM)
@@ -244,9 +279,22 @@ class TelegramDispatcher:
             lines.append(f"- rate-limit notices fired (lifetime): {notices}")
         except Exception as exc:
             lines.append(f"- rate-limit notices: query error ({exc})")
+        lines.extend(self._health_engine_lines())
         await update.effective_message.reply_text(
             "\n".join(lines), parse_mode="Markdown"
         )
+
+    def _health_engine_lines(self) -> list[str]:
+        """Health section: current turn duration and queued-message count."""
+        if self.engine is None:
+            return []
+        elapsed = self.engine.turn_elapsed_s
+        turn = (
+            f"- current turn: running for {elapsed:.0f}s"
+            if elapsed is not None
+            else "- current turn: idle"
+        )
+        return [turn, f"- queued messages: {self.engine.pending_count}"]
 
     async def _cmd_audit(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
         """Recent changes / failures / backups — owner-only.
@@ -647,6 +695,7 @@ class TelegramDispatcher:
             BotCommand("deny", "remove from allowlist: /deny <user|group> <id>"),
             BotCommand("policy", "set policy: /policy <owner_only|allowlist|open>"),
             BotCommand("kill", "stop the bot"),
+            BotCommand("reset_session", "fresh Claude session (history kept)"),
         ]
         try:
             await self.application.bot.set_my_commands(

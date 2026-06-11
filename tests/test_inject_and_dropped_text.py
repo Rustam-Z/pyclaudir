@@ -231,6 +231,45 @@ async def test_dropped_text_counter_resets_on_new_turn() -> None:
 
 
 @pytest.mark.asyncio
+async def test_health_introspection_accessors() -> None:
+    """``pending_count`` / ``turn_elapsed_s`` back the /health readout."""
+    worker = FakeWorker()
+    eng = Engine(worker, _CFG, debounce_ms=20)
+    await eng.start()
+    try:
+        assert eng.turn_elapsed_s is None, "idle engine reports no running turn"
+        assert eng.pending_count == 0, "fresh engine has an empty buffer"
+
+        await eng.submit(_msg("hi", mid=1))
+        await asyncio.sleep(0.08)  # debounce fires, turn starts
+        elapsed = eng.turn_elapsed_s
+        assert elapsed is not None and elapsed >= 0, "running turn reports elapsed time"
+
+        worker.feed(TurnResult(
+            text_blocks=[],
+            control=ControlAction(action="stop", reason="ok"),
+            dropped_text=False,
+        ))
+        await asyncio.sleep(0.05)
+        assert eng.turn_elapsed_s is None, "finished turn reports idle again"
+    finally:
+        await eng.stop()
+
+
+@pytest.mark.asyncio
+async def test_pending_count_reflects_buffered_messages() -> None:
+    """Messages waiting on a long debounce are visible as queue depth."""
+    worker = FakeWorker()
+    eng = Engine(worker, _CFG, debounce_ms=5000)
+    await eng.start()
+    try:
+        await eng.submit(_msg("queued", mid=1))
+        assert eng.pending_count == 1, "buffered message must show as queued"
+    finally:
+        await eng.stop()
+
+
+@pytest.mark.asyncio
 async def test_inject_drained_between_turns_when_pending() -> None:
     worker = FakeWorker()
     eng = Engine(worker, _CFG, debounce_ms=20)
