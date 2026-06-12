@@ -112,54 +112,18 @@ Out of the box: messaging, memory, reminders, web, vision. Want shell access? Co
 | `plugins.json` | no | capability surface — what tools, skills, and MCPs are on |
 | `access.json` | no | who can DM the bot or use it in groups (hot-reloaded, no restart) |
 
-`.env.example`, `prompts/project.md.example`, `plugins.json.example`, and `access.json.example` are tracked so you have a starting point; the real files are gitignored so different deployments carry different config without fighting over the file. Without Docker, `access.json` is auto-created on first run with the safest default (`owner_only`, no allowlist) if you don't seed it from the example. Under Docker it must exist on the host before `docker compose up` (it's bind-mounted so `/allow` and `/deny` edits persist across restarts) — copy the example as shown in the Quickstart.
+The `.example` versions of all four are tracked as starting points; the real files are gitignored. `access.json` auto-creates with the safest default (`owner_only`) on first run without Docker; under Docker, copy it from the example before `docker compose up` so `/allow` and `/deny` edits persist across restarts.
 
 ### What `plugins.json` controls
 
 One file, four blocks. Edit and restart to apply.
 
-```jsonc
-{
-  "tool_groups": {           // dangerous Claude Code built-ins, all off by default
-    "bash":      false,      //   Bash, PowerShell, Monitor — shell execution
-    "code":      false,      //   Edit, Write, Read, NotebookEdit, Glob, Grep, LSP
-    "subagents": false       //   Agent — token-heavy, isolated context
-  },
-  "mcps": [                  // external MCP servers — stdio, http, or sse
-    {                        //   stdio (local subprocess; auth via env)
-      "name": "github",
-      "type": "stdio",       //   optional; "stdio" is the default
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-github"],
-      "env":  { "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}" },
-      "allowed_tools": ["mcp__github"],
-      "enabled": true
-    },
-    {                        //   http (remote server; auth via static headers)
-      "name": "linear",
-      "type": "http",
-      "url": "https://mcp.linear.app/mcp",
-      "headers": { "Authorization": "Bearer ${LINEAR_API_KEY}" },
-      "allowed_tools": ["mcp__linear"],
-      "enabled": true
-    }
-    // …Notion, Slack, Postgres, Playwright, your own — same shape; sse also supported
-  ],
-  "builtin_tools_disabled": [ // pyclaudir built-ins to hide from the agent
-    // e.g. "create_poll", "stop_poll", "render_html", "render_latex", "send_photo"
-  ],
-  "skills_disabled": [       // skill directories under skills/ to hide
-    // e.g. "render-style"
-  ]
-}
-```
+- **`tool_groups`** — Claude Code's dangerous built-ins (shell / code editing / subagents). All off by default; flip to `true` to unlock.
+- **`mcps`** — external MCP servers (GitHub, Jira, Linear, Notion, your own). One array entry per server, `stdio` / `http` / `sse`, credentials pulled from `.env` via `${VAR}` references — no Python needed.
+- **`builtin_tools_disabled`** — pyclaudir built-ins to hide from the agent (e.g. `create_poll`).
+- **`skills_disabled`** — skill directories under `skills/` to hide.
 
-- **Tool groups.** Claude Code's dangerous built-ins (shell / code edit / subagents). All off by default. Flip to `true` and restart to unlock.
-- **External MCPs.** Three transports supported, exactly as the [MCP spec](https://modelcontextprotocol.io) defines them: `stdio` (local subprocess, auth via `env`), `http` (remote streamable HTTP, auth via static `headers`), and `sse` (Server-Sent Events, same field shape as http). `${VAR}` references pull credentials from `.env`; if any required var is empty the MCP is silently skipped at boot. To stop advertising one without removing credentials, flip `"enabled": false`. Adding a new MCP (Linear, Notion, Slack, your own) is just a new array entry — no Python. Pyclaudir doesn't manage OAuth flows; supply an already-issued token via `${VAR}`.
-- **Built-in tool toggles.** Names of pyclaudir built-ins (e.g. `create_poll`, `render_latex`) you want hidden. Filtered at MCP registration — the agent literally can't see them. A typo crashes boot with the available list.
-- **Skill toggles.** Directory names under `skills/` to hide. The skill stays on disk but isn't listed or readable, so it can't be invoked.
-
-A missing `plugins.json` boots locked-down (no integrations, no tool groups). A malformed file crashes boot loudly. Full schema reference: [docs/tools.md](docs/tools.md).
+A missing `plugins.json` boots locked-down (no integrations, no tool groups). A malformed file crashes boot loudly. Full schema, copy-paste examples, and per-MCP setup: [docs/tools.md](docs/tools.md).
 
 ### `.env`
 
@@ -170,7 +134,7 @@ All settings come from environment variables (or `.env`). Full list in
 |---|---|---|
 | `TELEGRAM_BOT_TOKEN` | yes | from @BotFather |
 | `PYCLAUDIR_OWNER_ID` | yes | your numeric Telegram user id |
-| `PYCLAUDIR_MODEL` | yes | e.g. `claude-opus-4-7` |
+| `PYCLAUDIR_MODEL` | yes | e.g. `claude-sonnet-4-6` |
 | `PYCLAUDIR_EFFORT` | yes | `low` / `medium` / `high` / `max` |
 
 Credentials for any external MCP you wire in live in `.env` and are

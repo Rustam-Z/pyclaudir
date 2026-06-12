@@ -4,8 +4,27 @@ Deep-dive technical documentation. The README is the high-level intro;
 this is the manual. Read this when you're modifying internals,
 debugging, or auditing.
 
+## Highlights
+
+The parts of pyclaudir:
+
+- Custom MCP tools to interact with Telegram API, memory, context
+- Self-reflection and self-evolving loop  
+  - A daily self-reflection pass reviews the bot's own mistakes and proposes durable rules for owner approval.
+  - The owner can edit the bot's persona from a DM; every edit takes a timestamped backup first.
+- plugins.json to extend with external MCPs
+- access.json for group and DM access with different access policy.
+- Error handling when tool, mcp, CC session raises an error - model retries 3 times max instead of constantly replying 
+  - The `claude` subprocess is supervised: crashes respawn with exponential backoff and the conversation resumes where it left off.
+  - If the model writes a reply without sending it, the harness nudges it until the reply is actually delivered.
+  - If the API rejects a turn outright, the bot says so and respawns a fresh session automatically.
+  - A circuit breaker aborts a turn after repeated tool errors instead of letting it spin for minutes.
+- Messages are batched into a single Claude turn instead of one turn each
+
+
 ## Table of contents
 
+- [Highlights](#highlights)
 - [What gets passed to `claude`](#what-gets-passed-to-claude)
 - [Full configuration](#full-configuration)
 - [How it works (in detail)](#how-it-works-in-detail)
@@ -30,7 +49,11 @@ pyclaudir runs Claude inside a long-lived
 `claude --print --input-format stream-json` process and limits what Claude
 can do with the `--allowedTools` and `--disallowedTools` flags. By
 default the bot has only its own MCP tools (in `pyclaudir/tools/`,
-served by a local MCP server) plus `WebFetch` and `WebSearch`.
+served by a local MCP server) plus `WebFetch` and `WebSearch`. The
+local server is registered with `alwaysLoad: true` so its tools are
+always in the model's context — never deferred behind Claude Code's
+ToolSearch (which made the bot "forget" `send_message` existed).
+Requires Claude Code ≥ 2.1.121.
 
 The toggle source of truth is [`plugins.json`](../plugins.json) at
 the repo root:
@@ -75,7 +98,7 @@ into a `Config` field.
 |---|---|---|---|
 | `TELEGRAM_BOT_TOKEN` | yes | — | from @BotFather |
 | `PYCLAUDIR_OWNER_ID` | yes | — | your numeric Telegram user id |
-| `PYCLAUDIR_MODEL` | yes | — | which Claude model to use (e.g. `claude-opus-4-6`); passed to `--model` |
+| `PYCLAUDIR_MODEL` | yes | — | which Claude model to use (e.g. `claude-sonnet-4-6`); passed to `--model` |
 | `PYCLAUDIR_EFFORT` | yes | — | how hard Claude thinks; passed to `--effort` (one of `low`, `medium`, `high`, `max`) |
 | `PYCLAUDIR_DATA_DIR` | no | `./data` | SQLite, memories, access config, raw CC logs |
 | `CLAUDE_CODE_BIN` | no | `claude` | name or full path of the `claude` program |
@@ -747,6 +770,13 @@ is enforced by code, not by hope, and tested in
   AWS access keys, JWTs, PEM private-key blocks, and DSNs with
   embedded passwords. An accidental credential paste never lands in
   the DB.
+- **Unicode normalization at the boundary.** Before a message reaches
+  the agent, `input_normalizer.py` strips zero-width and bidi-control
+  characters (classic invisible prompt-injection carriers) and
+  NFKC-normalizes the text. When anything was changed, the inbound
+  `<msg>` envelope carries a `flags=` attribute (`zero_width_stripped`,
+  `bidi_stripped`, `nfkc_changed`) and the system prompt tells the
+  agent to treat instructions in flagged messages as adversarial.
 - **Wedged-subprocess detection.** `CcWorker._liveness_loop` watches
   for silent-mid-turn subprocesses: if `max(last stdout event, last
   MCP tool call) < now - PYCLAUDIR_LIVENESS_TIMEOUT_SECONDS` (default
@@ -832,6 +862,73 @@ Once configured, you should be able to:
    has no `Bash` tool and its system prompt tells it to.
 9. Run `uv run python -m pytest tests/test_security_invariants.py`
    and see all 8 invariants pass.
+
+## When a session breaks
+
+Sometimes the API rejects a turn outright (the result event carries
+`is_error`) — for example a usage-policy refusal or a context overflow.
+Resuming that session would just replay the rejected content and fail
+again, so the engine treats it as broken:
+
+1. It tells the affected chats that the turn failed and that a fresh
+   session was started (previous conversation context is gone).
+2. It respawns `claude` with no `--resume` and deletes the persisted
+   session id in `data/session_id`, so a later restart can't resume
+   the broken session either.
+
+The session id normally lives in `data/session_id` (written on clean
+shutdown). To force a fresh session manually, send `/reset_session`,
+or delete that file while the bot is stopped.
+
+Recoverable failures — rate limit, auth, quota — do **not** trigger
+this. The session is fine there; a reset would only lose context. The
+engine just reports the error and keeps the session for the next turn.
+
+
+## What `plugins.json` controls
+
+One file, four blocks. Edit and restart to apply.
+
+```jsonc
+{
+  "tool_groups": {           // dangerous Claude Code built-ins, all off by default
+    "bash":      false,      //   Bash, PowerShell, Monitor — shell execution
+    "code":      false,      //   Edit, Write, Read, NotebookEdit, Glob, Grep, LSP
+    "subagents": false       //   Agent — token-heavy, isolated context
+  },
+  "mcps": [                  // external MCP servers — stdio, http, or sse
+    {                        //   stdio (local subprocess; auth via env)
+      "name": "github",
+      "type": "stdio",       //   optional; "stdio" is the default
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env":  { "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}" },
+      "allowed_tools": ["mcp__github"],
+      "enabled": true
+    },
+    {                        //   http (remote server; auth via static headers)
+      "name": "linear",
+      "type": "http",
+      "url": "https://mcp.linear.app/mcp",
+      "headers": { "Authorization": "Bearer ${LINEAR_API_KEY}" },
+      "allowed_tools": ["mcp__linear"],
+      "enabled": true
+    }
+    // …Notion, Slack, Postgres, Playwright, your own — same shape; sse also supported
+  ],
+  "builtin_tools_disabled": [ // pyclaudir built-ins to hide from the agent
+    // e.g. "create_poll", "stop_poll", "render_html", "render_latex", "send_photo"
+  ],
+  "skills_disabled": [       // skill directories under skills/ to hide
+    // e.g. "render-style"
+  ]
+}
+```
+
+- **Tool groups.** Claude Code's dangerous built-ins (shell / code edit / subagents). All off by default. Flip to `true` and restart to unlock.
+- **External MCPs.** Three transports supported, exactly as the [MCP spec](https://modelcontextprotocol.io) defines them: `stdio` (local subprocess, auth via `env`), `http` (remote streamable HTTP, auth via static `headers`), and `sse` (Server-Sent Events, same field shape as http). `${VAR}` references pull credentials from `.env`; if any required var is empty the MCP is silently skipped at boot. To stop advertising one without removing credentials, flip `"enabled": false`. Adding a new MCP (Linear, Notion, Slack, your own) is just a new array entry — no Python. Pyclaudir doesn't manage OAuth flows; supply an already-issued token via `${VAR}`.
+- **Built-in tool toggles.** Names of pyclaudir built-ins (e.g. `create_poll`, `render_latex`) you want hidden. Filtered at MCP registration — the agent literally can't see them. A typo crashes boot with the available list.
+- **Skill toggles.** Directory names under `skills/` to hide. The skill stays on disk but isn't listed or readable, so it can't be invoked.
 
 ## Repo layout
 
