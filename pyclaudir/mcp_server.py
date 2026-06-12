@@ -182,6 +182,12 @@ class McpServer:
             MCP_SERVER_NAME: {
                 "type": "http",
                 "url": self.url,
+                # Claude Code >=2.1.9 defers MCP tool schemas behind
+                # ToolSearch when they'd eat >10% of context. The bot then
+                # "forgets" send_message/reply_to_message exist and drops
+                # its reply as plain text. alwaysLoad keeps our core tools
+                # in context; external plugin MCPs stay deferrable.
+                "alwaysLoad": True,
             }
         }
         if extra_servers:
