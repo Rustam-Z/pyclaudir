@@ -247,9 +247,12 @@ The system prompt is two files: [prompts/system.md](prompts/system.md)
 
 ### Known limitations
 
-- **One process per data dir.** Two pyclaudir processes on the same
-  database/bot token will fire reminders twice and fight over the saved
-  Claude session. Run one instance, or give each its own `PYCLAUDIR_DATA_DIR`.
+- **One process per data dir (enforced).** A second instance on the same
+  `PYCLAUDIR_DATA_DIR` refuses to start (`data/.lock` is held by the
+  first). Give each instance its own data dir to run a fleet.
+- **Crashes don't lose buffered messages.** Messages waiting for a turn
+  are replayed on the next start (only ones newer than 24 hours). In rare
+  crash timing a message can be answered twice — never silently dropped.
 - **Claude's context grows over days.** The Claude session resumes across
   restarts, so very long-running chats eventually fill its context window.
   Send `/reset_session` to start a fresh session — chat history (database)

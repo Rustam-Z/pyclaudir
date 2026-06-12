@@ -26,6 +26,7 @@ from .db.reminders import (
 )
 from .engine import Engine
 from .startup import (
+    _acquire_instance_lock,
     _App,
     _bootstrap_access,
     _build_cc_spec,
@@ -34,6 +35,7 @@ from .startup import (
     _make_on_cc_giveup,
     _make_on_cc_stale_session,
     _open_db_and_stores,
+    _replay_unconsumed,
     _run_until_stopped,
     _seed_default_reminders,
     _setup_logging,
@@ -154,13 +156,13 @@ async def _reminder_loop(db: Database, engine: Engine) -> None:
 
 async def _async_main() -> None:
     _setup_logging()
-
     config = Config.from_env()
     config.ensure_dirs()
+    lock = _acquire_instance_lock(config)  # refuse to boot twice on one data dir
     _bootstrap_access(config)
 
     db, plugins, stores = await _open_db_and_stores(config)
-    app = _App(config=config, db=db)
+    app = _App(config=config, db=db, lock=lock)
 
     chat_titles: dict[int, str] = {}  # dispatcher writes, outbound tools read
     ctx, app.mcp = await _start_mcp_server(db, stores, plugins, chat_titles)
@@ -180,14 +182,14 @@ async def _async_main() -> None:
         app, stores, chat_titles,
     )
     await app.engine.start()
+    await _replay_unconsumed(db, app.engine)
     app.reminder_task = asyncio.create_task(
         _reminder_loop(db, app.engine), name="pyclaudir-reminders",
     )
 
     app.dispatcher.engine = app.engine
     ctx.bot = app.dispatcher.bot
-    # Stops the typing indicator the moment the user has a reply in hand.
-    ctx.on_chat_replied = app.engine.notify_chat_replied
+    ctx.on_chat_replied = app.engine.notify_chat_replied  # stops typing on reply
     await app.dispatcher.start()
     log.info("pyclaudir is live")
 

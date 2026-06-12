@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Awaitable, Callable
 
 from ..cc_failure_classifier import CcFailureClassification, classify_cc_failure
 from ..config import Config
+from ..db.messages import mark_messages_consumed
 from ..models import ChatMessage
 from .format import format_messages_with_context
 from .typing_indicator import TypingAction, TypingIndicatorMixin, TypingState
@@ -225,6 +226,24 @@ class Engine(TypingIndicatorMixin):
             int((now - oldest_receipt) * 1000),
         )
         await self._worker.send(xml)
+        await self._mark_consumed(batch)
+
+    async def _mark_consumed(self, batch: list[ChatMessage]) -> None:
+        """Flag the drained batch as handed to CC.
+
+        Called AFTER the send/inject — CC already has the messages, so
+        this one small UPDATE per turn never delays the response. A crash
+        in the window between send and this write replays the batch on
+        the next boot (at-least-once, mirroring the reminder semantics
+        of #22). Synthetic reminders (``message_id == 0``) are skipped —
+        they re-fire via their own ``pending`` status.
+        """
+        if self._db is None:
+            return
+        keys = [(m.chat_id, m.message_id) for m in batch if m.message_id > 0]
+        if not keys:
+            return
+        await mark_messages_consumed(self._db, keys)
 
     async def _maybe_inject(self) -> None:
         """Write pending messages to CC's stdin mid-turn.
@@ -246,6 +265,7 @@ class Engine(TypingIndicatorMixin):
             self._pending_callbacks = []
         xml = await format_messages_with_context(batch, self._db)
         await self._worker.inject(xml)
+        await self._mark_consumed(batch)
 
         now = time.monotonic()
         oldest_receipt = min(

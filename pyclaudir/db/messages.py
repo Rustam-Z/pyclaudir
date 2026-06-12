@@ -20,6 +20,65 @@ def _iso(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
+def _from_iso(raw: str) -> datetime:
+    return datetime.strptime(raw, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+
+
+async def mark_messages_consumed(
+    db: Database, keys: list[tuple[int, int]]
+) -> None:
+    """Flag ``(chat_id, message_id)`` rows as handed to the CC subprocess.
+
+    Called by the engine once per turn, AFTER the send — never on the
+    per-message hot path. A single row-values UPDATE statement.
+    """
+    if not keys:
+        return
+    placeholders = ",".join("(?,?)" for _ in keys)
+    params = [v for pair in keys for v in pair]
+    await db.execute(
+        "UPDATE messages SET consumed=1 "
+        f"WHERE (chat_id, message_id) IN (VALUES {placeholders})",
+        params,
+    )
+
+
+async def fetch_unconsumed_inbound(db: Database) -> list[ChatMessage]:
+    """Inbound messages buffered but never handed to CC — replayed on boot.
+
+    Only rows from the last 24 hours are returned; anything older is
+    settled (``consumed=1``) instead, so days-old questions don't get a
+    surprise reply and stale rows leave the partial index. The stored
+    text is already scrubbed + normalized, so ``input_flags`` is empty.
+    """
+    cutoff = "datetime('now', '-24 hours')"
+    rows = await db.fetch_all(
+        "SELECT chat_id, message_id, user_id, username, first_name, "
+        "timestamp, text, reply_to_id, reply_to_text FROM messages "
+        "WHERE direction='in' AND consumed=0 AND message_id > 0 "
+        f"AND timestamp > {cutoff} ORDER BY rowid",
+    )
+    await db.execute(
+        "UPDATE messages SET consumed=1 "
+        f"WHERE direction='in' AND consumed=0 AND timestamp <= {cutoff}",
+    )
+    return [
+        ChatMessage(
+            chat_id=r["chat_id"],
+            message_id=r["message_id"],
+            user_id=r["user_id"],
+            username=r["username"],
+            first_name=r["first_name"],
+            direction="in",
+            timestamp=_from_iso(r["timestamp"]),
+            text=r["text"],
+            reply_to_id=r["reply_to_id"],
+            reply_to_text=r["reply_to_text"],
+        )
+        for r in rows
+    ]
+
+
 async def insert_message(db: Database, msg: ChatMessage) -> None:
     """Idempotently insert a Telegram message row.
 

@@ -10,20 +10,23 @@ file-size split. ``__main__.py`` keeps the reminder loop and the
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import logging
+import os
 import signal
 import tempfile
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import IO
 
 from .access import AccessConfig, load_access, save_access
 from .cc_schema import schema_json
 from .cc_worker import CcSpawnSpec, CcWorker
 from .config import Config
 from .db.database import Database
-from .db.messages import insert_tool_call
+from .db.messages import fetch_unconsumed_inbound, insert_tool_call
 from .db.reminders import insert_auto_seeded_reminder, pending_with_auto_seed_key
 from .engine import Engine
 from .instructions_store import InstructionsStore
@@ -259,6 +262,51 @@ class _App:
     dispatcher: TelegramDispatcher | None = None
     engine: Engine | None = None
     reminder_task: asyncio.Task | None = None
+    #: Open handle to ``data/.lock`` — held for the process lifetime so
+    #: the flock stays alive. Released automatically on any exit.
+    lock: IO[str] | None = None
+
+
+def _acquire_instance_lock(config: Config) -> IO[str]:
+    """Take an exclusive flock on ``data/.lock`` or exit with a clear message.
+
+    Two pyclaudir processes on one data dir would double-fire reminders
+    and fight over the saved CC session, so refuse to boot. The flock
+    dies with the process — including SIGKILL — so there is no stale-lock
+    handling. The PID inside the file is informational for the operator.
+    """
+    lock_path = config.data_dir / ".lock"
+    handle = lock_path.open("w")
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        handle.close()
+        raise SystemExit(
+            f"another pyclaudir instance is already running on {config.data_dir} "
+            "(data/.lock is held). Stop it, or give this instance its own "
+            "PYCLAUDIR_DATA_DIR."
+        )
+    handle.write(str(os.getpid()))
+    handle.flush()
+    return handle
+
+
+async def _replay_unconsumed(db: Database, engine: Engine) -> None:
+    """Re-submit inbound messages buffered but never handed to CC.
+
+    Runs once at boot, after the engine starts and before the dispatcher
+    starts polling, so replayed messages can't interleave with fresh
+    inbound. The debounce re-batches them into one turn.
+    """
+    messages = await fetch_unconsumed_inbound(db)
+    if not messages:
+        return
+    log.info(
+        "replaying %d message(s) buffered before the last shutdown",
+        len(messages),
+    )
+    for m in messages:
+        await engine.submit(m)
 
 
 async def _open_db_and_stores(config: Config) -> tuple[Database, Plugins, _Stores]:
