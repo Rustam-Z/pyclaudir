@@ -518,9 +518,8 @@ async def _run_until_stopped(app: _App) -> None:
     try:
         await stop_event.wait()
     finally:
-        # Persist session id first so the next start resumes it —
-        # unless /reset_session asked for a fresh context.
-        if app.worker.session_id and not app.dispatcher.session_reset_requested:
+        # Persist session id first so the next start resumes it.
+        if app.worker.session_id:
             app.config.session_id_path.write_text(app.worker.session_id)
         app.reminder_task.cancel()
         await app.dispatcher.stop()

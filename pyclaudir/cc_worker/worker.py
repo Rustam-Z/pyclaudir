@@ -421,6 +421,29 @@ class CcWorker(CcEventHandlerMixin):
         await self._terminate_proc()
         await self.start()
 
+    async def reset_session(self) -> None:
+        """Drop the session id and respawn CC with a fresh, empty context.
+
+        In-process counterpart of stale-session recovery: the supervisor's
+        intentional-abort path respawns the subprocess, and ``build_argv``
+        omits ``--resume`` because the spec no longer carries a session id.
+        Does not consume the crash budget. If a turn is in flight, a
+        sentinel result unblocks the engine immediately (same trick as the
+        tool-error breaker).
+        """
+        log.warning(
+            "session reset: dropping session_id=%s, respawning fresh",
+            self._session_id,
+        )
+        self.spec = dataclasses.replace(self.spec, session_id=None)
+        self._session_id = None
+        self._supervisor_abort_reason = "session-reset"
+        if self._current_turn is not None:
+            sentinel = TurnResult(aborted_reason="session-reset")
+            self._result_queue.put_nowait(sentinel)
+            self._current_turn = None
+        await self._terminate_proc()
+
     # ------------------------------------------------------------------
     # Send / receive
     # ------------------------------------------------------------------

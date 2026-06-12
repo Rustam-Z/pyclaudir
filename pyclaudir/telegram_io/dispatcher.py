@@ -52,6 +52,8 @@ class EnginePort(Protocol):
 
     async def submit(self, msg: ChatMessage) -> None: ...
 
+    async def reset_session(self) -> None: ...
+
     def prime_typing(self, chat_id: int) -> None: ...
 
     @property
@@ -135,9 +137,6 @@ class TelegramDispatcher(OwnerCommandsMixin):
         self.chat_titles: dict[int, str] = (
             chat_titles if chat_titles is not None else {}
         )
-        #: Set by ``/reset_session`` so the shutdown path skips re-persisting
-        #: the live CC session id — the next boot must start a fresh session.
-        self.session_reset_requested: bool = False
         # AIORateLimiter queues outbound calls under Telegram's flood
         # limits and honours 429 retry_after, so a long multi-chunk reply
         # can't trip flood control and abort the turn via the tool-error

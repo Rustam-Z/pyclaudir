@@ -22,7 +22,11 @@ CONTROL_ACTION_SCHEMA: dict = {
         "action": {
             "type": "string",
             "enum": ["stop", "sleep", "heartbeat"],
-            "description": "What to do after this turn.",
+            "description": (
+                "What to do after this turn. 'stop' is valid only after a "
+                "reply was delivered via send_message or reply_to_message — "
+                "plain text blocks are never shown to the user."
+            ),
         },
         "reason": {
             "type": "string",

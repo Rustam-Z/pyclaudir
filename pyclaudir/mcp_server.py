@@ -13,11 +13,9 @@ FastMCP.
 
 from __future__ import annotations
 
-import importlib
 import inspect
 import json
 import logging
-import pkgutil
 import tempfile
 import time
 from pathlib import Path
@@ -27,33 +25,13 @@ import uvicorn
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.utilities.types import Image
 
-from . import tools as tools_pkg
+from .tools import discover_tool_classes
 from .tools.base import BaseTool, ToolContext, ToolResult
 
 log = logging.getLogger(__name__)
 
 #: The MCP "server name" Claude sees. Tool names become ``mcp__<server>__<name>``.
 MCP_SERVER_NAME = "pyclaudir"
-
-
-def discover_tool_classes() -> list[type[BaseTool]]:
-    """Walk ``pyclaudir.tools`` and return every concrete BaseTool subclass."""
-    found: list[type[BaseTool]] = []
-    seen: set[str] = set()
-    for mod_info in pkgutil.iter_modules(tools_pkg.__path__):
-        if mod_info.name in {"base", "__init__"}:
-            continue
-        module = importlib.import_module(f"{tools_pkg.__name__}.{mod_info.name}")
-        for _, obj in inspect.getmembers(module, inspect.isclass):
-            if not issubclass(obj, BaseTool) or obj is BaseTool:
-                continue
-            if inspect.isabstract(obj):
-                continue
-            if obj.__name__ in seen:
-                continue
-            seen.add(obj.__name__)
-            found.append(obj)
-    return found
 
 
 def _make_wrapper(tool: BaseTool, db_logger):

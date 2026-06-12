@@ -134,6 +134,15 @@ class Engine(TypingIndicatorMixin):
         self._pending_callbacks = []
         self._turn_callbacks = []
 
+    async def reset_session(self) -> None:
+        """Owner-requested fresh CC session — delegates to the worker.
+
+        If a turn is in flight, the worker queues a sentinel result that
+        unblocks the control loop; ``_handle_turn_result`` cleans up the
+        engine-side turn state when it arrives.
+        """
+        await self._worker.reset_session()
+
     # ------------------------------------------------------------------
     # Introspection (read-only, used by /health)
     # ------------------------------------------------------------------
@@ -469,11 +478,34 @@ class Engine(TypingIndicatorMixin):
             except Exception:
                 log.exception("turn-success callback failed")
 
+    async def _handle_aborted_turn(self, result: "TurnResult") -> None:
+        """Handle a short-circuited turn (``aborted_reason`` set).
+
+        - ``session-reset``: owner asked for a fresh session mid-turn.
+          CC never finished the turn, so callbacks are discarded —
+          reminders stay ``pending`` and re-fire into the fresh session
+          on the next loop tick (#22).
+        - ``tool-error-limit``: don't notify here — ``_on_cc_crash``
+          tells the user when the subprocess exits, so ``active_chats``
+          stays intact for that callback. CC saw the messages before
+          the abort, so callbacks fire — reminders advance and don't
+          loop on a poisoned state.
+
+        Neither path kicks ``_pending`` — the subprocess is mid-respawn.
+        """
+        if result.aborted_reason == "session-reset":
+            log.info("turn aborted: session reset requested by owner")
+            self._turn_callbacks = []
+            self._turn.active_chats.clear()
+            return
+        log.error("turn aborted: %s", result.aborted_reason)
+        await self._fire_turn_callbacks()
+
     async def _handle_turn_result(self, result: "TurnResult") -> None:
         """Process a successfully-returned :class:`TurnResult`.
 
-        Four outcome paths: tool-error-limit abort (worker scheduled
-        termination, ``_on_cc_crash`` notifies), stderr-classified
+        Four outcome paths: short-circuited turn (``aborted_reason``
+        set — see :meth:`_handle_aborted_turn`), stderr-classified
         failure (rate-limit/auth/quota), dropped-text (no
         ``send_message``), or a clean turn — possibly with a follow-up
         ``sleep`` action and pending messages to kick next.
@@ -481,14 +513,8 @@ class Engine(TypingIndicatorMixin):
         self._is_processing.clear()
         await self._stop_typing()
 
-        if result.aborted_reason == "tool-error-limit":
-            # Don't notify here — ``_on_cc_crash`` will tell the user
-            # when the subprocess exits. Leave ``_active_chats`` alone
-            # so the callback knows who to notify.
-            log.error("turn aborted: tool-error-limit")
-            # CC saw the messages before the abort — fire callbacks so
-            # reminders advance and don't loop on a poisoned state.
-            await self._fire_turn_callbacks()
+        if result.aborted_reason is not None:
+            await self._handle_aborted_turn(result)
             return
 
         action = result.control.action if result.control else None

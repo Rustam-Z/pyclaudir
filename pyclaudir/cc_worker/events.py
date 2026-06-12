@@ -23,6 +23,9 @@ class TurnResult:
     control: ControlAction | None = None
     #: Stderr lines captured during the turn (most recent last).
     stderr_tail: list[str] = field(default_factory=list)
+    #: True when any chat-delivery tool (``send_message`` & co.) was
+    #: called this turn — i.e. the user actually received something.
+    sent_to_chat: bool = False
     #: True iff CC produced text without ever calling ``send_message``.
     dropped_text: bool = False
     #: Non-None when pyclaudir short-circuited this turn (e.g.

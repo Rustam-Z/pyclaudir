@@ -2,9 +2,8 @@
 
 Relocated verbatim from ``dispatcher.py`` in the file-size split.
 :class:`OwnerCommandsMixin` is a mixin (not a standalone object) because
-the handlers read the dispatcher's ``config``, ``db``, ``engine``,
-``application``, and ``session_reset_requested`` attributes, all defined
-in ``TelegramDispatcher.__init__``.
+the handlers read the dispatcher's ``config``, ``db``, ``engine``, and
+``application`` attributes, all defined in ``TelegramDispatcher.__init__``.
 """
 
 from __future__ import annotations
@@ -63,25 +62,25 @@ class OwnerCommandsMixin:
     async def _cmd_reset_session(
         self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE
     ) -> None:
-        """Owner-only: drop the persisted CC session id and restart.
+        """Owner-only: drop the CC session and respawn with a fresh context.
 
-        The escape hatch for unbounded context growth — the next boot
-        spawns Claude Code without ``--resume``, i.e. a fresh, empty
-        context. Chat history (SQLite) and memories (markdown) survive.
+        The escape hatch for unbounded context growth — the worker
+        respawns Claude Code without ``--resume``, i.e. a fresh, empty
+        context. The bot itself stays up; chat history (SQLite) and
+        memories (markdown) survive.
         """
         if not self._is_owner(update):
             return
-        log.warning("/reset_session received from owner; clearing session and restarting")
-        self.session_reset_requested = True
+        log.warning("/reset_session received from owner; respawning cc with a fresh session")
         self.config.session_id_path.unlink(missing_ok=True)
+        await self.engine.reset_session()
         try:
             await update.effective_message.reply_text(
-                "Session cleared — restarting with a fresh context. "
+                "Session cleared — Claude restarted with a fresh context. "
                 "Chat history and memories are preserved."
             )
         except Exception:
             pass
-        os.kill(os.getpid(), signal.SIGTERM)
 
     async def _cmd_health(
         self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE

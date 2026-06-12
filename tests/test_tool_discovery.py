@@ -9,14 +9,35 @@ from pathlib import Path
 import pytest
 
 from pyclaudir import tools as tools_pkg
+from pyclaudir.cc_worker.event_handlers import CHAT_DELIVERY_TOOLS
 from pyclaudir.mcp_server import discover_tool_classes
 from pyclaudir.tools.base import BaseTool, ToolContext
+
+MCP_PREFIX = "mcp__pyclaudir__"
 
 
 def test_now_tool_is_discovered() -> None:
     classes = discover_tool_classes()
     names = {c.name for c in classes}
     assert "now" in names
+
+
+def test_chat_delivery_tools_pin_to_real_tools() -> None:
+    """``CHAT_DELIVERY_TOOLS`` is the source of truth for "did the user
+    actually receive something" in dropped-text detection. Pin the set,
+    and prove every entry maps to a real tool so a rename can't silently
+    weaken detection (the one risk of a hand-maintained list)."""
+    assert CHAT_DELIVERY_TOOLS == {
+        f"{MCP_PREFIX}send_message",
+        f"{MCP_PREFIX}reply_to_message",
+        f"{MCP_PREFIX}send_photo",
+        f"{MCP_PREFIX}send_memory_document",
+        f"{MCP_PREFIX}create_poll",
+    }
+    discovered = {c.name for c in discover_tool_classes()}
+    for namespaced in CHAT_DELIVERY_TOOLS:
+        bare = namespaced.removeprefix(MCP_PREFIX)
+        assert bare in discovered, f"{namespaced} maps to no real tool"
 
 
 def test_basetool_is_not_itself_returned() -> None:

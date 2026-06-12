@@ -334,38 +334,73 @@ def test_on_giveup_fires_before_crashloop_raises(spec: CcSpawnSpec, cfg: Config)
     assert calls == [worker._crash_limit]
 
 
-def test_structured_output_with_text_blocks_is_not_dropped_text(spec: CcSpawnSpec, cfg: Config) -> None:
-    """If the model emits text AND calls StructuredOutput, dropped_text
-    should be False because the turn ended cleanly with a control action."""
-    worker = CcWorker(spec, cfg)
-    worker._current_turn = TurnResult()
-    # Model emits some thinking text
-    worker._handle_event({
-        "type": "assistant",
-        "message": {"content": [{"type": "text", "text": "Let me think..."}]},
-    })
-    # Then calls StructuredOutput
-    worker._handle_event({
+def _structured_output_event(uid: str = "toolu_so") -> dict:
+    return {
         "type": "assistant",
         "message": {
             "content": [
                 {
                     "type": "tool_use",
                     "name": "StructuredOutput",
-                    "id": "toolu_so",
+                    "id": uid,
                     "input": {"action": "stop", "reason": "done"},
                 }
             ]
         },
+    }
+
+
+def test_text_without_delivery_tool_is_dropped_even_with_control(
+    spec: CcSpawnSpec, cfg: Config
+) -> None:
+    """Regression: the model wrote its answer as plain text, then called
+    StructuredOutput(stop) — but never ``send_message``. The user received
+    nothing, so dropped_text must be True so the engine nags the model to
+    resend via the tool. (StructuredOutput is a clean turn-end signal,
+    not proof of delivery.)"""
+    worker = CcWorker(spec, cfg)
+    worker._current_turn = TurnResult()
+    worker._handle_event({
+        "type": "assistant",
+        "message": {"content": [{"type": "text", "text": "Yep, here I am."}]},
     })
-    # Result event
+    worker._handle_event(_structured_output_event())
     worker._handle_event({"type": "result"})
     queued = worker._result_queue.get_nowait()
-    assert queued.control is not None
+    assert queued.control is not None, "StructuredOutput must still parse"
     assert queued.control.action == "stop"
-    # Has text blocks BUT also has control → NOT dropped text
-    assert queued.text_blocks == ["Let me think..."]
-    assert queued.dropped_text is False
+    assert queued.dropped_text is True, (
+        "text never reached the user — the corrective nag must fire"
+    )
+
+
+def test_text_with_delivery_tool_is_not_dropped(spec: CcSpawnSpec, cfg: Config) -> None:
+    """Text blocks alongside a real ``send_message`` call are fine — the
+    user got the message, no nag needed."""
+    worker = CcWorker(spec, cfg)
+    worker._current_turn = TurnResult()
+    worker._handle_event({
+        "type": "assistant",
+        "message": {"content": [{"type": "text", "text": "Sending now..."}]},
+    })
+    worker._handle_event({
+        "type": "assistant",
+        "message": {
+            "content": [
+                {
+                    "type": "tool_use",
+                    "name": "mcp__pyclaudir__send_message",
+                    "id": "toolu_send",
+                    "input": {"chat_id": 587272213, "text": "Yep, here I am."},
+                }
+            ]
+        },
+    })
+    worker._handle_event(_structured_output_event())
+    worker._handle_event({"type": "result"})
+    queued = worker._result_queue.get_nowait()
+    assert queued.sent_to_chat is True, "send_message call must be tracked"
+    assert queued.dropped_text is False, "delivered text must not trigger the nag"
 
 
 def test_stale_session_pattern_detection(spec: CcSpawnSpec, cfg: Config) -> None:
