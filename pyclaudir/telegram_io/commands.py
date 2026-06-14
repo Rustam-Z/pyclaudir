@@ -59,6 +59,26 @@ class OwnerCommandsMixin:
             pass
         os.kill(os.getpid(), signal.SIGTERM)
 
+    async def _cmd_pause(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """Owner-only: drop all inbound messages until /resume. In-memory only."""
+        if not self._is_owner(update):
+            return
+        self._paused = True
+        log.warning("/pause received from owner; dropping inbound messages")
+        await update.effective_message.reply_text(
+            "⏸ paused — messages dropped until /resume"
+        )
+
+    async def _cmd_resume(
+        self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        """Owner-only: re-enable message forwarding. Paused messages stay dropped."""
+        if not self._is_owner(update):
+            return
+        self._paused = False
+        log.warning("/resume received from owner; forwarding inbound messages")
+        await update.effective_message.reply_text("▶ resumed")
+
     async def _cmd_reset_session(
         self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE
     ) -> None:
@@ -95,6 +115,8 @@ class OwnerCommandsMixin:
         if not self._is_owner(update):
             return
         lines: list[str] = ["*pyclaudir health*"]
+        status = "⏸ PAUSED (dropping messages)" if self._paused else "active"
+        lines.append(f"- status: {status}")
         try:
             row = await self.db.fetch_one(
                 "SELECT MAX(timestamp) AS last FROM messages WHERE direction='out'"
@@ -103,23 +125,7 @@ class OwnerCommandsMixin:
             lines.append(f"- last bot send: `{last_tx}` UTC")
         except Exception as exc:
             lines.append(f"- last bot send: query error ({exc})")
-        try:
-            row = await self.db.fetch_one(
-                "SELECT status, cron_expr, trigger_at FROM reminders "
-                "WHERE auto_seed_key = 'self-reflection-default' "
-                "ORDER BY id DESC LIMIT 1"
-            )
-            if row is None:
-                lines.append(
-                    "- self-reflection reminder: MISSING (will re-seed on restart)"
-                )
-            else:
-                lines.append(
-                    f"- self-reflection reminder: {row['status']} "
-                    f"(cron `{row['cron_expr']}`, next `{row['trigger_at']}` UTC)"
-                )
-        except Exception as exc:
-            lines.append(f"- self-reflection reminder: query error ({exc})")
+        lines.extend(await self._health_reminder_lines())
         try:
             row = await self.db.fetch_one(
                 "SELECT COUNT(*) AS c FROM rate_limits WHERE notice_sent = 1"
@@ -132,6 +138,23 @@ class OwnerCommandsMixin:
         await update.effective_message.reply_text(
             "\n".join(lines), parse_mode="Markdown"
         )
+
+    async def _health_reminder_lines(self) -> list[str]:
+        """Health section: state of the self-reflection auto-seed reminder."""
+        try:
+            row = await self.db.fetch_one(
+                "SELECT status, cron_expr, trigger_at FROM reminders "
+                "WHERE auto_seed_key = 'self-reflection-default' "
+                "ORDER BY id DESC LIMIT 1"
+            )
+        except Exception as exc:
+            return [f"- self-reflection reminder: query error ({exc})"]
+        if row is None:
+            return ["- self-reflection reminder: MISSING (will re-seed on restart)"]
+        return [
+            f"- self-reflection reminder: {row['status']} "
+            f"(cron `{row['cron_expr']}`, next `{row['trigger_at']}` UTC)"
+        ]
 
     def _health_engine_lines(self) -> list[str]:
         """Health section: current turn duration and queued-message count."""
@@ -286,6 +309,8 @@ class OwnerCommandsMixin:
             BotCommand("allow", "add to allowlist: /allow <user|group> <id>"),
             BotCommand("deny", "remove from allowlist: /deny <user|group> <id>"),
             BotCommand("policy", "set policy: /policy <owner_only|allowlist|open>"),
+            BotCommand("pause", "drop inbound messages until /resume"),
+            BotCommand("resume", "re-enable message forwarding"),
             BotCommand("kill", "stop the bot"),
             BotCommand("reset_session", "fresh Claude session (history kept)"),
         ]

@@ -132,6 +132,11 @@ class TelegramDispatcher(OwnerCommandsMixin):
         #: :meth:`start` is called, otherwise inbound messages will crash
         #: when the handler tries to forward them.
         self.engine: EnginePort | None = engine
+        #: Owner /pause toggle. While True, inbound user messages from ALL
+        #: chats are dropped (not persisted, not forwarded). In-memory only:
+        #: a restart starts un-paused. Flipped by /pause and /resume
+        #: (see OwnerCommandsMixin).
+        self._paused: bool = False
         #: Shared with ToolContext.chat_titles so outbound logs can render
         #: the chat's display name. We populate it from every inbound message.
         self.chat_titles: dict[int, str] = (
@@ -159,6 +164,8 @@ class TelegramDispatcher(OwnerCommandsMixin):
         self.application.add_handler(
             CommandHandler("reset_session", self._cmd_reset_session)
         )
+        self.application.add_handler(CommandHandler("pause", self._cmd_pause))
+        self.application.add_handler(CommandHandler("resume", self._cmd_resume))
         self.application.add_handler(CommandHandler("health", self._cmd_health))
         self.application.add_handler(CommandHandler("audit", self._cmd_audit))
         # Owner-only access management commands.
@@ -201,11 +208,10 @@ class TelegramDispatcher(OwnerCommandsMixin):
         if cm is None:
             return
         cm.received_at_monotonic = received_at
-        log.info(
-            "hot-path stage=receipt chat=%s msg=%s t_ms=0",
-            cm.chat_id,
-            cm.message_id,
-        )
+        if self._paused:
+            log.info("paused — dropping chat=%s msg=%s", cm.chat_id, cm.message_id)
+            return
+        log.info("hot-path stage=receipt chat=%s msg=%s t_ms=0", cm.chat_id, cm.message_id)
 
         self._remember_chat_title(update)
         chat_type = update.effective_chat.type if update.effective_chat else None

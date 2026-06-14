@@ -254,6 +254,15 @@ def reminder_rows(db_path: Path, token: str) -> list[sqlite3.Row]:
     )
 
 
+def message_rows(db_path: Path, token: str) -> list[sqlite3.Row]:
+    """`messages` rows whose text contains ``token`` (either direction).
+
+    Proves a dropped (paused) message was never persisted."""
+    return read_only_query(
+        db_path, "SELECT * FROM messages WHERE text LIKE ?", (f"%{token}%",)
+    )
+
+
 def tool_calls_since(db_path: Path, since: str) -> list[sqlite3.Row]:
     """`tool_calls` rows recorded at or after ``since`` (a "%Y-%m-%d %H:%M:%S"
     UTC string) — for correlating a test's action to the tools it triggered."""

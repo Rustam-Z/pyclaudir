@@ -200,6 +200,24 @@ async def test_owner_dm_still_persisted(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_paused_owner_message_dropped_not_persisted(tmp_path: Path) -> None:
+    """Issue #41 — while paused, even an allowed owner DM is dropped:
+    not written to ``messages`` and not forwarded to the engine."""
+    db = await _open(tmp_path)
+    try:
+        dispatcher = _dispatcher(_cfg(tmp_path), db)
+        dispatcher._paused = True
+        await dispatcher._on_message(
+            _make_update(user_id=OWNER, chat_id=OWNER, chat_type="private"),
+            None,
+        )
+        assert await _message_count(db) == 0, "paused message must not be persisted"
+        dispatcher.engine.submit.assert_not_awaited()
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
 async def test_disallowed_edit_does_not_call_mark_edited(tmp_path: Path) -> None:
     db = await _open(tmp_path)
     try:

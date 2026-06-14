@@ -255,11 +255,16 @@ hides the `/` menu from non-owners.
 /deny user <id>              Remove user
 /deny group <chat_id>        Remove chat
 /policy <owner_only|allowlist|open>
+/pause                       Drop all inbound messages until /resume —
+                             messages still arrive but are dropped (not
+                             queued); in-memory only, resets on restart
+/resume                      Re-enable message forwarding
 /kill                        SIGTERM (graceful shutdown)
 /reset_session               Clear the saved Claude session id and restart —
                              fresh context, chat history and memories kept
-/health                      Last send, reminder state, rate-limit notices,
-                             current turn duration, queued messages
+/health                      Pause status, last send, reminder state,
+                             rate-limit notices, current turn duration,
+                             queued messages
 /audit                       Recent tool failures, backups, memory footprint
 ```
 
