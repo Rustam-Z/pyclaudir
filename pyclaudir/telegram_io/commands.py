@@ -8,6 +8,7 @@ the handlers read the dispatcher's ``config``, ``db``, ``engine``, and
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import signal
@@ -228,6 +229,40 @@ class OwnerCommandsMixin:
         except Exception as exc:
             return [f"*memory footprint:* error ({exc})"]
 
+    async def _cmd_usage(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """Relay Claude Code's own ``/usage`` output verbatim — owner-only.
+
+        Runs a short-lived headless ``claude --print /usage`` and forwards its
+        text, so the bot shows exactly what Claude Code reports (subscription
+        session and weekly rate limits with reset times).
+        """
+        if not self._is_owner(update):
+            return
+        output = await self._fetch_claude_usage()
+        await update.effective_message.reply_text(output)
+
+    async def _fetch_claude_usage(self) -> str:
+        """Run ``claude --print /usage`` and return its text, or an error line."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                self.config.claude_code_bin,
+                "--print",
+                "/usage",
+                "--output-format",
+                "text",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+        except (asyncio.TimeoutError, OSError) as exc:
+            log.warning("/usage subprocess failed: %s", exc)
+            return f"Could not read Claude Code usage: {exc}"
+        if proc.returncode != 0:
+            err = stderr.decode(errors="replace").strip()[:200]
+            log.warning("/usage exited %s: %s", proc.returncode, err)
+            return f"Could not read Claude Code usage (exit {proc.returncode})."
+        return stdout.decode(errors="replace").strip() or "(no usage output)"
+
     # ------------------------------------------------------------------
     # Access management commands (owner-only)
     # ------------------------------------------------------------------
@@ -305,6 +340,7 @@ class OwnerCommandsMixin:
         commands = [
             BotCommand("health", "quick health readout"),
             BotCommand("audit", "recent failures, backups, memory footprint"),
+            BotCommand("usage", "Claude Code usage and rate limits"),
             BotCommand("access", "show access policy"),
             BotCommand("allow", "add to allowlist: /allow <user|group> <id>"),
             BotCommand("deny", "remove from allowlist: /deny <user|group> <id>"),

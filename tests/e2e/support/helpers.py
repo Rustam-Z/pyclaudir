@@ -22,9 +22,10 @@ _BURST_TIMEOUT_S = 90.0  # how long to wait for every burst reply to land
 # the others bound how long an observable (reaction, linkage row, full burst,
 # fired reminder) takes to appear.
 MAX_TEXT_REPLY_S = 5.0  # a plain text answer
-MAX_COMMAND_REPLY_S = 5.0  # an owner control command (/pause, /resume) acks
-MAX_MEMORY_REPLY_S = 10.0  # a turn that writes/reads a memory file
 MAX_REACTION_S = 5.0  # a turn that adds an emoji reaction
+MAX_COMMAND_REPLY_S = 5.0  # an owner control command (/pause, /resume) acks
+MAX_USAGE_REPLY_S = 10.0  # /usage shells out to a short-lived `claude --print`
+MAX_MEMORY_REPLY_S = 10.0  # a turn that writes/reads a memory file
 MAX_SKILL_REPLY_S = 30.0  # a turn that reads a skill first
 MAX_REMINDER_REPLY_S = 30.0  # scheduling a reminder (reads the reminder-format skill)
 MAX_BURST_S = 10.0  # every reply to a 3-message burst lands

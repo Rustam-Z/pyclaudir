@@ -144,7 +144,9 @@ pulled into `plugins.json` via `${VAR}` references.
 Access lives in `access.json` at the repo root (hot-reloaded). One `policy`
 gates DMs and groups: `owner_only` (default, owner DM only) · `allowlist`
 (`allowed_users` for DMs, `allowed_chats` for groups) · `open` (everyone).
-Owner-only commands: `/access`, `/allow`, `/deny`, `/policy`, `/pause`, `/resume`, `/kill`, `/health`, `/audit`, `/reset_session`.
+Owner-only commands: `/access`, `/allow`, `/deny`, `/policy`, `/pause`, `/resume`, `/kill`, `/health`, `/audit`, `/usage`, `/reset_session`.
+`/usage` relays Claude Code's own usage report (subscription session and weekly
+rate limits, with reset times) by shelling out to `claude --print /usage`.
 Blocked DMs get one canned "this is a private assistant" reply on their
 first message; blocked groups stay silent.
 
