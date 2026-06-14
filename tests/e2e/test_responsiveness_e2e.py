@@ -27,7 +27,7 @@ from tests.e2e.support.helpers import (
 log = logging.getLogger(__name__)
 
 
-async def test_dm_reply_is_prompt(
+async def test_reply_is_prompt_dm(
     pyclaudir_sut: Sut, tester_client: TelegramClient, dm: Conversation
 ) -> None:
     # given a warm bot (the first turn pays startup cost; not measured)

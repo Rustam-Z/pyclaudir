@@ -17,17 +17,16 @@ from telethon.tl.custom.message import Message  # type: ignore[import-untyped]
 
 _QUIET_WINDOW_S = 3.0  # silence that marks a multi-chunk reply as complete
 _BURST_TIMEOUT_S = 90.0  # how long to wait for every burst reply to land
-_REACTION_TIMEOUT_S = 30.0  # how long to wait for the bot's reaction to appear
 
 # Response-time limits (seconds). Reply limits check the first chunk (t_first_s);
 # the others bound how long an observable (reaction, linkage row, full burst,
 # fired reminder) takes to appear.
 MAX_TEXT_REPLY_S = 5.0  # a plain text answer
 MAX_MEMORY_REPLY_S = 10.0  # a turn that writes/reads a memory file
-MAX_REACTION_S = 10.0  # a turn that adds an emoji reaction
+MAX_REACTION_S = 5.0  # a turn that adds an emoji reaction
 MAX_SKILL_REPLY_S = 30.0  # a turn that reads a skill first
 MAX_REMINDER_REPLY_S = 30.0  # scheduling a reminder (reads the reminder-format skill)
-MAX_BURST_S = 30.0  # every reply to a 3-message burst lands
+MAX_BURST_S = 10.0  # every reply to a 3-message burst lands
 MAX_RENDER_REPLY_S = 60.0  # a turn that renders an image
 MAX_REMINDER_FIRE_S = 160.0  # a scheduled reminder actually fires (delayed)
 
@@ -187,7 +186,7 @@ async def expect_silence(
 async def send_burst(
     client: TelegramClient, convo: Conversation, texts: list[str], expect: list[str]
 ) -> str:
-    """Send every text back-to-back, then collect the bot's replies until each
+    """Send every text one per second, then collect the bot's replies until each
     substring in ``expect`` has appeared (or a timeout). Returns the joined
     reply text — used to prove a message burst is fully handled."""
     chunks: list[Message] = []
@@ -200,7 +199,9 @@ async def send_burst(
     )
     client.add_event_handler(_collect, evt)
     try:
-        for text in texts:
+        for i, text in enumerate(texts):
+            if i:
+                await asyncio.sleep(1.0)  # pause between messages in a burst
             outgoing = f"@{convo.mention} {text}" if convo.mention else text
             await client.send_message(convo.chat, outgoing)
         deadline = time.monotonic() + _BURST_TIMEOUT_S
@@ -282,11 +283,16 @@ def _has_reaction(msg: Message, emoji: str) -> bool:
 async def wait_for_reaction(
     client: TelegramClient, chat: object, message_id: int, emoji: str
 ) -> bool:
-    """Poll a message until the bot's ``emoji`` reaction appears (or timeout)."""
-    deadline = time.monotonic() + _REACTION_TIMEOUT_S
+    """Poll a message until the bot's ``emoji`` reaction appears (or timeout).
+
+    Waits slightly past ``MAX_REACTION_S`` with a fine interval so the caller
+    can time the true arrival and let ``assert_within`` be the 5s gate, instead
+    of the poll cutoff silently masking a reaction that beat the limit.
+    """
+    deadline = time.monotonic() + MAX_REACTION_S
     while time.monotonic() < deadline:
         msg = await client.get_messages(chat, ids=message_id)
         if msg is not None and _has_reaction(msg, emoji):
             return True
-        await asyncio.sleep(1.5)
+        await asyncio.sleep(0.25)
     return False

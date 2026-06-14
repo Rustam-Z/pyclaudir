@@ -18,7 +18,7 @@ from tests.e2e.support.harness import E2EConfig, Sut, set_access, unauthorized_r
 from tests.e2e.support.helpers import Conversation, expect_silence, new_sentinel
 
 
-async def test_unauthorized_group_is_silent_and_logged(
+async def test_unauthorized_is_silent_and_logged_group(
     pyclaudir_sut: Sut,
     tester_client: TelegramClient,
     group: Conversation,

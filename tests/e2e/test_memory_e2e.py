@@ -64,7 +64,7 @@ async def test_memory_write_and_read_group(
     await _assert_write_and_read(pyclaudir_sut, tester_client, group)
 
 
-async def test_memory_survives_session_reset(
+async def test_memory_survives_session_reset_dm(
     pyclaudir_sut: Sut, tester_client: TelegramClient, dm: Conversation
 ) -> None:
     # given a codeword written to memory

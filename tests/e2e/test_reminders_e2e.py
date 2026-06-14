@@ -66,7 +66,7 @@ async def test_reminder_is_scheduled_group(
 
 
 @pytest.mark.slow
-async def test_reminder_fires(
+async def test_reminder_fires_dm(
     pyclaudir_sut: Sut, tester_client: TelegramClient, dm: Conversation
 ) -> None:
     token = new_sentinel("FIRE")
