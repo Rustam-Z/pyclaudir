@@ -127,3 +127,46 @@ async def test_resumed_processes_group(
     then   it is answered within MAX_TEXT_REPLY_S, proving the CC session stayed warm.
     """
     await _assert_resumed_processes(tester_client, dm, group)
+
+
+@pytest.mark.slow
+async def test_pause_resume_lifecycle_group(
+    pyclaudir_sut: Sut,
+    tester_client: TelegramClient,
+    dm: Conversation,
+    group: Conversation,
+) -> None:
+    """Pausing then resuming from the owner DM toggles group processing.
+
+    given  the owner /pause from the DM
+    when   a group message arrives while paused, then it is dropped (no reply,
+           never reaches the DB); when the owner /resume and a normal group
+           message arrives, then it is answered, proving the round-trip restores
+           group processing within the command/text latency bounds.
+    """
+    try:
+        paused = await send_and_wait(tester_client, dm, "/pause")
+        assert_reply_within(paused, MAX_COMMAND_REPLY_S, "pause ack")
+        assert "paus" in paused.text.lower(), f"no pause ack; got {paused.text!r}"
+
+        token = new_sentinel("DROPPED")
+        replies = await expect_silence(tester_client, group, f"hello {token}")
+        assert not replies, (
+            f"expected silence while paused; got {[m.raw_text for m in replies]!r}"
+        )
+        rows = message_rows(pyclaudir_sut.db_path, token)
+        assert not rows, f"paused message leaked into DB: {[dict(r) for r in rows]!r}"
+
+        resumed = await send_and_wait(tester_client, dm, "/resume")
+        assert_reply_within(resumed, MAX_COMMAND_REPLY_S, "resume ack")
+        assert "resum" in resumed.text.lower(), f"no resume ack; got {resumed.text!r}"
+
+        question, recall_token = recall_prompt()
+        reply = await send_and_wait(tester_client, group, question)
+        assert_reply_within(reply, MAX_TEXT_REPLY_S, "post-resume reply")
+        assert recall_token in reply.text, (
+            f"resumed reply missing {recall_token!r}: {reply.text!r}"
+        )
+    finally:
+        # idempotent safety net in case an assertion left the bot paused
+        await send_and_wait(tester_client, dm, "/resume")

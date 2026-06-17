@@ -135,7 +135,7 @@ async def send_burst(
 
 
 async def expect_silence(
-    client: TelegramClient, convo: Conversation, text: str, within: float = 10.0
+    client: TelegramClient, convo: Conversation, text: str, within: float = 15.0
 ) -> list[Message]:
     """Send ``text`` and collect any bot replies for ``within`` seconds.
 
