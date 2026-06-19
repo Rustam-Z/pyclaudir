@@ -194,6 +194,90 @@ async def test_stray_result_after_reset_is_not_enqueued(tmp_path: Path) -> None:
     assert worker._current_turn is None, "no phantom turn may be created"
 
 
+@pytest.mark.asyncio
+async def test_trailing_events_before_init_not_misattributed(
+    tmp_path: Path,
+) -> None:
+    """A prior cc-turn's trailing text+result, arriving after ``send()``
+    armed a fresh TurnResult but BEFORE that turn's ``system/init``, must be
+    dropped — not folded into the just-sent turn. cc runs one turn per stdin
+    message, and an injected message's tail can race the next ``send()``;
+    misattributing it spuriously set ``dropped_text`` and delivered a junk
+    message (the "Replied — I'm here." bug)."""
+    worker, _cfg, _terminated = _worker_with_stubbed_terminate(tmp_path)
+    # Stub stdin so the real send() path runs without a live subprocess.
+    worker._proc = MagicMock()
+    worker._proc.returncode = None
+    worker._proc.stdin = MagicMock()
+
+    async def fake_drain() -> None:
+        return None
+
+    worker._proc.stdin.drain = fake_drain  # type: ignore[assignment]
+
+    # Given the engine sends the real turn — the init-gate arms
+    await worker.send("the reference question")
+    assert worker._awaiting_turn_init is True, "send() must arm the init-gate"
+    tr_c = worker._current_turn
+    assert tr_c is not None
+
+    # When the PRIOR (injected) turn's trailing text + result drain in,
+    # before this turn's own system/init
+    worker._handle_event(
+        {
+            "type": "assistant",
+            "message": {"content": [{"type": "text", "text": "Replied — I'm here."}]},
+        }
+    )
+    worker._handle_event({"type": "result", "subtype": "success", "result": None})
+
+    # Then those stray events are dropped: TR_C untouched, nothing enqueued,
+    # the gate still armed, TR_C still the current turn
+    assert tr_c.text_blocks == [], "prior turn's text must not pollute TR_C"
+    assert worker._current_turn is tr_c, "stray result must not close TR_C early"
+    assert worker._result_queue.empty(), "no spurious turn may be enqueued"
+    assert worker._awaiting_turn_init is True, "gate stays armed until our init"
+
+    # When the real cc-turn for TR_C begins (its system/init), runs, and ends
+    # with a user-visible reply
+    worker._handle_event({"type": "system", "subtype": "init", "session_id": "sid-c"})
+    assert worker._awaiting_turn_init is False, "init clears the gate"
+    worker._handle_event(
+        {
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {"type": "text", "text": "TEST-REF answered"},
+                    {
+                        "type": "tool_use",
+                        "id": "t1",
+                        "name": "mcp__pyclaudir__telegram_send_message",
+                        "input": {},
+                    },
+                ]
+            },
+        }
+    )
+    worker._handle_event(
+        {
+            "type": "result",
+            "subtype": "success",
+            "result": {"action": "stop", "reason": "done"},
+        }
+    )
+
+    # Then exactly one TurnResult is enqueued — TR_C — with ONLY the real
+    # turn's data and dropped_text False (it took a user-visible action)
+    result = worker._result_queue.get_nowait()
+    assert worker._result_queue.empty(), "exactly one turn may be enqueued"
+    assert result is tr_c
+    assert result.text_blocks == ["TEST-REF answered"]
+    assert result.user_visible_action is True
+    assert result.dropped_text is False, (
+        "the spurious 'Replied — I'm here.' must never resurface as dropped text"
+    )
+
+
 # ----------------------------------------------------------------------
 # Engine sentinel handling
 # ----------------------------------------------------------------------

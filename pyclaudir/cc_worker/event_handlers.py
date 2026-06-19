@@ -58,6 +58,9 @@ class CcEventHandlerMixin:
     #: the mixin's reads type-check now that ``_handle_event`` no longer
     #: lazily creates the turn.
     _current_turn: TurnResult | None
+    #: Init-gate read by ``_handle_event`` / set by ``_on_system_init``;
+    #: defined in ``CcWorker.__init__`` (see worker.py).
+    _awaiting_turn_init: bool
 
     def _handle_event(self, event: dict[str, Any]) -> None:
         """Parse one stream-json event from the CC subprocess.
@@ -80,14 +83,14 @@ class CcEventHandlerMixin:
         if etype == "system" and event.get("subtype") == "init":
             self._on_system_init(event)
             return
-        if self._current_turn is None:
-            # No turn is in flight — this is a stray event from a terminated
-            # or already-completed session (e.g. a final result flushed by a
-            # dying subprocess while it's drained during reset/respawn).
-            # Dropping it keeps stale results from being enqueued and then
-            # consumed as the next session's turn result, which would orphan
-            # the real reply. A genuine turn always has its TurnResult created
-            # by send()/inject() before the subprocess can respond.
+        if self._current_turn is None or self._awaiting_turn_init:
+            # Drop: no turn is collecting events here. Either _current_turn is
+            # None (a stray event from a dying/terminated session — enqueuing
+            # it would orphan the next session's reply), or _awaiting_turn_init
+            # is set (a turn was just send()-ed but its own system/init hasn't
+            # arrived; cc runs one turn per stdin message, so these events
+            # belong to a PRIOR turn still draining — folding them in would
+            # misattribute them and could close the wrong turn early).
             return
         if etype == "assistant":
             self._on_assistant_event(event)
@@ -122,6 +125,10 @@ class CcEventHandlerMixin:
 
     def _on_system_init(self, event: dict[str, Any]) -> None:
         """Capture the CC session id and surface MCP-server init failures."""
+        # The real cc-turn for the most recent send() has begun: events from
+        # here on belong to it, not to a prior draining turn. Clear before the
+        # session_id read so an init without one still disarms the gate.
+        self._awaiting_turn_init = False
         sid = event.get("session_id")
         if isinstance(sid, str):
             self._session_id = sid

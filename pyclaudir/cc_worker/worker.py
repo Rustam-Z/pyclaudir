@@ -122,6 +122,15 @@ class CcWorker(CcEventHandlerMixin):
         self._inject_queue: asyncio.Queue[str] = asyncio.Queue()
         self._stderr_tail: list[str] = []
         self._current_turn: TurnResult | None = None
+        #: Init-gate for the freshly-sent turn. ``send()`` arms it; the next
+        #: ``system/init`` (the real start of this send's cc-turn) clears it.
+        #: While armed, assistant/result events are dropped — cc runs one turn
+        #: per stdin user message sequentially, so events arriving before our
+        #: own init belong to a *prior* turn still draining its trailing
+        #: text+result and must not be folded into the just-sent TurnResult.
+        #: Reset wherever ``_current_turn`` is force-cleared so it can't stay
+        #: stuck armed if the subprocess dies before its init.
+        self._awaiting_turn_init: bool = False
         self._session_id: str | None = spec.session_id
         self._crash_times: list[float] = []
         self._supervisor_task: asyncio.Task | None = None
@@ -446,6 +455,7 @@ class CcWorker(CcEventHandlerMixin):
             sentinel = TurnResult(aborted_reason="session-reset")
             self._result_queue.put_nowait(sentinel)
             self._current_turn = None
+        self._awaiting_turn_init = False
         await self._terminate_proc()
 
     # ------------------------------------------------------------------
@@ -457,6 +467,7 @@ class CcWorker(CcEventHandlerMixin):
         if self._proc is None or self._proc.stdin is None:
             raise RuntimeError("cc worker not started")
         self._current_turn = TurnResult()
+        self._awaiting_turn_init = True
         self._turn_tool_error_count = 0
         self._turn_first_tool_error_at = None
         self._cancel_tool_error_watchdog()
@@ -636,6 +647,7 @@ class CcWorker(CcEventHandlerMixin):
         sentinel.stderr_tail = list(self._stderr_tail)
         self._result_queue.put_nowait(sentinel)
         self._current_turn = None
+        self._awaiting_turn_init = False
         self._tool_error_abort_task = asyncio.create_task(
             self._terminate_proc(), name="cc-tool-error-abort",
         )
