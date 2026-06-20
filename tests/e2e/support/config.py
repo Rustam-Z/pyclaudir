@@ -38,14 +38,16 @@ _REQUIRED_ENV = (
     "PYCLAUDIR_EFFORT",
 )
 
-#: The single place to override an env value for the SUT. Empty means the SUT
-#: inherits the operator's ``.env`` as-is. Example: set
-#: ``PYCLAUDIR_RATE_LIMIT_PER_MIN="120"`` so the burst test isn't throttled by
-#: the app default of 20, or ``PYCLAUDIR_EFFORT="low"`` to keep e2e fast.
-SUT_ENV_OVERRIDES: dict[str, str] = {}
+#: Overrides applied over the operator's ``.env`` for the SUT (see ``child_env``).
+#: ``PYCLAUDIR_EFFORT="low"`` is pinned so turn latency stays fast and consistent
+#: regardless of the operator's setting — the per-test latency gates flake when a
+#: high-effort turn lands in the slow tail. Add e.g.
+#: ``PYCLAUDIR_RATE_LIMIT_PER_MIN="120"`` here if the burst test hits the default.
+SUT_ENV_OVERRIDES: dict[str, str] = {"PYCLAUDIR_EFFORT": "low"}
 
 _QUIET_WINDOW_S = 3.0  # silence that marks a multi-chunk reply as complete
 _BURST_TIMEOUT_S = 90.0  # how long to wait for every burst reply to land
+_MULTI_MSG_TIMEOUT_S = 30.0  # how long to wait for every split-reply message to land
 
 MAX_TEXT_REPLY_S = 10.0  # a plain text answer
 MAX_REACTION_S = 10.0  # a turn that adds an emoji reaction

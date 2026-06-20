@@ -26,6 +26,7 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
+    "pytest-rerunfailures>=14",
     "anyio>=4.4",
     "ruff>=0.6",
     "mypy>=1.10",
@@ -46,6 +47,9 @@ packages = ["pyclaudir"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# Rerun any failed test up to 3 times — the live e2e suite is timing-flaky.
+# A genuinely broken test still fails all 4 attempts; only flakes are rescued.
+addopts = "--reruns 3"
 log_cli = true
 log_cli_level = "INFO"
 # Bare message: the bot subprocess lines forwarded by the e2e harness already

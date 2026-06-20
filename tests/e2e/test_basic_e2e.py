@@ -16,7 +16,7 @@ import pytest
 from telethon import TelegramClient  # type: ignore[import-untyped]
 
 from tests.e2e.support.assertions import assert_reply_within
-from tests.e2e.support.client import send_and_wait
+from tests.e2e.support.client import send_and_wait, send_and_wait_for_chunks
 from tests.e2e.support.data import recall_prompt, split_message_prompt
 from tests.e2e.support.models import Conversation
 from tests.e2e.support.config import MAX_TEXT_REPLY_S
@@ -47,6 +47,24 @@ async def _assert_prompt_reply(client: TelegramClient, convo: Conversation) -> N
     assert_reply_within(reply, MAX_TEXT_REPLY_S, "reply")
 
 
+def _each_token_in_own_message(
+    tokens: tuple[str, ...], chunks: tuple[str, ...]
+) -> bool:
+    """True if every token can be matched to its own distinct message.
+
+    Proves the bot actually split its answer: we claim a separate chunk for
+    each token, so bundling several tokens into one message (or dropping one)
+    leaves a token without a chunk and fails the match.
+    """
+    unclaimed = list(chunks)
+    for token in tokens:
+        carrier = next((chunk for chunk in unclaimed if token in chunk), None)
+        if carrier is None:
+            return False
+        unclaimed.remove(carrier)
+    return True
+
+
 async def _assert_multi_message_reply(
     client: TelegramClient, convo: Conversation
 ) -> None:
@@ -54,7 +72,7 @@ async def _assert_multi_message_reply(
     await send_and_wait(client, convo, "Hello, are you there?")
 
     question, tokens = split_message_prompt()
-    reply = await send_and_wait(client, convo, question)
+    reply = await send_and_wait_for_chunks(client, convo, question, len(tokens))
     log.info(
         "multi-message reply: chunks=%d first=%.2fs complete=%.2fs",
         reply.chunk_count,
@@ -62,14 +80,14 @@ async def _assert_multi_message_reply(
         reply.t_complete_s,
     )
 
-    assert reply.chunk_count >= len(tokens), (
-        f"expected at least {len(tokens)} separate messages, "
-        f"got {reply.chunk_count}; reply was {reply.text!r}"
-    )
     for token in tokens:
         assert token in reply.text, (
-            f"bot did not include {token!r}; reply was {reply.text!r}"
+            f"bot did not send {token!r}; chunks were {reply.chunks!r}"
         )
+    assert _each_token_in_own_message(tokens, reply.chunks), (
+        f"bot bundled tokens instead of sending {len(tokens)} separate "
+        f"messages; chunks were {reply.chunks!r}"
+    )
     assert_reply_within(reply, MAX_TEXT_REPLY_S, "reply")
 
 

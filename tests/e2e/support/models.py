@@ -34,11 +34,20 @@ class Conversation:
 class Reply:
     """One bot turn as seen by the tester account."""
 
-    text: str  # all reply chunks joined with newlines
+    chunks: tuple[str, ...]  # raw text of each Telegram message, in arrival order
     media_kind: str | None  # "photo" | "document" | None
     t_first_s: float  # send -> first reply chunk (seconds)
     t_complete_s: float  # send -> last chunk (seconds)
-    chunk_count: int  # number of Telegram messages the reply arrived in
+
+    @property
+    def text(self) -> str:
+        """All reply chunks joined with newlines."""
+        return "\n".join(self.chunks)
+
+    @property
+    def chunk_count(self) -> int:
+        """Number of Telegram messages the reply arrived in."""
+        return len(self.chunks)
 
 
 @dataclass(frozen=True)

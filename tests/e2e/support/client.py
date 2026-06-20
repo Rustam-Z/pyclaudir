@@ -18,6 +18,7 @@ from telethon.tl.custom.message import Message  # type: ignore[import-untyped]
 
 from tests.e2e.support.config import (
     _BURST_TIMEOUT_S,
+    _MULTI_MSG_TIMEOUT_S,
     _QUIET_WINDOW_S,
     MAX_REACTION_S,
 )
@@ -96,11 +97,52 @@ async def send_and_wait(
         client.remove_event_handler(_collect, evt)
 
     return Reply(
-        text="\n".join(m.raw_text or "" for m in chunks),
+        chunks=tuple(m.raw_text or "" for m in chunks),
         media_kind=next((k for m in chunks if (k := _media_kind(m))), None),
         t_first_s=t_first,
         t_complete_s=last_at - sent_at,
-        chunk_count=len(chunks),
+    )
+
+
+async def send_and_wait_for_chunks(
+    client: TelegramClient,
+    convo: Conversation,
+    text: str,
+    expected_chunks: int,
+) -> Reply:
+    """Send ``text`` and collect the reply until ``expected_chunks`` messages
+    arrive or ``_MULTI_MSG_TIMEOUT_S`` elapses — used by the split-reply test,
+    where gaps between the bot's messages would trip a quiet-window cutoff."""
+    chunks: list[Message] = []
+    enough = asyncio.Event()
+    first_at = last_at = 0.0
+
+    async def _collect(event: events.NewMessage.Event) -> None:
+        nonlocal first_at, last_at
+        last_at = time.perf_counter()
+        first_at = first_at or last_at
+        chunks.append(event.message)
+        if len(chunks) >= expected_chunks:
+            enough.set()
+
+    evt = events.NewMessage(
+        chats=convo.chat, from_users=convo.reply_from, incoming=True
+    )
+    client.add_event_handler(_collect, evt)
+    try:
+        sent_at = time.perf_counter()
+        await client.send_message(convo.chat, _format_outbound(convo, text))
+        try:
+            await asyncio.wait_for(enough.wait(), _MULTI_MSG_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            pass
+    finally:
+        client.remove_event_handler(_collect, evt)
+    return Reply(
+        chunks=tuple(m.raw_text or "" for m in chunks),
+        media_kind=next((k for m in chunks if (k := _media_kind(m))), None),
+        t_first_s=first_at - sent_at,
+        t_complete_s=last_at - sent_at,
     )
 
 
