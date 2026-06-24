@@ -22,7 +22,8 @@ from pathlib import Path
 
 from telethon import TelegramClient  # type: ignore[import-untyped]
 
-from tests.e2e.support.client import send_and_wait
+from tests.e2e.support.client import has_photo, send_and_wait, send_and_wait_until
+from tests.e2e.support.config import MAX_RENDER_REPLY_S
 from tests.e2e.support.data import new_sentinel
 from tests.e2e.support.models import SCENARIOS, Conversation, Reply, Scenario
 from tests.e2e.support.state import tool_calls_since
@@ -60,13 +61,31 @@ class RunResult:
     tool_ms: int
 
 
+async def _send_scenario(
+    client: TelegramClient, convo: Conversation, prompt: str, check: str
+) -> Reply:
+    """Drive one scenario, choosing the wait that fits its success signal.
+
+    A ``photo`` scenario (render) often sends a "working on it" text first and
+    the photo only after, so we keep waiting for the message that carries the
+    photo — the quiet-window wait used for text replies would stop at the
+    confirmation and miss the image. Same generous wait as the render e2e test;
+    the eval logs the latency rather than gating on it.
+    """
+    if check == "photo":
+        return await send_and_wait_until(
+            client, convo, prompt, until=has_photo, timeout=MAX_RENDER_REPLY_S
+        )
+    return await send_and_wait(client, convo, prompt, timeout=MAX_RENDER_REPLY_S)
+
+
 async def _run_once(
     client: TelegramClient, convo: Conversation, db_path: Path, scenario: Scenario
 ) -> RunResult:
     token = new_sentinel("EVAL")
     since = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-    reply = await send_and_wait(
-        client, convo, scenario.prompt.format(token=token), timeout=180
+    reply = await _send_scenario(
+        client, convo, scenario.prompt.format(token=token), scenario.check
     )
     tool_ms = sum(r["duration_ms"] or 0 for r in tool_calls_since(db_path, since))
     return RunResult(
