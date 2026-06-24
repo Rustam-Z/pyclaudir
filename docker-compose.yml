@@ -24,7 +24,7 @@ services:
 
   pyclaudir:
     build: .
-    restart: unless-stopped
+    restart: on-failure
     env_file: .env
     depends_on:
       pyclaudir-init:
