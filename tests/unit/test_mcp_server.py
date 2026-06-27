@@ -1,5 +1,5 @@
 """End-to-end check that the MCP server starts on a random port and the
-``now`` tool is reachable over HTTP via the official MCP client."""
+``time_now`` tool is reachable over HTTP via the official MCP client."""
 
 from __future__ import annotations
 
@@ -23,9 +23,9 @@ async def test_now_tool_reachable_via_http() -> None:
                 await session.initialize()
                 tools = await session.list_tools()
                 names = {t.name for t in tools.tools}
-                assert "now" in names
+                assert "time_now" in names
 
-                result = await session.call_tool("now", {})
+                result = await session.call_tool("time_now", {})
                 assert result.isError in (False, None)
                 # FastMCP wraps the return string in a TextContent block.
                 texts = [c.text for c in result.content if hasattr(c, "text")]

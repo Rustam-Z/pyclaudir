@@ -247,10 +247,10 @@ when to use it). Optional: `license`, `compatibility`, `metadata`,
 raise `SkillsError`; invalid skills are silently dropped from
 `list()` so one bad skill doesn't blind the agent to the rest.
 
-`list_skills` implements the spec's **progressive disclosure**
+`skill_list` implements the spec's **progressive disclosure**
 pattern — it returns only name + description per skill (metadata
 from frontmatter, ~100 tokens/skill), so the agent can decide which
-skill is relevant without loading full bodies. `read_skill(name)`
+skill is relevant without loading full bodies. `skill_read(name)`
 returns the full SKILL.md (including frontmatter) when the agent is
 ready to execute.
 
@@ -260,8 +260,8 @@ docs loaded on demand, `assets/` for templates/schemas. Our
 `skills/self-reflection/` only uses `SKILL.md` + `README.md` (the
 latter is operator-facing, outside the spec but allowed as "any
 additional files or directories"). If a future skill needs those
-structures, the store doesn't prevent them — `read_skill` just
-returns SKILL.md; siblings are readable via `read_memory`/ops-side
+structures, the store doesn't prevent them — `skill_read` just
+returns SKILL.md; siblings are readable via `memory_read`/ops-side
 tooling as needed.
 
 Surface:
@@ -269,13 +269,13 @@ Surface:
 - `pyclaudir/skills_store.py` — path-hardened read-only store scoped
   to the top-level `skills/` directory. Only first-level subdirs that
   contain a `SKILL.md` count as skills.
-- `pyclaudir/tools/skills.py` — `list_skills`, `read_skill` MCP tools.
+- `pyclaudir/tools/skills.py` — `skill_list`, `skill_read` MCP tools.
 
 **Invocation pattern.** A reminder fires with text
 `<skill name="X">run</skill>`. The reminder loop wraps that in a
 `<reminder>` envelope before injecting into the engine as a synthetic
 `ChatMessage`. The bot, per `system.md` § Skills, recognizes the
-`<skill>` inside `<reminder>` pattern, calls `read_skill("X")`, and
+`<skill>` inside `<reminder>` pattern, calls `skill_read("X")`, and
 executes the playbook's steps.
 
 **Trust boundary.** The bot trusts `<skill>` directives ONLY when
@@ -300,7 +300,7 @@ reminder (default cron `0 0 * * *` — midnight UTC every day).
   60-85% / 85%+ with overreach thresholds are soft LLM judgment),
   proposes promote/refine/discard to the owner via DM, and on
   explicit approval appends rules to `project.md` via
-  `append_instructions`.
+  `instruction_append`.
 
 **Mandatory loop.** Learning cannot be stopped:
 
@@ -319,7 +319,7 @@ migration 005.
 
 `prompts/system.md` and `prompts/project.md` are both loaded from disk on every CC subprocess spawn (`cc_worker.py:build_argv`, lines ~168-181) and concatenated into the `--system-prompt` argument — there's no way to hot-reload mid-session.
 
-Two MCP tools expose `prompts/project.md` (and only that file) to the bot: `read_instructions` and `append_instructions`. system.md is intentionally not exposed — it's git-tracked, so any bot edit would land as a working-tree diff and pollute the repo. Operator-driven customisations therefore accumulate in project.md (gitignored). The owner-only policy is enforced **in the system prompt**, not in code; the owner can invoke these tools from any chat.
+Two MCP tools expose `prompts/project.md` (and only that file) to the bot: `instruction_read` and `instruction_append`. system.md is intentionally not exposed — it's git-tracked, so any bot edit would land as a working-tree diff and pollute the repo. Operator-driven customisations therefore accumulate in project.md (gitignored). The owner-only policy is enforced **in the system prompt**, not in code; the owner can invoke these tools from any chat.
 
 What the code enforces, via `InstructionsStore` (`pyclaudir/instructions_store.py`):
 
@@ -415,7 +415,7 @@ In pyclaudir: **not implemented**. We use SIGTERM/SIGINT for shutdown and `/kill
 
 ### From Claudir (now implemented in pyclaudir)
 
-1. **Scheduled events / reminders** — `set_reminder`, `list_reminders`, `cancel_reminder` MCP tools backed by a `reminders` SQLite table. A background asyncio task polls every 60s and injects due reminders as synthetic inbound messages. Supports one-shot (ISO8601) and recurring (cron) schedules.
+1. **Scheduled events / reminders** — `reminder_set`, `reminder_list`, `reminder_cancel` MCP tools backed by a `reminders` SQLite table. A background asyncio task polls every 60s and injects due reminders as synthetic inbound messages. Supports one-shot (ISO8601) and recurring (cron) schedules.
 
 ---
 
@@ -500,7 +500,7 @@ WHERE message_id = ?
 
 **Files:** `pyclaudir/instructions_store.py`, `pyclaudir/tools/instructions.py`, `data/prompt_backups/`.
 
-Two MCP tools — `read_instructions` and `append_instructions` —
+Two MCP tools — `instruction_read` and `instruction_append` —
 expose `prompts/project.md` (only) to the bot. system.md is
 intentionally not exposed via tools; it's git-tracked, so bot edits
 would pollute the repo. The owner-only policy is enforced **in the
@@ -531,7 +531,7 @@ extension pattern for future Claude Code sessions:
 
 1. **Skill file.** Drop `skills/<name>/SKILL.md` — auto-discovered
    by `SkillsStore`. No code change needed to make the file visible.
-2. **Trigger.** For on-demand skills, the owner can use `set_reminder`
+2. **Trigger.** For on-demand skills, the owner can use `reminder_set`
    to schedule `<skill name="X">run</skill>`. For mandatory skills,
    add an entry in `pyclaudir/__main__.py:_seed_default_reminders`
    with a unique `auto_seed_key`.
@@ -556,7 +556,7 @@ the bottom.
 **Files:** `pyclaudir/__main__.py:_seed_default_reminders`, `pyclaudir/tools/reminder.py:CancelReminderTool`, migration 005 (`auto_seed_key` column).
 
 The `auto_seed_key` column on `reminders` tags rows that were
-inserted by the startup hook (vs. by the agent via `set_reminder`).
+inserted by the startup hook (vs. by the agent via `reminder_set`).
 This single column drives two behaviors:
 
 1. **Cancel gate at the tool layer.** `CancelReminderTool` fetches
@@ -649,7 +649,7 @@ nobody's messaged in a while.
 
 `learnings.md` is append-only and capped at 64 KiB per memory file.
 Without pruning, a year of daily self-reflection would blow the cap
-and `read_memory` would start truncating. Phase C runs after Phase B
+and `memory_read` would start truncating. Phase C runs after Phase B
 on each invocation. Compacts **only** old (>90 days), resolved
 (`[promoted]`/`[discarded]`/`[refined]`) entries to one-line
 summaries. Leaves `[pending]`/`[error]` entries, plain-history
@@ -677,8 +677,8 @@ All skills under `skills/<name>/SKILL.md` follow the Agent Skills
 spec (<https://agentskills.io/specification>). `SkillsStore` parses
 YAML frontmatter, validates `name` matches the directory + the
 `[a-z0-9]+(-[a-z0-9]+)*` regex, caps `description` at 1024 chars.
-`list_skills` implements the spec's progressive-disclosure pattern —
-metadata only at list time, full body only on `read_skill`.
+`skill_list` implements the spec's progressive-disclosure pattern —
+metadata only at list time, full body only on `skill_read`.
 
 `uv run python -m pyclaudir.scripts.validate_skills` walks every
 first-level skill and reports conformance. Runs cheap; wire into

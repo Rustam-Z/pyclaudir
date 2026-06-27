@@ -110,7 +110,7 @@ class DatabaseQueryTool(BaseTool[DatabaseQueryArgs]):
         "  reactions(id, chat_id, message_id, user_id, emoji, created_at)\n"
         "  tool_calls(id, tool_name, args_json, result_json, error,\n"
         "             duration_ms, created_at)\n"
-        "  reminders -- see set_reminder docs"
+        "  reminders -- see reminder_set docs"
     )
     args_model = DatabaseQueryArgs
 

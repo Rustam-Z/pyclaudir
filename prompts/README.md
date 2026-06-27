@@ -12,5 +12,5 @@ and prepended to every turn.
 
 Edit the markdown; restart the bot (`docker compose up -d
 --force-recreate` or rerun `python -m pyclaudir`) to reload. The bot
-can append to `project.md` itself via `append_instructions` — every
+can append to `project.md` itself via `instruction_append` — every
 write is backed up to `data/prompt_backups/` first.

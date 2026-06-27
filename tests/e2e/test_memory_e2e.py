@@ -4,7 +4,7 @@ write+read (DM and group, separate tests): remember a codeword, confirm it
     lands in a ``data/memories/`` file, and the bot recalls it.
 search (DM and group, separate tests): seed a fact under an unhelpful filename,
     ask a content question, and confirm the bot answers it AND actually called
-    ``search_memory`` to find it (not list + read-everything).
+    ``memory_search`` to find it (not list + read-everything).
 reset (DM only): the codeword survives ``/reset_session`` — proving
     cross-session persistence, not just in-context recall. The reset is an
     owner command, kept in a DM to avoid group command-addressing quirks.
@@ -75,8 +75,8 @@ async def _assert_search_finds_seeded_fact(
         f"bot did not recall the seeded date; reply was {reply.text!r}"
     )
     tools = {row["tool_name"] for row in tool_calls_since(sut.db_path, since)}
-    assert "search_memory" in tools, (
-        f"bot answered without calling search_memory; tools used: {sorted(tools)}"
+    assert "memory_search" in tools, (
+        f"bot answered without calling memory_search; tools used: {sorted(tools)}"
     )
     assert_reply_within(reply, MAX_MEMORY_REPLY_S, "memory search")
 
@@ -113,7 +113,7 @@ async def test_memory_search_dm(
 
     given  a fact seeded under a filename that hides its contents
     when   the owner asks a content question about it in a DM
-    then   the bot calls search_memory, answers correctly, within MAX_MEMORY_REPLY_S.
+    then   the bot calls memory_search, answers correctly, within MAX_MEMORY_REPLY_S.
     """
     await _assert_search_finds_seeded_fact(pyclaudir_sut, tester_client, dm)
 
@@ -126,7 +126,7 @@ async def test_memory_search_group(
 
     given  a fact seeded under a filename that hides its contents
     when   the owner asks a content question about it in a group
-    then   the bot calls search_memory, answers correctly, within MAX_MEMORY_REPLY_S.
+    then   the bot calls memory_search, answers correctly, within MAX_MEMORY_REPLY_S.
     """
     await _assert_search_finds_seeded_fact(pyclaudir_sut, tester_client, group)
 

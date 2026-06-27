@@ -14,7 +14,7 @@ Daily two-phase loop that drives the bot's own learning:
   against 10-20 hypothetical scenarios, scores fit, and proposes
   promote / refine / discard to the owner. On explicit owner
   approval, appends the rule to `prompts/project.md` via
-  `append_instructions` (owner-only by prompt policy; system.md is
+  `instruction_append` (owner-only by prompt policy; system.md is
   not exposed via tools).
 
 Both phases run back-to-back in one invocation, triggered by a
@@ -25,7 +25,7 @@ refused at the tool layer, and if it ever goes missing (manual SQL,
 DB corruption, etc.) the startup hook re-seeds it. Learning does
 not stop.
 
-The bot reads `SKILL.md` via the `read_skill` MCP tool when a
+The bot reads `SKILL.md` via the `skill_read` MCP tool when a
 `<reminder>` envelope arrives containing
 `<skill name="self-reflection">run</skill>`.
 

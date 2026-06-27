@@ -36,7 +36,7 @@ class SendMemoryDocumentArgs(BaseModel):
     path: str = Field(
         description=(
             "Relative path under data/memories/ — same shape as "
-            "read_memory. No '..', no absolute paths, no symlinks."
+            "memory_read. No '..', no absolute paths, no symlinks."
         ),
     )
     caption: str | None = Field(
@@ -61,7 +61,7 @@ class TelegramSendMemoryDocumentTool(BaseTool[SendMemoryDocumentArgs]):
         "rather than pasted text — handy for csv/log/large markdown. For a "
         "rendered image use telegram_send_photo; for plain text use "
         "telegram_send_message. Path-locked to the memories root (same "
-        "hardening as read_memory); sends immediately."
+        "hardening as memory_read); sends immediately."
     )
     args_model = SendMemoryDocumentArgs
 

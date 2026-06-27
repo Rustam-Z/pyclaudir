@@ -284,7 +284,7 @@ def test_invariant_2_only_pyclaudir_server_name() -> None:
 # ---------------------------------------------------------------------------
 # Invariant 3: memory writes exist but enforce safety rails
 #
-# Originally read-only. Operator opted the agent into write_memory + append_memory
+# Originally read-only. Operator opted the agent into memory_write + memory_append
 # so it can keep its own notes. The trade-off is mitigated by:
 #   (a) read-before-write — must read existing files before mutating them
 #   (b) 64 KiB per-file size cap
@@ -297,20 +297,22 @@ def test_invariant_2_only_pyclaudir_server_name() -> None:
 
 
 def test_invariant_3_memory_write_safety_rails() -> None:
-    """The expected memory tool surface is exactly: list/read/write/append.
+    """The expected memory tool surface is exactly: list/search/read/write/append.
     No delete/edit/create. No path traversal. Read-before-write enforced."""
     classes = {c.name: c for c in discover_tool_classes()}
     expected_memory_tools = {
-        "list_memories",
-        "read_memory",
-        "write_memory",
-        "append_memory",
+        "memory_list",
+        "memory_search",
+        "memory_read",
+        "memory_write",
+        "memory_append",
     }
     actual_memory_tools = set(classes.keys()) & {
-        "list_memories",
-        "read_memory",
-        "write_memory",
-        "append_memory",
+        "memory_list",
+        "memory_search",
+        "memory_read",
+        "memory_write",
+        "memory_append",
         "delete_memory",
         "edit_memory",
         "create_memory",

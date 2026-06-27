@@ -122,7 +122,7 @@ def test_search_does_not_unlock_read_before_write(store: MemoryStore) -> None:
 
 
 @pytest.mark.asyncio
-async def test_search_memory_tool_happy_path(store: MemoryStore) -> None:
+async def test_memory_search_tool_happy_path(store: MemoryStore) -> None:
     """The MCP tool formats hits as 'path:line: text', best first."""
     (store.root / "n.md").write_text("acme deadline today\nacme only")
     tool = SearchMemoryTool(ToolContext(memory_store=store))
@@ -137,7 +137,7 @@ async def test_search_memory_tool_happy_path(store: MemoryStore) -> None:
 
 
 @pytest.mark.asyncio
-async def test_search_memory_tool_no_matches(store: MemoryStore) -> None:
+async def test_memory_search_tool_no_matches(store: MemoryStore) -> None:
     """The tool reports an explicit empty result rather than erroring."""
     (store.root / "n.md").write_text("unrelated")
     tool = SearchMemoryTool(ToolContext(memory_store=store))

@@ -210,7 +210,7 @@ class MemoryStore:
         if path.exists():
             if relative not in self._read_paths:
                 raise MemoryPathError(
-                    f"refusing to overwrite {relative}: must call read_memory "
+                    f"refusing to overwrite {relative}: must call memory_read "
                     "first in this session (read-before-write invariant)"
                 )
             if not path.is_file():
@@ -236,7 +236,7 @@ class MemoryStore:
         if path.exists():
             if relative not in self._read_paths:
                 raise MemoryPathError(
-                    f"refusing to append to {relative}: must call read_memory "
+                    f"refusing to append to {relative}: must call memory_read "
                     "first in this session (read-before-write invariant)"
                 )
             if not path.is_file():

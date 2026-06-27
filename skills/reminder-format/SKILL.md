@@ -1,15 +1,15 @@
 ---
 name: reminder-format
-description: House format for the text passed to set_reminder. Read before calling set_reminder, and again before editing a reminder (cancel + re-create). Three rules — open with the literal marker <THIS IS A REMINDER>, state the goal in one line, then list numbered steps the future-self should run when the reminder fires. Keeps fired <reminder> envelopes self-explanatory and actionable.
+description: House format for the text passed to reminder_set. Read before calling reminder_set, and again before editing a reminder (cancel + re-create). Three rules — open with the literal marker <THIS IS A REMINDER>, state the goal in one line, then list numbered steps the future-self should run when the reminder fires. Keeps fired <reminder> envelopes self-explanatory and actionable.
 license: MIT
-compatibility: Requires the set_reminder tool.
+compatibility: Requires the reminder_set tool.
 ---
 
 # Skill: reminder-format
 
 Reference skill (no `<reminder>` envelope required). Read it before
-calling `set_reminder` — and again before editing a reminder (which
-means `cancel_reminder` + a fresh `set_reminder`). The format applies
+calling `reminder_set` — and again before editing a reminder (which
+means `reminder_cancel` + a fresh `reminder_set`). The format applies
 to the `text` argument; cron and `trigger_at` are unaffected.
 
 The reminder text is a self-prompt: when the timer fires, this exact

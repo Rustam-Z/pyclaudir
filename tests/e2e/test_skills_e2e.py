@@ -22,7 +22,7 @@ from tests.e2e.support.state import tool_calls_since
 from tests.e2e.support.config import MAX_SKILL_REPLY_S
 from tests.e2e.support.waits import wait_until
 
-_SKILL_TOOLS = {"read_skill", "list_skills"}
+_SKILL_TOOLS = {"skill_read", "skill_list"}
 
 
 async def _assert_consults_skill(
@@ -39,7 +39,7 @@ async def _assert_consults_skill(
             if r["tool_name"] in _SKILL_TOOLS
         ]
     )
-    assert calls, f"no read_skill/list_skills tool call recorded for {skill!r}"
+    assert calls, f"no skill_read/skill_list tool call recorded for {skill!r}"
     assert_reply_within(reply, MAX_SKILL_REPLY_S, "skill")
 
 

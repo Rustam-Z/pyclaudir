@@ -82,9 +82,9 @@ Use as an **automation layer.** Wire up MCPs and schedule agents to do real work
 ### Try saying
 
 - *"hey reschedule the meeting, and message X"*
-- *"read the last 24h of our team chat and DM me a 5-bullet status."* — uses `set_reminder` + `database_query` + `telegram_send_message`. Ships on by default.
+- *"read the last 24h of our team chat and DM me a 5-bullet status."* — uses `reminder_set` + `database_query` + `telegram_send_message`. Ships on by default.
 - *"pull the top AI stories from Hacker News and send me a briefing"* — `WebFetch` + `WebSearch`, default tools.
-- *"watch https://example.com/changelog hourly and ping me the moment a new entry mentions 'pricing'."* — cron `set_reminder` + `WebFetch`. Diff state lives in a memory file.
+- *"watch https://example.com/changelog hourly and ping me the moment a new entry mentions 'pricing'."* — cron `reminder_set` + `WebFetch`. Diff state lives in a memory file.
 - *"review this week's git log on `~/code/myapp` and open a PR if the README has drifted."* — needs `tool_groups.bash: true` and `tool_groups.code: true` in `plugins.json`, plus `GITHUB_PERSONAL_ACCESS_TOKEN` in `.env` for the PR.
 - *"every morning at 7am, DM me my Jira tickets due this week, grouped by project."* — needs the `mcp-atlassian` entry enabled (Atlassian's remote MCP, OAuth set up on the host).
 

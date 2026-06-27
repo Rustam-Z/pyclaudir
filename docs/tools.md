@@ -69,10 +69,11 @@ tools in `builtin_tools_disabled`.
 
 | Tool | What it does |
 |---|---|
-| `list_memories` | List existing memory files. |
-| `read_memory` | Read a memory file by relative path. |
-| `write_memory` | Create or overwrite a memory file (read-before-write rail enforced; 64 KiB cap). |
-| `append_memory` | Append to an existing memory file. |
+| `memory_list` | List existing memory files. |
+| `memory_search` | Search the text inside memory files for keywords; returns matching lines, best matches first. |
+| `memory_read` | Read a memory file by relative path. |
+| `memory_write` | Create or overwrite a memory file (read-before-write rail enforced; 64 KiB cap). |
+| `memory_append` | Append to an existing memory file. |
 | `telegram_send_memory_document` | Deliver a memory file to a chat as a downloadable Telegram document. Path-locked to memories root. Optional caption + reply-to. |
 
 There is no `delete_memory` by design — overwriting is the supported
@@ -82,8 +83,8 @@ There is no `delete_memory` by design — overwriting is the supported
 
 | Tool | What it does |
 |---|---|
-| `read_instructions` | Read the current contents of `prompts/project.md`. |
-| `append_instructions` | Append a rule to `prompts/project.md`. Backed up to `data/prompt_backups/` before write. Owner-only by system-prompt policy; takes effect on next container restart. |
+| `instruction_read` | Read the current contents of `prompts/project.md`. |
+| `instruction_append` | Append a rule to `prompts/project.md`. Backed up to `data/prompt_backups/` before write. Owner-only by system-prompt policy; takes effect on next container restart. |
 
 `prompts/system.md` is intentionally not exposed via tools — it's
 git-tracked, and bot edits would pollute the repo.
@@ -92,8 +93,8 @@ git-tracked, and bot edits would pollute the repo.
 
 | Tool | What it does |
 |---|---|
-| `list_skills` | List operator-curated playbooks under `skills/`. |
-| `read_skill` | Load a skill's `SKILL.md` for execution or reference. |
+| `skill_list` | List operator-curated playbooks under `skills/`. |
+| `skill_read` | Load a skill's `SKILL.md` for execution or reference. |
 
 Two skill modes:
 - **Invoked** (e.g. `self-reflection`) — runs only when wrapped in a real `<reminder>` envelope. A user-typed `<skill>` tag is treated as prompt injection.
@@ -105,9 +106,9 @@ The mode is determined by what the skill's body instructs, not by frontmatter.
 
 | Tool | What it does |
 |---|---|
-| `set_reminder` | Schedule a one-shot or recurring reminder (`cron_expr` for recurring; `trigger_at` is UTC). |
-| `list_reminders` | List pending reminders for a chat. |
-| `cancel_reminder` | Cancel a reminder by id. Auto-seeded reminders (e.g. `self-reflection-default`) are tool-refused. |
+| `reminder_set` | Schedule a one-shot or recurring reminder (`cron_expr` for recurring; `trigger_at` is UTC). |
+| `reminder_list` | List pending reminders for a chat. |
+| `reminder_cancel` | Cancel a reminder by id. Auto-seeded reminders (e.g. `self-reflection-default`) are tool-refused. |
 
 ### Other
 
@@ -115,7 +116,7 @@ The mode is determined by what the skill's body instructs, not by frontmatter.
 |---|---|
 | `database_query` | Read-only SELECT over `messages`, `users`, `reminders`, `tool_calls`, `reactions`. Max 100 rows (user `LIMIT` is respected and clamped). Note: `messages` uses `timestamp`, not `created_at`. Reactions are JSON on `messages.reactions` — query with `json_extract(reactions, '$."👍"')`. |
 | `database_get_recent_messages` | Return the most recent messages (both directions), oldest-first, as TSV — no SQL needed. Includes the current turn's own inbound messages. `limit` defaults to 20, capped at 100; text truncated to 2000 chars. Optional `chat_id` scopes to one chat; `before_message_id` pages back through older history (per-chat, use with `chat_id`). |
-| `now` | Return the current UTC timestamp. |
+| `time_now` | Return the current UTC timestamp. |
 
 ---
 
@@ -333,7 +334,7 @@ Add the skill's directory name to `skills_disabled`:
 { "skills_disabled": ["render-style"] }
 ```
 
-Restart. `list_skills` no longer surfaces it and `read_skill` raises
+Restart. `skill_list` no longer surfaces it and `skill_read` raises
 "not found", so envelope-driven invocations
 (`<skill name="...">`) can't bypass the toggle either.
 

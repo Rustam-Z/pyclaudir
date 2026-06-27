@@ -47,7 +47,7 @@ def test_field_descriptions_and_constraints_reach_the_schema() -> None:
 def test_now_tool_is_discovered() -> None:
     classes = discover_tool_classes()
     names = {c.name for c in classes}
-    assert "now" in names
+    assert "time_now" in names
 
 
 def test_user_visible_tools_pin_to_real_tools() -> None:

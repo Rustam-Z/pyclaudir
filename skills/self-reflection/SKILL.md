@@ -107,13 +107,13 @@ to fill a quota.
 
 For each selected candidate:
 
-1. `read_memory("self/learnings.md")` first (read-before-write rail).
+1. `memory_read("self/learnings.md")` first (read-before-write rail).
 2. Decide the candidate's status marker:
    - `[pending]` if it's a likely durable rule ("I should default to
      X when Y").
    - plain header (no marker) if it's history-only context (one-off
      observation, user-specific quirk).
-3. Append an h2-headed entry via `write_memory` (writing the full
+3. Append an h2-headed entry via `memory_write` (writing the full
    new content back), same format as the correction-driven entries:
 
    ```
@@ -135,7 +135,7 @@ phase B will handle all proposals in one batch.
 
 ### Step 1 — gather pending lessons
 
-Read `data/memories/self/learnings.md` via `read_memory`.
+Read `data/memories/self/learnings.md` via `memory_read`.
 
 Parse the h2 headers (`## YYYY-MM-DD — topic [marker]`). Collect every
 entry whose marker is exactly `[pending]`. Entries without a marker,
@@ -195,7 +195,7 @@ call it ambiguous rather than forcing a number.
 ### Step 3 — save the audit log
 
 Write the per-run reasoning to
-`data/memories/self/reflections/<YYYY-MM-DD>.md` via `write_memory`
+`data/memories/self/reflections/<YYYY-MM-DD>.md` via `memory_write`
 (create parents automatically — just pass the full relative path).
 For each lesson include:
 
@@ -246,10 +246,10 @@ their decision directly.
 
 For each approved item (promote or refined-promote):
 
-1. Optionally call `read_instructions()` first to see how project.md
+1. Optionally call `instruction_read()` first to see how project.md
    is currently structured — useful for picking the right section to
    append into.
-2. Call `append_instructions(<rule text>)`. The rule text should be a
+2. Call `instruction_append(<rule text>)`. The rule text should be a
    self-contained sentence or short paragraph the model can follow
    without additional context. Prepend with a `\n- ` so it appends
    cleanly under whatever section it lands in, or wrap it in its own
@@ -257,9 +257,9 @@ For each approved item (promote or refined-promote):
 3. Update the corresponding `[pending]` marker in
    `data/memories/self/learnings.md` to `[promoted]` (or `[refined]`
    if the owner dictated narrower wording).
-   - `read_memory("self/learnings.md")` first (read-before-write).
+   - `memory_read("self/learnings.md")` first (read-before-write).
    - Replace the specific h2 line, preserving everything else.
-   - `write_memory("self/learnings.md", <full updated content>)`.
+   - `memory_write("self/learnings.md", <full updated content>)`.
 
 For each rejected item: update marker to `[discarded]` in
 `learnings.md`.
@@ -306,7 +306,7 @@ One-line summary of what the entry concluded. (compacted YYYY-MM-DD)
 
 ### C.3 — the compaction pass
 
-1. `read_memory("self/learnings.md")` (already done in phase B —
+1. `memory_read("self/learnings.md")` (already done in phase B —
    re-use the content).
 2. Identify compaction targets per C.2.
 3. For each target, preserve the h2 header with the status marker
@@ -314,7 +314,7 @@ One-line summary of what the entry concluded. (compacted YYYY-MM-DD)
    YYYY-MM-DD)` footer.
 4. Add or update a `## Last compaction: <today>` line near the top
    of the file so future runs know when the last pass happened.
-5. `write_memory("self/learnings.md", <new content>)`.
+5. `memory_write("self/learnings.md", <new content>)`.
 
 Report the compaction in the step-7 confirmation message: "Done. N
 rule(s) promoted. Compacted M old entries." If no compaction
@@ -335,10 +335,10 @@ Then `stop`.
 
 ## Failure handling
 
-- **`append_instructions` returns an error** (size cap, file missing,
+- **`instruction_append` returns an error** (size cap, file missing,
   etc.) — abort without touching markers and post a note to the owner
   describing the failure.
-- **`write_memory` fails** (size cap, read-before-write) — abort that
+- **`memory_write` fails** (size cap, read-before-write) — abort that
   item only. Mark it with `[error]` so next run doesn't re-pick it up
   until the operator looks.
 - **Owner doesn't reply** — the turn ends when the model decides.
@@ -350,7 +350,7 @@ Then `stop`.
 
 - Do NOT guess the owner's intent on an ambiguous reply. Ask.
 - Do NOT skip the audit log. The `<date>.md` file is the evidence.
-- Do NOT promote more than one rule per `append_instructions` call.
+- Do NOT promote more than one rule per `instruction_append` call.
   One rule, one append, one backup. Small diffs are easier to revert.
 - Do NOT re-generate scenarios if you already have an audit log for
   the same lesson from a prior run — unless the rule's wording has

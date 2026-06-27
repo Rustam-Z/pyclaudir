@@ -2,7 +2,7 @@
 
 Companion to the dispatcher's attachment ingest in ``telegram_io.py``. Path
 resolution is locked to ``data/attachments/``: same traversal-hardened
-rules as ``read_memory`` (no ``..``, no absolute paths, no symlinks). The
+rules as ``memory_read`` (no ``..``, no absolute paths, no symlinks). The
 absolute paths the dispatcher writes into ``[attachment: ...]`` markers
 land *under* the attachments root, so the model passes the relative tail
 back into this tool — or it hands the absolute path and we strip the root.

@@ -17,7 +17,7 @@ from .base import BaseTool, ToolResult
 
 
 # ---------------------------------------------------------------------------
-# set_reminder
+# reminder_set
 # ---------------------------------------------------------------------------
 
 
@@ -96,13 +96,13 @@ class SetReminderArgs(BaseModel):
 
 
 class SetReminderTool(BaseTool[SetReminderArgs]):
-    name = "set_reminder"
+    name = "reminder_set"
     description = (
         "Schedule a reminder to fire later — one-shot (trigger_at only) or "
         "recurring (also set cron_expr). trigger_at is UTC ISO-8601 and must "
         "be in the future; ask the user's timezone if unknown and convert to "
         "UTC first. Do NOT use for something to do right now — just do it. "
-        "Manage existing reminders with list_reminders and cancel_reminder."
+        "Manage existing reminders with reminder_list and reminder_cancel."
     )
     args_model = SetReminderArgs
 
@@ -143,7 +143,7 @@ class SetReminderTool(BaseTool[SetReminderArgs]):
 
 
 # ---------------------------------------------------------------------------
-# list_reminders
+# reminder_list
 # ---------------------------------------------------------------------------
 
 
@@ -152,10 +152,10 @@ class ListRemindersArgs(BaseModel):
 
 
 class ListRemindersTool(BaseTool[ListRemindersArgs]):
-    name = "list_reminders"
+    name = "reminder_list"
     description = (
         "List all pending reminders for a chat, ordered by trigger time. Use "
-        "to find a reminder's id before calling cancel_reminder."
+        "to find a reminder's id before calling reminder_cancel."
     )
     args_model = ListRemindersArgs
 
@@ -178,22 +178,20 @@ class ListRemindersTool(BaseTool[ListRemindersArgs]):
 
 
 # ---------------------------------------------------------------------------
-# cancel_reminder
+# reminder_cancel
 # ---------------------------------------------------------------------------
 
 
 class CancelReminderArgs(BaseModel):
     reminder_id: int = Field(
-        description=(
-            "Numeric id of the reminder to cancel, as shown by list_reminders."
-        )
+        description=("Numeric id of the reminder to cancel, as shown by reminder_list.")
     )
 
 
 class CancelReminderTool(BaseTool[CancelReminderArgs]):
-    name = "cancel_reminder"
+    name = "reminder_cancel"
     description = (
-        "Cancel a pending reminder by id (get ids from list_reminders). "
+        "Cancel a pending reminder by id (get ids from reminder_list). "
         "Auto-seeded mandatory reminders (e.g. the self-reflection loop) "
         "cannot be cancelled through this tool — attempts are refused and the "
         "reminder continues to fire on schedule."

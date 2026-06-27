@@ -38,7 +38,7 @@ synthesis.
 ## Research procedure
 
 1. **Determine the lookback window.** Call
-   `list_reminders(chat_id=<firing chat>)` and find the reminder that
+   `reminder_list(chat_id=<firing chat>)` and find the reminder that
    just fired (match by `text` containing this skill's invocation tag).
    Read its `cron` field and map cadence → window:
    - Daily cadence (e.g. `0 9 * * *`, hourly variants) → **1 day**

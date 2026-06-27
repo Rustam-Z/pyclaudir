@@ -1,4 +1,4 @@
-"""``now`` — return the current time. Smoke test for the MCP wiring."""
+"""``time_now`` — return the current time. Smoke test for the MCP wiring."""
 
 from __future__ import annotations
 
@@ -14,11 +14,11 @@ class NowArgs(BaseModel):
 
 
 class NowTool(BaseTool[NowArgs]):
-    name = "now"
+    name = "time_now"
     description = (
         "Return the current time as ISO8601 in both UTC and the host's local "
         "timezone. Use to ground 'now' before computing a date/time. To "
-        "schedule a future action use set_reminder, not this. Doubles as a "
+        "schedule a future action use reminder_set, not this. Doubles as a "
         "basic 'is the tool channel alive' check."
     )
     args_model = NowArgs

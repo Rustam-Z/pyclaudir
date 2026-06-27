@@ -1,4 +1,4 @@
-"""MCP skill tools — list_skills and read_skill surface."""
+"""MCP skill tools — skill_list and skill_read surface."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from pyclaudir.tools.skills import (
 
 _VALID = """---
 name: self-reflection
-description: A test skill for tool-level unit testing. This is what list_skills surfaces.
+description: A test skill for tool-level unit testing. This is what skill_list surfaces.
 ---
 
 # self-reflection
@@ -41,7 +41,7 @@ def _ctx(store: SkillsStore) -> ToolContext:
 
 
 @pytest.mark.asyncio
-async def test_list_skills_returns_names_and_descriptions(tmp_path: Path) -> None:
+async def test_skill_list_returns_names_and_descriptions(tmp_path: Path) -> None:
     store = _store(tmp_path)
     ctx = _ctx(store)
     result = await ListSkillsTool(ctx).run(ListSkillsArgs())
@@ -53,13 +53,13 @@ async def test_list_skills_returns_names_and_descriptions(tmp_path: Path) -> Non
         {
             "name": "self-reflection",
             "description": "A test skill for tool-level unit testing. "
-            "This is what list_skills surfaces.",
+            "This is what skill_list surfaces.",
         },
     ]
 
 
 @pytest.mark.asyncio
-async def test_list_skills_empty(tmp_path: Path) -> None:
+async def test_skill_list_empty(tmp_path: Path) -> None:
     store = SkillsStore(root=tmp_path / "empty")
     store.ensure_root()
     ctx = _ctx(store)
@@ -69,7 +69,7 @@ async def test_list_skills_empty(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_read_skill_returns_content(tmp_path: Path) -> None:
+async def test_skill_read_returns_content(tmp_path: Path) -> None:
     store = _store(tmp_path)
     ctx = _ctx(store)
     result = await ReadSkillTool(ctx).run(ReadSkillArgs(name="self-reflection"))
@@ -79,7 +79,7 @@ async def test_read_skill_returns_content(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_read_skill_unknown_name_is_error(tmp_path: Path) -> None:
+async def test_skill_read_unknown_name_is_error(tmp_path: Path) -> None:
     store = _store(tmp_path)
     ctx = _ctx(store)
     result = await ReadSkillTool(ctx).run(ReadSkillArgs(name="does-not-exist"))
@@ -88,7 +88,7 @@ async def test_read_skill_unknown_name_is_error(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_read_skill_traversal_rejected(tmp_path: Path) -> None:
+async def test_skill_read_traversal_rejected(tmp_path: Path) -> None:
     store = _store(tmp_path)
     ctx = _ctx(store)
     result = await ReadSkillTool(ctx).run(ReadSkillArgs(name="../secrets"))

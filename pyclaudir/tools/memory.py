@@ -27,11 +27,11 @@ class ListMemoriesArgs(BaseModel):
 
 
 class ListMemoriesTool(BaseTool[ListMemoriesArgs]):
-    name = "list_memories"
+    name = "memory_list"
     description = (
         "List every memory file the operator has placed under data/memories/. "
         "Returns one path per line with its size in bytes. To find files by "
-        "their CONTENTS rather than their names, use search_memory instead. "
+        "their CONTENTS rather than their names, use memory_search instead. "
         "Files are read-only from your perspective; the operator curates them "
         "out of band."
     )
@@ -69,12 +69,12 @@ class SearchMemoryArgs(BaseModel):
 
 
 class SearchMemoryTool(BaseTool[SearchMemoryArgs]):
-    name = "search_memory"
+    name = "memory_search"
     description = (
         "Search the TEXT INSIDE memory files (not just their names) for "
         "keywords. Case-insensitive. Returns matching lines as "
-        "'path:line: text', best matches first. Faster than list_memories "
-        "plus reading every file: search first, then read_memory the most "
+        "'path:line: text', best matches first. Faster than memory_list "
+        "plus reading every file: search first, then memory_read the most "
         "relevant file for full context."
     )
     args_model = SearchMemoryArgs
@@ -102,7 +102,7 @@ class ReadMemoryArgs(BaseModel):
 
 
 class ReadMemoryTool(BaseTool[ReadMemoryArgs]):
-    name = "read_memory"
+    name = "memory_read"
     description = (
         "Read a memory file by relative path under data/memories/. UTF-8. "
         "Files larger than 64 KiB are truncated. Reading a file unlocks "
@@ -134,10 +134,10 @@ class WriteMemoryArgs(BaseModel):
 
 
 class WriteMemoryTool(BaseTool[WriteMemoryArgs]):
-    name = "write_memory"
+    name = "memory_write"
     description = (
         "Create or fully overwrite a memory file. Max 64 KiB. "
-        "If the file already exists you MUST call read_memory on it first "
+        "If the file already exists you MUST call memory_read on it first "
         "in the same session — this is a safety rail to stop accidental "
         "destruction of operator-curated notes. New files (that don't yet "
         "exist) can be created without a prior read. Writes to local storage "
@@ -170,10 +170,10 @@ class AppendMemoryArgs(BaseModel):
 
 
 class AppendMemoryTool(BaseTool[AppendMemoryArgs]):
-    name = "append_memory"
+    name = "memory_append"
     description = (
         "Append text to a memory file. New total must stay under 64 KiB. "
-        "If the file already exists you MUST call read_memory on it first "
+        "If the file already exists you MUST call memory_read on it first "
         "in the same session. New files can be created without a prior "
         "read. Useful for journals, running notes, conversation logs."
     )

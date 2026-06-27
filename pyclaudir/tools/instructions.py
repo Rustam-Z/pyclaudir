@@ -19,7 +19,7 @@ class ReadInstructionsArgs(BaseModel):
 
 
 class ReadInstructionsTool(BaseTool[ReadInstructionsArgs]):
-    name = "read_instructions"
+    name = "instruction_read"
     description = (
         "Read the current contents of project.md (your project-specific "
         "behaviour overlay, concatenated after system.md to form your "
@@ -46,7 +46,7 @@ class AppendInstructionsArgs(BaseModel):
 
 
 class AppendInstructionsTool(BaseTool[AppendInstructionsArgs]):
-    name = "append_instructions"
+    name = "instruction_append"
     description = (
         "Append text to project.md, your project-specific behaviour "
         "overlay. system.md is read-only (git-tracked); all "

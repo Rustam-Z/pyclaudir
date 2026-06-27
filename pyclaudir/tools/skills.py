@@ -7,7 +7,7 @@ which is strictly read-only and path-hardened.
 
 The intended use: when a reminder injects a message of the form
 ``<skill name="X">run</skill>`` inside a ``<reminder>`` envelope, the
-bot calls ``read_skill("X")`` and executes the playbook's steps.
+bot calls ``skill_read("X")`` and executes the playbook's steps.
 """
 
 from __future__ import annotations
@@ -24,14 +24,14 @@ class ListSkillsArgs(BaseModel):
 
 
 class ListSkillsTool(BaseTool[ListSkillsArgs]):
-    name = "list_skills"
+    name = "skill_list"
     description = (
         "List available agent skills (playbooks) under the project's "
         "skills/ directory, following the Agent Skills spec "
         "(https://agentskills.io/specification). Returns each skill's "
         "name and its frontmatter description — enough to decide which "
         "skill is relevant without loading the full body. Fetch the "
-        "body via read_skill only when you're ready to execute. Skills "
+        "body via skill_read only when you're ready to execute. Skills "
         'are typically invoked via `<skill name="X">run</skill>` '
         "inside a `<reminder>` envelope."
     )
@@ -62,10 +62,10 @@ class ReadSkillArgs(BaseModel):
 
 
 class ReadSkillTool(BaseTool[ReadSkillArgs]):
-    name = "read_skill"
+    name = "skill_read"
     description = (
         "Read the playbook (SKILL.md) for a given agent skill. "
-        "Returns the full markdown content. Call list_skills first if "
+        "Returns the full markdown content. Call skill_list first if "
         "you're not sure what's available. Call this when a `<reminder>` "
         'envelope contains `<skill name="X">run</skill>`.'
     )

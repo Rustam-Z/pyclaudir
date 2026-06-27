@@ -194,7 +194,7 @@ def test_write_rejects_symlinked_target(store: MemoryStore, tmp_path: Path) -> N
 
 
 @pytest.mark.asyncio
-async def test_write_memory_tool_happy_path(store: MemoryStore) -> None:
+async def test_memory_write_tool_happy_path(store: MemoryStore) -> None:
     ctx = ToolContext(memory_store=store)
     tool = WriteMemoryTool(ctx)
     result = await tool.run(WriteMemoryArgs(path="notes/test.md", content="hi"))
@@ -204,7 +204,7 @@ async def test_write_memory_tool_happy_path(store: MemoryStore) -> None:
 
 
 @pytest.mark.asyncio
-async def test_write_memory_tool_returns_error_on_overwrite_without_read(
+async def test_memory_write_tool_returns_error_on_overwrite_without_read(
     store: MemoryStore,
 ) -> None:
     (store.root / "policy.md").write_text("careful")
@@ -244,7 +244,7 @@ async def test_full_round_trip_via_tools(store: MemoryStore) -> None:
 
 
 @pytest.mark.asyncio
-async def test_write_memory_tool_creates_new_file_without_read(
+async def test_memory_write_tool_creates_new_file_without_read(
     store: MemoryStore,
 ) -> None:
     """A brand-new file is allowed without a prior read, since there's

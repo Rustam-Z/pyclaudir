@@ -131,7 +131,7 @@ async def test_cancelled_row_triggers_reseed(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_reminder_tool_refuses_to_cancel_auto_seeded(tmp_path: Path) -> None:
-    """Hard gate at the tool layer — cancel_reminder refuses auto-seeded
+    """Hard gate at the tool layer — reminder_cancel refuses auto-seeded
     rows, so even if the bot is prompt-injected into calling it, it
     cannot stop the self-reflection loop."""
     from pyclaudir.tools.base import ToolContext

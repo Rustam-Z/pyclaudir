@@ -20,7 +20,7 @@ skills/
 ├── render-style/          ← house style for render_html
 │   ├── SKILL.md
 │   └── README.md
-├── reminder-format/       ← house format for set_reminder text
+├── reminder-format/       ← house format for reminder_set text
 │   └── SKILL.md
 ├── trends/                ← on-demand global digest (tech / AI / finance / economy)
 │   └── SKILL.md
@@ -34,7 +34,7 @@ skills/
 |---|---|---|
 | [self-reflection](self-reflection/) | invoked | Daily two-phase loop: introspect last 24h of outbound behavior, stress-test pending lessons against scenarios, propose promote / refine / discard rules to the owner. Triggered by an auto-seeded reminder; refused without a real `<reminder>` envelope. |
 | [render-style](render-style/) | reference | Style guide for the `render_html` tool — dark dashboard / timeline / architecture-diagram look with CSS tokens, layout rules, and three copy-paste HTML skeletons. Read on the agent's own initiative before any `render_html` call. |
-| [reminder-format](reminder-format/) | reference | Three-rule format for the `set_reminder` text argument — `<THIS IS A REMINDER>` opener, `Goal:` line, numbered steps. Read before creating or editing any reminder so fired `<reminder>` envelopes are self-explanatory. |
+| [reminder-format](reminder-format/) | reference | Three-rule format for the `reminder_set` text argument — `<THIS IS A REMINDER>` opener, `Goal:` line, numbered steps. Read before creating or editing any reminder so fired `<reminder>` envelopes are self-explanatory. |
 | [trends](trends/) | invoked | On-demand global digest — tech, startup, AI, finance, future, economy. Sweeps X / Reddit / HN / Business Insider / LinkedIn / big-tech earnings / AI-lab blogs. Triggered by a reminder containing `<skill name="trends">run</skill>`. |
 | [trends-uzbekistan](trends-uzbekistan/) | invoked | On-demand Uzbek-scene digest — local startups, VC, fintech, gov tech, hackathons. Sweeps Uzbek Telegram channels (uzbekvc / uzbekfintech / uzbbanking / skartariss / stanbsse) and spot.uz. Triggered by a reminder containing `<skill name="trends-uzbekistan">run</skill>`. |
 
@@ -64,9 +64,9 @@ hyphenated). Files are capped at 256 KiB; descriptions at 1024 chars.
 
 Surfaced via:
 
-- `list_skills` — returns name + description for every well-formed
+- `skill_list` — returns name + description for every well-formed
   skill the agent can use to choose what to read.
-- `read_skill <name>` — returns the full body so the agent can apply
+- `skill_read <name>` — returns the full body so the agent can apply
   it.
 
 Path resolution is hardened the same way the memory store is —
@@ -82,7 +82,7 @@ no `..`, no symlinks, must stay inside `skills/`.
    discovered automatically before a specific tool call (the way
    `render-style` is referenced before `render_html`).
 5. Restart the bot — the skills store re-scans on startup and the new
-   skill becomes available via `list_skills` immediately.
+   skill becomes available via `skill_list` immediately.
 
 The bot **never writes** to `skills/`. The store is read-only by
 design; operators curate this directory by hand or via PR.

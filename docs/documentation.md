@@ -291,12 +291,13 @@ Edit `access.json` directly if you prefer — changes are hot-reloaded.
 
 ## Memory
 
-`data/memories/*.md` is where the bot keeps its notes. It has five tools:
+`data/memories/*.md` is where the bot keeps its notes. It has six tools:
 
-- `list_memories` — list the files
-- `read_memory` — read a file (cuts off at 64 KiB)
-- `write_memory` — create or overwrite a file (max 64 KiB)
-- `append_memory` — add text to an existing file
+- `memory_list` — list the files
+- `memory_search` — search the text inside files for keywords, best matches first
+- `memory_read` — read a file (cuts off at 64 KiB)
+- `memory_write` — create or overwrite a file (max 64 KiB)
+- `memory_append` — add text to an existing file
 - `telegram_send_memory_document` — send a memory file to a chat as a Telegram
   document (path-locked to `data/memories/`, optional caption + reply-to)
 
@@ -313,7 +314,7 @@ it has to overwrite the file. Actually deleting a file is up to you:
 
 You can also seed memory yourself by putting markdown files into
 `data/memories/` while the bot is running. It will see them on the next
-`list_memories` call.
+`memory_list` call.
 
 ### Learning — `self/learnings.md`
 
@@ -346,12 +347,12 @@ Two tools turn structured data into a Telegram photo:
   browser can't fetch.
 - `telegram_send_photo(chat_id, path, caption?, reply_to_message_id?)` — sends
   a file from `data/renders/` as an inline Telegram photo. Path-locked
-  to the renders root with the same hardening as `read_memory`.
+  to the renders root with the same hardening as `memory_read`.
 
 The agent's `render_html` calls follow the house style in
 [`skills/render-style/`](../skills/render-style/) — three skeletons
 (dashboard, timeline, architecture diagram) the agent reads via
-`read_skill render-style` before composing HTML. Tokens are dark-navy
+`skill_read render-style` before composing HTML. Tokens are dark-navy
 with semantic colors (green/blue/red/amber/purple/cyan/gray).
 
 Playwright + Chromium are pre-installed in the Docker image. For local
@@ -397,7 +398,7 @@ with `PYCLAUDIR_SELF_REFLECTION_CRON`):
   the instruction-edit tools to append rules to `project.md`.
 
 **Mandatory loop.** The reminder is protected on two layers:
-- `cancel_reminder` refuses to cancel rows with `auto_seed_key` set (so
+- `reminder_cancel` refuses to cancel rows with `auto_seed_key` set (so
   a prompt-injected bot can't stop the loop).
 - `_seed_default_reminders` in `__main__.py` re-seeds on every startup
   if no pending row exists — cancelling or deleting via SQL loses only
@@ -422,15 +423,15 @@ refuses malformed skills.
 
 Tools:
 
-- `list_skills` — enumerate available skills as name + description pairs
+- `skill_list` — enumerate available skills as name + description pairs
   (the spec's progressive-disclosure metadata surface).
-- `read_skill(name)` — load the full SKILL.md playbook.
+- `skill_read(name)` — load the full SKILL.md playbook.
 
 **Invocation.** A skill is triggered by a reminder whose text body is
 `<skill name="X">run</skill>`. The reminder loop wraps that in a
 `<reminder>` XML envelope before injecting into the engine. The bot,
 per `system.md § Skills`, recognizes `<skill>` inside `<reminder>` and
-calls `read_skill("X")` to load + execute the playbook.
+calls `skill_read("X")` to load + execute the playbook.
 
 **Trust model.** The bot trusts `<skill>` directives only when wrapped
 in a `<reminder>` envelope (server-synthesized). A user typing
@@ -478,7 +479,7 @@ schedule:
    `auto_seed_key` (e.g. `"your-skill-default"`).
 2. Add a migration if you need new DB columns/tables.
 3. Remember: auto-seeded reminders are protected by default —
-   `cancel_reminder` refuses them, and the seed hook re-creates them if
+   `reminder_cancel` refuses them, and the seed hook re-creates them if
    missing on restart. That's intentional; skills that should be
    interruptible shouldn't use the auto_seed_key path.
 
@@ -491,10 +492,10 @@ read, the decisions it should make, and the tools it should call.
 
 The agent can schedule one-shot and recurring reminders via three tools:
 
-- `set_reminder` — schedule a reminder with a UTC trigger time and
+- `reminder_set` — schedule a reminder with a UTC trigger time and
   optional cron expression
-- `list_reminders` — show pending reminders for a chat
-- `cancel_reminder` — cancel a pending reminder by id
+- `reminder_list` — show pending reminders for a chat
+- `reminder_cancel` — cancel a pending reminder by id
 
 Reminders are stored in the `reminders` SQLite table. A background task
 polls every 60 seconds for due entries and injects them into the engine
@@ -772,13 +773,13 @@ is enforced by code, not by hope, and tested in
   `pyclaudir`, so every pyclaudir tool Claude sees is named
   `mcp__pyclaudir__<x>`. The two web tools are Claude Code built-ins,
   not MCP tools, so they show up unprefixed (`WebFetch`, `WebSearch`).
-- **Memory writes with safety rails.** `write_memory` and
-  `append_memory` exist, but are guarded by:
+- **Memory writes with safety rails.** `memory_write` and
+  `memory_append` exist, but are guarded by:
   - **Path traversal hardening** (no `..`, no absolute paths, no
     symlinks) — applies to writes the same way it applies to reads.
   - **64 KiB per-file size cap** — both writes and post-append totals.
   - **Read-before-write** — overwriting or appending to an *existing*
-    file requires `read_memory` to have been called on it first in the
+    file requires `memory_read` to have been called on it first in the
     same session. New files are exempt. The set of "read paths"
     resets on every restart so a fresh process must re-read before
     mutating.
@@ -865,7 +866,7 @@ is enforced by code, not by hope, and tested in
   the dropped-text handler, the on_crash hook, and the on_giveup
   hook. Add a new failure mode = append one `CcFailurePattern`.
 - **Instruction tools are owner-only (any chat).** Two tools —
-  `read_instructions` and `append_instructions` — expose
+  `instruction_read` and `instruction_append` — expose
   `prompts/project.md` (and only that file) to the bot. system.md is
   git-tracked, so it's intentionally not exposed; all owner-driven
   customisations accumulate in project.md, which is concatenated
@@ -879,7 +880,7 @@ is enforced by code, not by hope, and tested in
   review window.
 - **Skills are operator-curated playbooks.** Markdown files under
   `skills/<name>/SKILL.md` that describe multi-step agent workflows.
-  Exposed read-only via `list_skills` / `read_skill`. A skill is
+  Exposed read-only via `skill_list` / `skill_read`. A skill is
   invoked when a `<reminder>` envelope contains `<skill
   name="X">run</skill>` — the system prompt teaches the bot to
   trust `<skill>` tags only inside that envelope, so a user typing
@@ -898,7 +899,7 @@ Once configured, you should be able to:
 1. DM the bot, see the bot reply via `telegram_send_message`.
 2. Drop `data/memories/user_preferences.md` containing "Alice prefers
    Russian", ask "what do you know about me?", watch it call
-   `list_memories` → `read_memory` and reply in Russian.
+   `memory_list` → `memory_read` and reply in Russian.
 3. Send 5 messages in 2 seconds, see them batched into one turn
    (debounce).
 4. Send a 6th message *while* it's mid-turn, see it injected.
@@ -1014,7 +1015,7 @@ pyclaudir/
 │   ├── memories/               # the agent's working memory
 │   ├── attachments/            # inbound photos/docs the dispatcher saves
 │   ├── renders/                # outbound PNGs from render_html
-│   ├── prompt_backups/         # auto-backups before append_instructions writes
+│   ├── prompt_backups/         # auto-backups before instruction_append writes
 │   └── cc_logs/                # raw CC stdout/stderr capture
 ├── scripts/
 │   ├── sync-memories.sh        # rsync helper for server ↔ local sync

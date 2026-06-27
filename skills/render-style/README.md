@@ -27,7 +27,7 @@ the rendering browser has all outbound network blocked.
 ## How the agent uses it
 
 1. Bot decides a reply needs a visual (table, chart, diagram, flow).
-2. `read_skill render-style` — pulls in tokens, layout rules, the
+2. `skill_read render-style` — pulls in tokens, layout rules, the
    skeleton library.
 3. Picks the matching layout mode; copies the skeleton; substitutes
    real content into the placeholders.
@@ -42,7 +42,7 @@ The pointer to read this skill before rendering lives in
 Skills are git-tracked under `skills/`; memory files live under
 `data/memories/` which is gitignored. Style guides should ship with
 the repo, survive `data/` resets, and be visible to anyone reviewing
-the codebase. Skills are also discoverable through `list_skills` so
+the codebase. Skills are also discoverable through `skill_list` so
 the bot can find them without operator priming.
 
 ## Editing
