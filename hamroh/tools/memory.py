@@ -19,6 +19,7 @@ import asyncio
 
 from pydantic import BaseModel, Field
 
+from ..storage.memory import MEMORY_TEMPLATE, MemoryFile
 from .base import BaseTool, ToolResult
 
 
@@ -29,11 +30,13 @@ class ListMemoriesArgs(BaseModel):
 class ListMemoriesTool(BaseTool[ListMemoriesArgs]):
     name = "memory_list"
     description = (
-        "List every memory file the operator has placed under data/memories/. "
-        "Returns one path per line with its size in bytes. To find files by "
-        "their CONTENTS rather than their names, use memory_search instead. "
-        "Files are read-only from your perspective; the operator curates them "
-        "out of band."
+        "List every memory file under data/memories/, each with its "
+        "frontmatter description — enough to decide which memory is relevant "
+        "without reading the whole file (the same progressive-disclosure "
+        "protocol skill_list uses). Memories carry name/description "
+        "frontmatter; legacy files without it show just their path and size. "
+        "To find files by their CONTENTS rather than their summaries, use "
+        "memory_search instead."
     )
     args_model = ListMemoriesArgs
 
@@ -44,11 +47,23 @@ class ListMemoriesTool(BaseTool[ListMemoriesArgs]):
         files = await asyncio.to_thread(store.list)
         if not files:
             return ToolResult(content="(no memory files)")
-        lines = [f"{f.relative_path}\t{f.size_bytes}" for f in files]
+        lines = [_format_memory_line(f) for f in files]
         return ToolResult(
             content="\n".join(lines),
-            data={"files": [f.relative_path for f in files]},
+            data={
+                "files": [
+                    {"path": f.relative_path, "description": f.description}
+                    for f in files
+                ],
+            },
         )
+
+
+def _format_memory_line(f: MemoryFile) -> str:
+    """Render one ``memory_list`` line: description when present, else path+size."""
+    if f.description:
+        return f"- {f.relative_path} — {f.description}"
+    return f"- {f.relative_path}\t{f.size_bytes} bytes (no description)"
 
 
 class SearchMemoryArgs(BaseModel):
@@ -129,19 +144,25 @@ class WriteMemoryArgs(BaseModel):
         ),
     )
     content: str = Field(
-        description="Full new file body. Overwrites any existing content.",
+        description=(
+            "Full new file body. Overwrites any existing content. MUST begin "
+            "with the frontmatter template:\n" + MEMORY_TEMPLATE + "\nKeep the "
+            "description a fresh one-line summary of what the file now holds."
+        ),
     )
 
 
 class WriteMemoryTool(BaseTool[WriteMemoryArgs]):
     name = "memory_write"
     description = (
-        "Create or fully overwrite a memory file. Max 64 KiB. "
+        "Create or fully overwrite a memory file. Max 64 KiB. Content MUST "
+        "start with name/description frontmatter (the template) — writes "
+        "without it are rejected — so memory_list can show what the file is "
+        "about. Rewrite the description whenever the content changes. "
         "If the file already exists you MUST call memory_read on it first "
-        "in the same session — this is a safety rail to stop accidental "
-        "destruction of operator-curated notes. New files (that don't yet "
-        "exist) can be created without a prior read. Writes to local storage "
-        "only — to send a memory file to the user, use "
+        "in the same session — a safety rail against destroying operator-"
+        "curated notes. New files can be created without a prior read. Writes "
+        "to local storage only — to send a memory file to the user, use "
         "telegram_send_memory_document."
     )
     args_model = WriteMemoryArgs
@@ -165,17 +186,27 @@ class AppendMemoryArgs(BaseModel):
         description="Relative path under data/memories/. No '..', no absolute paths.",
     )
     content: str = Field(
-        description="Text to append. A trailing newline is NOT added automatically.",
+        description="Text to append to the body. A trailing newline is NOT added.",
+    )
+    description: str = Field(
+        description=(
+            "Fresh one-line summary of what the file holds after this append. "
+            "Replaces the file's frontmatter description so memory_list stays "
+            "current. Max 1024 chars."
+        ),
     )
 
 
 class AppendMemoryTool(BaseTool[AppendMemoryArgs]):
     name = "memory_append"
     description = (
-        "Append text to a memory file. New total must stay under 64 KiB. "
-        "If the file already exists you MUST call memory_read on it first "
-        "in the same session. New files can be created without a prior "
-        "read. Useful for journals, running notes, conversation logs."
+        "Append text to a memory file's body AND refresh its one-line "
+        "description (kept in frontmatter) so memory_list always reflects the "
+        "latest content. The file's name is preserved (or derived from the "
+        "filename for a new/legacy file — the first append adds frontmatter). "
+        "New total must stay under 64 KiB. If the file already exists you MUST "
+        "call memory_read on it first in the same session. Useful for "
+        "journals, running notes, conversation logs."
     )
     args_model = AppendMemoryArgs
 
@@ -184,7 +215,9 @@ class AppendMemoryTool(BaseTool[AppendMemoryArgs]):
         if store is None:
             return ToolResult(content="memory store unavailable", is_error=True)
         try:
-            new_size = await asyncio.to_thread(store.append, args.path, args.content)
+            new_size = await asyncio.to_thread(
+                store.append, args.path, args.content, args.description
+            )
         except Exception as exc:
             return ToolResult(content=f"{type(exc).__name__}: {exc}", is_error=True)
         return ToolResult(

@@ -69,12 +69,25 @@ tools in `builtin_tools_disabled`.
 
 | Tool | What it does |
 |---|---|
-| `memory_list` | List existing memory files. |
+| `memory_list` | List existing memory files, each with its frontmatter description (progressive disclosure, like `skill_list`). Legacy files without frontmatter show just path + size. |
 | `memory_search` | Search the text inside memory files for keywords; returns matching lines, best matches first. |
 | `memory_read` | Read a memory file by relative path. |
-| `memory_write` | Create or overwrite a memory file (read-before-write rail enforced; 64 KiB cap). |
-| `memory_append` | Append to an existing memory file. |
+| `memory_write` | Create or overwrite a memory file. Content **must** begin with name/description frontmatter (the template); writes without it are rejected. Read-before-write rail enforced; 64 KiB cap. |
+| `memory_append` | Append text to a memory file's body **and** refresh its frontmatter description (so `memory_list` stays current). Name is preserved or derived from the filename; the first append migrates a legacy file onto the template. |
 | `telegram_send_memory_document` | Deliver a memory file to a chat as a downloadable Telegram document. Path-locked to memories root. Optional caption + reply-to. |
+
+Memory files follow the same frontmatter protocol as skills — a `---` block
+with `name` and `description` — so the agent can scan `memory_list` and pick
+the right file without reading every one:
+
+```
+---
+name: <short human-friendly label>
+description: <one-line summary used to find this memory without reading it>
+---
+
+<body — the actual remembered content>
+```
 
 There is no `delete_memory` by design — overwriting is the supported
 "forget" path. Operator handles real deletion on host.

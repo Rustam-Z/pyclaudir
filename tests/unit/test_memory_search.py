@@ -112,8 +112,9 @@ def test_search_does_not_unlock_read_before_write(store: MemoryStore) -> None:
     store.search("config")  # matches policy.md but is not a "read"
 
     assert "policy.md" not in store.read_paths_snapshot, "search must not credit a read"
+    templated = "---\nname: policy\ndescription: config\n---\n\noverwritten"
     with pytest.raises(MemoryPathError, match="read-before-write"):
-        store.write("policy.md", "overwritten")
+        store.write("policy.md", templated)
 
 
 # ---------------------------------------------------------------------------

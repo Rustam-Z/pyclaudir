@@ -25,6 +25,11 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from .frontmatter import (
+    parse_frontmatter,
+    render_frontmatter,
+    require_name_and_description,
+)
 from .path_safety import resolve_under_root
 
 
@@ -36,6 +41,9 @@ class MemoryPathError(ValueError):
 class MemoryFile:
     relative_path: str
     size_bytes: int
+    #: One-line summary from the file's frontmatter ``description``, or
+    #: ``None`` for legacy files that predate the frontmatter template.
+    description: str | None = None
 
 
 @dataclass(frozen=True)
@@ -58,6 +66,47 @@ _HitList = list[MemorySearchHit]
 #: Maximum size of any one memory file. Matches the read-truncation default
 #: so a file the model can read fully can also be re-written fully.
 MAX_MEMORY_BYTES = 64 * 1024
+
+#: Wording for memory-file frontmatter errors (passed to the shared helpers).
+_FM_LABEL = "memory file"
+
+#: Canonical skeleton every memory file must follow. Mirrors the skills
+#: protocol: ``name`` + ``description`` frontmatter so ``memory_list`` can
+#: surface what a file is about without reading its body.
+MEMORY_TEMPLATE = """\
+---
+name: <short human-friendly label>
+description: <one-line summary used to find this memory without reading it>
+---
+
+<body — the actual remembered content>
+"""
+
+
+def _require_frontmatter(content: str) -> None:
+    """Raise :class:`MemoryPathError` unless ``content`` carries valid frontmatter."""
+    metadata, _ = parse_frontmatter(content, error_cls=MemoryPathError, label=_FM_LABEL)
+    require_name_and_description(metadata, error_cls=MemoryPathError, label=_FM_LABEL)
+
+
+def _read_description(path: Path) -> str | None:
+    """Best-effort frontmatter ``description`` for ``path``, else ``None``.
+
+    Never raises: a legacy file (no frontmatter), malformed frontmatter, or
+    an unreadable file all yield ``None`` so one bad file can't blind the
+    whole listing.
+    """
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+        metadata, _ = parse_frontmatter(
+            text, error_cls=MemoryPathError, label=_FM_LABEL
+        )
+    except (OSError, MemoryPathError):
+        return None
+    description = metadata.get("description")
+    if isinstance(description, str) and description.strip():
+        return description.strip()
+    return None
 
 
 class MemoryStore:
@@ -103,7 +152,9 @@ class MemoryStore:
         """List every file under the memories root, recursively.
 
         Hidden files (``.gitkeep``, dotfiles) are skipped. Symlinked entries
-        are skipped silently — they cannot be read by ``read`` either.
+        are skipped silently — they cannot be read by ``read`` either. Each
+        file's frontmatter ``description`` is surfaced when present (skills
+        protocol); legacy files without it get ``description=None``.
         """
         if not self._root.exists():
             return []
@@ -118,7 +169,11 @@ class MemoryStore:
             except ValueError:  # pragma: no cover - rglob shouldn't escape
                 continue
             out.append(
-                MemoryFile(relative_path=str(rel), size_bytes=path.stat().st_size)
+                MemoryFile(
+                    relative_path=str(rel),
+                    size_bytes=path.stat().st_size,
+                    description=_read_description(path),
+                )
             )
         return out
 
@@ -191,16 +246,13 @@ class MemoryStore:
     def write(self, relative: str, content: str) -> int:
         """Create or overwrite a memory file with ``content``.
 
-        Returns the number of bytes written.
-
-        Rules:
-
-        - Path resolution must pass :meth:`resolve_path` (no traversal,
-          no symlinks, must stay inside root).
-        - ``content`` UTF-8 byte length must be ≤ :data:`MAX_MEMORY_BYTES`.
-        - If the file already exists, ``relative`` must be in
-          :attr:`_read_paths` (read-before-write). New files are exempt.
+        Returns the number of bytes written. ``content`` must begin with the
+        frontmatter template (``name`` + ``description``); path resolution
+        must pass :meth:`resolve_path`; the UTF-8 byte length must be ≤
+        :data:`MAX_MEMORY_BYTES`; and an existing file must have been read
+        first (read-before-write). See :data:`MEMORY_TEMPLATE`.
         """
+        _require_frontmatter(content)
         path = self.resolve_path(relative)
         encoded = content.encode("utf-8")
         if len(encoded) > MAX_MEMORY_BYTES:
@@ -222,33 +274,66 @@ class MemoryStore:
         self._read_paths.add(relative)
         return len(encoded)
 
-    def append(self, relative: str, content: str) -> int:
-        """Append ``content`` to a memory file.
+    def append(self, relative: str, content: str, description: str) -> int:
+        """Append ``content`` to a memory file's body, refreshing its frontmatter.
 
         Returns the new total size in bytes.
+
+        Unlike a raw byte-append, this keeps the file's frontmatter current:
+        the body grows by ``content`` and the frontmatter ``description`` is
+        set to ``description`` on every call, so ``memory_list`` always shows
+        an up-to-date summary. ``name`` is preserved from the existing
+        frontmatter, or derived from the filename stem for a new or legacy
+        (frontmatter-less) file — the first append migrates a legacy file
+        onto the template.
 
         Same path safety + read-before-write rules as :meth:`write`. The
         post-append size must still fit within :data:`MAX_MEMORY_BYTES`.
         """
         path = self.resolve_path(relative)
-        encoded = content.encode("utf-8")
-        existing = b""
-        if path.exists():
-            if relative not in self._read_paths:
-                raise MemoryPathError(
-                    f"refusing to append to {relative}: must call memory_read "
-                    "first in this session (read-before-write invariant)"
-                )
-            if not path.is_file():
-                raise MemoryPathError(f"{relative} exists but is not a regular file")
-            existing = path.read_bytes()
-        new_size = len(existing) + len(encoded)
-        if new_size > MAX_MEMORY_BYTES:
+        name, body = self._existing_name_and_body(path, relative)
+        rebuilt = render_frontmatter({"name": name, "description": description})
+        rebuilt += f"\n{body}{content}"
+        require_name_and_description(
+            {"name": name, "description": description},
+            error_cls=MemoryPathError,
+            label=_FM_LABEL,
+        )
+        encoded = rebuilt.encode("utf-8")
+        if len(encoded) > MAX_MEMORY_BYTES:
             raise MemoryPathError(
-                f"append would exceed cap: {new_size} bytes > {MAX_MEMORY_BYTES}"
+                f"append would exceed cap: {len(encoded)} bytes > {MAX_MEMORY_BYTES}"
             )
         path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("ab") as fh:
-            fh.write(encoded)
+        path.write_bytes(encoded)
         self._read_paths.add(relative)
-        return new_size
+        return len(encoded)
+
+    def _existing_name_and_body(self, path: Path, relative: str) -> tuple[str, str]:
+        """Return ``(name, body)`` for an append target.
+
+        For an existing file the read-before-write gate applies and the
+        current frontmatter is parsed: a templated file yields its stored
+        ``name`` and body, a legacy file keeps its whole content as the body.
+        A brand-new file starts empty. ``name`` falls back to the filename
+        stem when the file has no frontmatter ``name``.
+        """
+        fallback_name = Path(relative).stem or relative
+        if not path.exists():
+            return fallback_name, ""
+        if relative not in self._read_paths:
+            raise MemoryPathError(
+                f"refusing to append to {relative}: must call memory_read "
+                "first in this session (read-before-write invariant)"
+            )
+        if not path.is_file():
+            raise MemoryPathError(f"{relative} exists but is not a regular file")
+        existing = path.read_text(encoding="utf-8", errors="replace")
+        try:
+            metadata, body = parse_frontmatter(
+                existing, error_cls=MemoryPathError, label=_FM_LABEL
+            )
+        except MemoryPathError:
+            return fallback_name, existing  # legacy file: keep all of it as body
+        name = metadata.get("name")
+        return (name if isinstance(name, str) and name else fallback_name), body

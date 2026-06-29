@@ -128,6 +128,18 @@ For each selected candidate:
    <optional short reasoning>
    ```
 
+   **Frontmatter.** Every memory file (including `learnings.md`) must
+   begin with a `name`/`description` frontmatter block. When rewriting
+   `learnings.md`, keep these as the file's first lines (add them if a
+   legacy file lacks them); the h2 entries follow below:
+
+   ```
+   ---
+   name: self-learnings
+   description: Append-only reflection journal — pending/promoted/discarded lesson candidates.
+   ---
+   ```
+
 Then proceed to phase B. **Do not** DM the owner between phases —
 phase B will handle all proposals in one batch.
 
@@ -218,6 +230,15 @@ final call in Step 5 and can redirect it.
 Write the per-run reasoning to
 `data/memories/self/reflections/<YYYY-MM-DD>.md` via `memory_write`
 (create parents automatically — just pass the full relative path).
+Start the file with the required frontmatter, then the body:
+
+```
+---
+name: reflection-<YYYY-MM-DD>
+description: Self-reflection audit log for <YYYY-MM-DD> — why each lesson promoted or was dropped.
+---
+```
+
 For each lesson include:
 
 - Proposed rule text.
@@ -299,11 +320,13 @@ compact the `learnings.md` entry. Two target branches:
 
 1. `memory_read(<target path>)` first if the file already exists
    (read-before-write rail); brand-new files are exempt.
-2. `memory_append(<target path>, <fact text>)` — append a self-
-   contained line under the right file (`notes/users/<id>.md`,
+2. `memory_append(<target path>, <fact text>, <description>)` — append
+   a self-contained line under the right file (`notes/users/<id>.md`,
    `notes/groups/<chat_id>.md`, or `notes/<topic>.md`). Use the path
-   the owner named, or your suggested path if they accepted it. No
-   restart needed — memory is read live.
+   the owner named, or your suggested path if they accepted it. The
+   `description` is a fresh one-line summary of what the file now holds
+   (it replaces the file's frontmatter description, keeping `memory_list`
+   current). No restart needed — memory is read live.
 
 **Then, for either branch, compact the source entry** in
 `data/memories/self/learnings.md` **in one write** — the lesson now

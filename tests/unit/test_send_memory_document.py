@@ -33,7 +33,8 @@ def _mock_bot(message_id: int = 999) -> MagicMock:
 
 @pytest.mark.asyncio
 async def test_happy_path_sends_document(store: MemoryStore) -> None:
-    store.write("notes/report.md", "# Report\nbody")
+    content = "---\nname: report\ndescription: a report\n---\n\n# Report\nbody"
+    store.write("notes/report.md", content)
     bot = _mock_bot(message_id=42)
     tool = TelegramSendMemoryDocumentTool(ToolContext(bot=bot, memory_store=store))
 
@@ -51,14 +52,14 @@ async def test_happy_path_sends_document(store: MemoryStore) -> None:
     kwargs = bot.send_document.await_args.kwargs
     assert kwargs["chat_id"] == 123
     assert kwargs["filename"] == "report.md"
-    assert Path(kwargs["document"]).read_text() == "# Report\nbody"
+    assert Path(kwargs["document"]).read_text() == content
     assert kwargs["caption"] is None
     assert kwargs["reply_to_message_id"] is None
 
 
 @pytest.mark.asyncio
 async def test_caption_and_reply_to_passed_through(store: MemoryStore) -> None:
-    store.write("a.md", "x")
+    store.write("a.md", "---\nname: a\ndescription: d\n---\n\nx")
     bot = _mock_bot()
     tool = TelegramSendMemoryDocumentTool(ToolContext(bot=bot, memory_store=store))
 
@@ -127,7 +128,7 @@ async def test_no_memory_store_returns_error() -> None:
 
 @pytest.mark.asyncio
 async def test_on_chat_replied_invoked_after_send(store: MemoryStore) -> None:
-    store.write("note.md", "hi")
+    store.write("note.md", "---\nname: note\ndescription: d\n---\n\nhi")
     bot = _mock_bot()
     seen: list[int] = []
     ctx = ToolContext(

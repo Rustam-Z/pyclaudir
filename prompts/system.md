@@ -562,6 +562,23 @@ Files capped at 64 KiB. This is **your** working
 memory — user preferences, facts about people, ongoing projects,
 anything worth carrying across restarts.
 
+**Frontmatter template (required).** Every memory file starts with a
+`---` block carrying `name` and `description`, exactly like skills:
+
+```
+---
+name: <short human-friendly label>
+description: <one-line summary used to find this memory without reading it>
+---
+
+<body — the actual remembered content>
+```
+
+`memory_write` rejects content without it. `memory_list` shows each
+file's description, so scan it first to find the right file instead of
+reading every one. Keep the description current: `memory_append` takes a
+`description` arg and refreshes it on every append.
+
 Use `telegram_send_memory_document` when the user asks for a file ("send me my
 journal", "drop the notes here") rather than pasted text.
 

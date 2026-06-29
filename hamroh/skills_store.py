@@ -33,8 +33,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-import yaml
-
+from .storage.frontmatter import parse_frontmatter, require_name_and_description
 from .storage.path_safety import resolve_under_root
 
 
@@ -56,39 +55,20 @@ MAX_SKILL_BYTES = 256 * 1024
 #: no leading/trailing hyphen, no consecutive hyphens.
 _NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
-#: Frontmatter description cap per spec.
-_DESCRIPTION_MAX = 1024
-_NAME_MAX = 64
-
 
 def _parse_frontmatter(text: str) -> tuple[dict, str]:
-    """Split YAML frontmatter from the markdown body.
+    """Split a SKILL.md's YAML frontmatter from its body.
 
-    Returns ``(metadata, body)``. Raises :class:`SkillsError` if the
-    frontmatter block is malformed.
+    Thin wrapper over :func:`hamroh.storage.frontmatter.parse_frontmatter`
+    that pins the skill-specific error type and wording.
     """
-    if not text.startswith("---"):
-        raise SkillsError("SKILL.md must start with YAML frontmatter delimiter '---'")
-    # Match the frontmatter block: --- ... --- (line-anchored)
-    m = re.match(r"^---\s*\n(.*?)\n---\s*(?:\n|$)", text, re.DOTALL)
-    if m is None:
-        raise SkillsError("SKILL.md frontmatter block is not closed with '---'")
-    try:
-        data = yaml.safe_load(m.group(1)) or {}
-    except yaml.YAMLError as exc:
-        raise SkillsError(f"SKILL.md frontmatter is not valid YAML: {exc}") from exc
-    if not isinstance(data, dict):
-        raise SkillsError("SKILL.md frontmatter must be a YAML mapping")
-    return data, text[m.end() :]
+    return parse_frontmatter(text, error_cls=SkillsError, label="SKILL.md")
 
 
 def _validate_skill_metadata(metadata: dict, expected_name: str) -> None:
     """Enforce the required spec constraints on frontmatter."""
-    name = metadata.get("name")
-    if not isinstance(name, str) or not name:
-        raise SkillsError("SKILL.md frontmatter must include a non-empty 'name' field")
-    if len(name) > _NAME_MAX:
-        raise SkillsError(f"skill name '{name}' exceeds {_NAME_MAX} chars")
+    require_name_and_description(metadata, error_cls=SkillsError, label="SKILL.md")
+    name = metadata["name"]
     if not _NAME_RE.match(name):
         raise SkillsError(
             f"skill name '{name}' must be lowercase alphanumeric with hyphens, "
@@ -98,15 +78,6 @@ def _validate_skill_metadata(metadata: dict, expected_name: str) -> None:
         raise SkillsError(
             f"skill name '{name}' in frontmatter must match parent directory "
             f"'{expected_name}'"
-        )
-    description = metadata.get("description")
-    if not isinstance(description, str) or not description.strip():
-        raise SkillsError(
-            "SKILL.md frontmatter must include a non-empty 'description' field"
-        )
-    if len(description) > _DESCRIPTION_MAX:
-        raise SkillsError(
-            f"skill description exceeds {_DESCRIPTION_MAX} chars ({len(description)})"
         )
 
 

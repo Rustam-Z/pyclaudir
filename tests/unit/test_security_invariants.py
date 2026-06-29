@@ -340,8 +340,9 @@ def test_invariant_3_read_before_write_enforced(tmp_path: Path) -> None:
     store = MemoryStore(tmp_path / "memories")
     store.ensure_root()
     (store.root / "operator_note.md").write_text("CRITICAL")
+    templated = "---\nname: note\ndescription: d\n---\n\ndestroyed"
     with pytest.raises(MemoryPathError, match="read-before-write"):
-        store.write("operator_note.md", "destroyed")
+        store.write("operator_note.md", templated)
     # The original survived
     assert (store.root / "operator_note.md").read_text() == "CRITICAL"
 
@@ -351,8 +352,9 @@ def test_invariant_3_size_cap_enforced(tmp_path: Path) -> None:
 
     store = MemoryStore(tmp_path / "memories")
     store.ensure_root()
+    oversize = f"---\nname: n\ndescription: d\n---\n\n{'x' * (MAX_MEMORY_BYTES + 1)}"
     with pytest.raises(MemoryPathError, match="too large"):
-        store.write("huge.md", "x" * (MAX_MEMORY_BYTES + 1))
+        store.write("huge.md", oversize)
 
 
 # ---------------------------------------------------------------------------
