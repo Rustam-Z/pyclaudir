@@ -12,7 +12,12 @@ from pathlib import Path
 
 import pytest
 
-from hamroh.skills_store import MAX_SKILL_BYTES, SkillsError, SkillsStore
+from hamroh.skills_store import (
+    MAX_SKILL_BYTES,
+    SkillsError,
+    SkillsStore,
+    render_skills_index,
+)
 
 
 _VALID_FRONTMATTER = textwrap.dedent(
@@ -226,3 +231,30 @@ def test_read_truncates_at_cap(tmp_path: Path) -> None:
     )
     text = store.read("self-reflection")
     assert "[truncated" in text
+
+
+# ---------------------------------------------------------------------------
+# render_skills_index() — the preloaded "level 1" system-prompt block
+# ---------------------------------------------------------------------------
+
+
+def test_render_skills_index_lists_each_skill(tmp_path: Path) -> None:
+    """given several valid skills, when rendered, then each appears as
+    '- **name** — description' under the Available skills header."""
+    store = _make_store(tmp_path)
+
+    block = render_skills_index(store)
+
+    assert block.startswith("# Available skills"), "block must carry the header"
+    assert "- **self-reflection** — A test skill" in block, "self-reflection listed"
+    assert "- **another** — A test skill" in block, "another listed"
+    assert "skill_read" in block, "block must tell the agent how to load a body"
+
+
+def test_render_skills_index_empty_when_no_skills(tmp_path: Path) -> None:
+    """An empty skills/ dir renders to '' so the caller appends nothing."""
+    root = tmp_path / "skills"
+    store = SkillsStore(root=root)
+    store.ensure_root()
+
+    assert render_skills_index(store) == "", "no skills → no dangling header"

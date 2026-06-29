@@ -124,11 +124,19 @@ class CcSpawnSpec:
     #: here, preserving today's "credentials missing → tools hidden"
     #: semantics.
     mcp_allowed_tools: tuple[str, ...] = ()
+    #: Pre-rendered "available skills" block (name + description per skill),
+    #: appended to the system prompt so the agent always knows what
+    #: playbooks exist without calling ``skill_list`` — Agent Skills
+    #: "level 1" metadata. Built at startup from
+    #: :func:`hamroh.skills_store.render_skills_index`; empty string means
+    #: nothing is appended (no skills, or feature off).
+    skills_index: str = ""
 
 
 def _compose_system_prompt(spec: CcSpawnSpec) -> str:
     """Assemble the system prompt: shipped base + project overlay +
-    runtime block + (optionally) the subagent docs."""
+    runtime block + (optionally) the skills index + (optionally) the
+    subagent docs."""
     runtime_block = (
         "# Runtime\n\n"
         "You are running with:\n"
@@ -143,6 +151,8 @@ def _compose_system_prompt(spec: CcSpawnSpec) -> str:
     if spec.project_prompt_path and spec.project_prompt_path.exists():
         system_prompt += "\n\n" + spec.project_prompt_path.read_text(encoding="utf-8")
     system_prompt += "\n\n" + runtime_block
+    if spec.skills_index:
+        system_prompt += "\n\n" + spec.skills_index
     if spec.enable_subagents:
         if (
             spec.subagents_prompt_path is None

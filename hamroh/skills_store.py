@@ -213,3 +213,26 @@ class SkillsStore:
         if truncated:
             text += f"\n\n[truncated to {max_bytes} bytes]"
         return text
+
+
+def render_skills_index(store: SkillsStore) -> str:
+    """Render the available-skills block preloaded into the system prompt.
+
+    Lists each skill's name + description (Agent Skills "level 1" metadata)
+    so the agent always knows what playbooks exist without first calling
+    ``skill_list`` — mirroring how Claude Code preloads skill descriptions.
+    Returns an empty string when there are no skills, so the caller can
+    append it unconditionally without leaving a dangling header.
+    """
+    skills = store.list()
+    if not skills:
+        return ""
+    lines = "\n".join(f"- **{s.name}** — {s.description}" for s in skills)
+    return (
+        "# Available skills\n\n"
+        "These operator-curated playbooks live under skills/<name>/SKILL.md. "
+        "Their names and descriptions are listed here so you always know what "
+        'exists — load a full body with skill_read("<name>") when one is '
+        "relevant. skill_list re-fetches this same list on demand.\n\n"
+        f"{lines}\n"
+    )

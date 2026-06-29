@@ -39,7 +39,7 @@ from .instructions_store import InstructionsStore
 from .mcp_server import McpServer
 from .plugins import Plugins, load_plugins
 from .rate_limiter import RateLimitConfig, RateLimiter
-from .skills_store import SkillsStore
+from .skills_store import SkillsStore, render_skills_index
 from .storage.attachments import AttachmentStore
 from .storage.memory import MemoryStore
 from .storage.render import RenderStore
@@ -384,11 +384,15 @@ async def _start_mcp_server(
     return ctx, mcp
 
 
-def _build_cc_spec(config: Config, plugins: Plugins, mcp: McpServer) -> CcSpawnSpec:
+def _build_cc_spec(
+    config: Config, plugins: Plugins, mcp: McpServer, skills: SkillsStore
+) -> CcSpawnSpec:
     """Write the schema + MCP config to a tmpdir and assemble the spawn spec.
 
     Tool-group toggles flow through ``plugins.json`` exclusively — edit
-    the file and restart to flip.
+    the file and restart to flip. The skills index is rendered once here
+    and baked into the system prompt, so adding/removing a skill takes
+    effect on the next restart.
     """
     tmpdir = Path(tempfile.mkdtemp(prefix="hamroh-"))
     schema_path = tmpdir / "schema.json"
@@ -415,6 +419,7 @@ def _build_cc_spec(config: Config, plugins: Plugins, mcp: McpServer) -> CcSpawnS
         enable_bash=bool(plugins.tool_groups.get("bash", False)),
         enable_code=bool(plugins.tool_groups.get("code", False)),
         mcp_allowed_tools=tuple(mcp_allowed_tools),
+        skills_index=render_skills_index(skills),
     )
 
 

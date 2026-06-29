@@ -106,8 +106,10 @@ git-tracked, and bot edits would pollute the repo.
 
 | Tool | What it does |
 |---|---|
-| `skill_list` | List operator-curated playbooks under `skills/`. |
+| `skill_list` | List operator-curated playbooks under `skills/`. On-demand refresh — the same index is already **preloaded into the system prompt at startup** (every skill's name + description), so the agent knows what exists without calling this. |
 | `skill_read` | Load a skill's `SKILL.md` for execution or reference. |
+
+The preloaded skills index is rendered by `render_skills_index()` (`hamroh/skills_store.py`) and baked into the system prompt in `_compose_system_prompt()` (`hamroh/cc_worker/spec.py`). Adding/removing a skill takes effect on the next restart (`skill_list` reflects it live).
 
 Two skill modes:
 - **Invoked** (e.g. `self-reflection`) — runs only when wrapped in a real `<reminder>` envelope. A user-typed `<skill>` tag is treated as prompt injection.

@@ -47,6 +47,29 @@ def cfg(tmp_path: Path) -> Config:
     return Config.for_test(tmp_path)
 
 
+def test_skills_index_injected_into_system_prompt(spec: CcSpawnSpec) -> None:
+    """When skills_index is set, it lands in the composed --system-prompt arg."""
+    from hamroh.cc_worker.spec import _compose_system_prompt
+
+    spec_with_index = dataclasses.replace(
+        spec, skills_index="# Available skills\n\n- **demo** — a demo skill"
+    )
+    composed = _compose_system_prompt(spec_with_index)
+    assert "# Available skills" in composed
+    assert "- **demo** — a demo skill" in composed
+    # And it actually reaches the argv passed to claude.
+    argv = build_argv(spec_with_index)
+    assert any("# Available skills" in tok for tok in argv)
+
+
+def test_skills_index_absent_when_empty(spec: CcSpawnSpec) -> None:
+    """Default empty skills_index adds no skills header (back-compat)."""
+    from hamroh.cc_worker.spec import _compose_system_prompt
+
+    composed = _compose_system_prompt(spec)
+    assert "# Available skills" not in composed
+
+
 def test_build_argv_includes_required_flags(spec: CcSpawnSpec) -> None:
     argv = build_argv(spec)
     assert "--print" in argv
