@@ -82,7 +82,7 @@ async def _assert_search_finds_seeded_fact(
 
 
 async def test_memory_write_and_read_dm(
-    pyclaudir_sut: Sut, tester_client: TelegramClient, dm: Conversation
+    hamroh_sut: Sut, tester_client: TelegramClient, dm: Conversation
 ) -> None:
     """The bot writes a codeword to memory and reads it back in a DM.
 
@@ -90,12 +90,12 @@ async def test_memory_write_and_read_dm(
     when   the owner asks the bot to remember it in a DM
     then   it lands in a memory file and the bot recalls it within MAX_MEMORY_REPLY_S.
     """
-    await _assert_write_and_read(pyclaudir_sut, tester_client, dm)
+    await _assert_write_and_read(hamroh_sut, tester_client, dm)
 
 
 @pytest.mark.smoke
 async def test_memory_write_and_read_group(
-    pyclaudir_sut: Sut, tester_client: TelegramClient, group: Conversation
+    hamroh_sut: Sut, tester_client: TelegramClient, group: Conversation
 ) -> None:
     """The bot writes a codeword to memory and reads it back in a group.
 
@@ -103,11 +103,11 @@ async def test_memory_write_and_read_group(
     when   the owner asks the bot to remember it in a group
     then   it lands in a memory file and the bot recalls it within MAX_MEMORY_REPLY_S.
     """
-    await _assert_write_and_read(pyclaudir_sut, tester_client, group)
+    await _assert_write_and_read(hamroh_sut, tester_client, group)
 
 
 async def test_memory_search_dm(
-    pyclaudir_sut: Sut, tester_client: TelegramClient, dm: Conversation
+    hamroh_sut: Sut, tester_client: TelegramClient, dm: Conversation
 ) -> None:
     """The bot searches memory contents to answer a question in a DM.
 
@@ -115,12 +115,12 @@ async def test_memory_search_dm(
     when   the owner asks a content question about it in a DM
     then   the bot calls memory_search, answers correctly, within MAX_MEMORY_REPLY_S.
     """
-    await _assert_search_finds_seeded_fact(pyclaudir_sut, tester_client, dm)
+    await _assert_search_finds_seeded_fact(hamroh_sut, tester_client, dm)
 
 
 @pytest.mark.smoke
 async def test_memory_search_group(
-    pyclaudir_sut: Sut, tester_client: TelegramClient, group: Conversation
+    hamroh_sut: Sut, tester_client: TelegramClient, group: Conversation
 ) -> None:
     """The bot searches memory contents to answer a question in a group.
 
@@ -128,12 +128,12 @@ async def test_memory_search_group(
     when   the owner asks a content question about it in a group
     then   the bot calls memory_search, answers correctly, within MAX_MEMORY_REPLY_S.
     """
-    await _assert_search_finds_seeded_fact(pyclaudir_sut, tester_client, group)
+    await _assert_search_finds_seeded_fact(hamroh_sut, tester_client, group)
 
 
 @pytest.mark.smoke
 async def test_memory_survives_session_reset_dm(
-    pyclaudir_sut: Sut, tester_client: TelegramClient, dm: Conversation
+    hamroh_sut: Sut, tester_client: TelegramClient, dm: Conversation
 ) -> None:
     """A codeword in memory survives /reset_session in a DM.
 
@@ -144,7 +144,7 @@ async def test_memory_survives_session_reset_dm(
     codeword = new_sentinel("MANGO")
     await send_and_wait(tester_client, dm, _REMEMBER.format(cw=codeword))
     on_disk = await wait_until(
-        lambda: memory_files_containing(pyclaudir_sut.memories_dir, codeword)
+        lambda: memory_files_containing(hamroh_sut.memories_dir, codeword)
     )
     assert on_disk, f"{codeword!r} was not persisted to a memory file"
 

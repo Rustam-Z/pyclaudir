@@ -1,6 +1,6 @@
 """E2E: turning on the live progress draft doesn't break normal DM replies.
 
-With ``PYCLAUDIR_PROGRESS_DRAFT_ENABLED`` on, every DM turn streams a live
+With ``HAMROH_PROGRESS_DRAFT_ENABLED`` on, every DM turn streams a live
 "working…" draft (Telegram's ``sendMessageDraft``) on the hot path — fired the
 instant a message arrives and refreshed every ~5s until the reply lands. This
 test guards the regression that matters most: those extra draft calls must not

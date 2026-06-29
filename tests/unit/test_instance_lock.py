@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from pyclaudir.config import Config
-from pyclaudir.startup import _acquire_instance_lock
+from hamroh.config import Config
+from hamroh.startup import _acquire_instance_lock
 
 
 def _cfg(tmp_path: Path) -> Config:

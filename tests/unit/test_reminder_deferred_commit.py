@@ -19,10 +19,10 @@ from pathlib import Path
 
 import pytest
 
-from pyclaudir.cc_worker import TurnResult
-from pyclaudir.config import Config
-from pyclaudir.engine import Engine, EngineOptions
-from pyclaudir.models import ChatMessage, ControlAction
+from hamroh.cc_worker import TurnResult
+from hamroh.config import Config
+from hamroh.engine import Engine, EngineOptions
+from hamroh.models import ChatMessage, ControlAction
 
 _CFG = Config.for_test(Path("/tmp"))
 

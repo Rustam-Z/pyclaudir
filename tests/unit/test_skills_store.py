@@ -1,7 +1,7 @@
 """SkillsStore — read-only, path-hardened, Agent Skills spec-compliant.
 
 Covers spec conformance (frontmatter required, name/description rules,
-directory/name match) plus the pyclaudir-specific hardening (path
+directory/name match) plus the hamroh-specific hardening (path
 traversal, symlinks, size cap).
 """
 
@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from pyclaudir.skills_store import MAX_SKILL_BYTES, SkillsError, SkillsStore
+from hamroh.skills_store import MAX_SKILL_BYTES, SkillsError, SkillsStore
 
 
 _VALID_FRONTMATTER = textwrap.dedent(
@@ -179,7 +179,7 @@ def test_frontmatter_description_too_long(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Path hardening (unchanged from pyclaudir's own rules)
+# Path hardening (unchanged from hamroh's own rules)
 # ---------------------------------------------------------------------------
 
 

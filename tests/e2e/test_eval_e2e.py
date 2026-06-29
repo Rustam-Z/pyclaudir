@@ -5,7 +5,7 @@ Latency is reported, not gated: a single sample flakes near an SLO, so the
 table is informational (raise ``E2E_EVAL_RUNS`` for trustworthy percentiles).
 The correctness pass-rate over the matrix is the stable signal we assert.
 A warm-up turn pays the one-time startup cost off the clock. Both tests reuse
-the one session bot via ``pyclaudir_sut`` — no second bot is spawned.
+the one session bot via ``hamroh_sut`` — no second bot is spawned.
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ async def _eval_chat(
 @pytest.mark.smoke
 @pytest.mark.slow
 async def test_eval_dm(
-    pyclaudir_sut: Sut, tester_client: TelegramClient, dm: Conversation
+    hamroh_sut: Sut, tester_client: TelegramClient, dm: Conversation
 ) -> None:
     """Eval matrix passes for the DM chat.
 
@@ -52,13 +52,13 @@ async def test_eval_dm(
     """
     # warm-up turn pays the one-time startup cost off the clock
     await send_and_wait(tester_client, dm, "Hello, are you there?")
-    await _eval_chat(tester_client, dm, pyclaudir_sut.db_path)
+    await _eval_chat(tester_client, dm, hamroh_sut.db_path)
 
 
 @pytest.mark.smoke
 @pytest.mark.slow
 async def test_eval_group(
-    pyclaudir_sut: Sut, tester_client: TelegramClient, group: Conversation
+    hamroh_sut: Sut, tester_client: TelegramClient, group: Conversation
 ) -> None:
     """Eval matrix passes for the group chat.
 
@@ -66,4 +66,4 @@ async def test_eval_group(
     when   each scenario runs E2E_EVAL_RUNS times in a group
     then   the latency table is logged and the pass-rate stays >= E2E_EVAL_MIN_PASS.
     """
-    await _eval_chat(tester_client, group, pyclaudir_sut.db_path)
+    await _eval_chat(tester_client, group, hamroh_sut.db_path)

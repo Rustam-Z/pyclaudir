@@ -5,7 +5,7 @@ The top-level [README](../README.md) is the high-level intro; everything below i
 ## Files
 
 ### [documentation.md](documentation.md)
-The full technical manual for pyclaudir itself. Read this when you're
+The full technical manual for hamroh itself. Read this when you're
 modifying, debugging, or auditing the project.
 
 Covers: every env var, the four-process architecture in detail, how to
@@ -16,7 +16,7 @@ end-to-end checklist, and the full repo layout.
 
 ### [tools.md](tools.md)
 The canonical list of every tool available to the bot — always-on
-pyclaudir built-ins, always-on Claude Code built-ins (web), and
+hamroh built-ins, always-on Claude Code built-ins (web), and
 opt-in groups (subagents, shell, code, Jira, GitLab, GitHub). Also
 the canonical reference for [`plugins.json`](../plugins.json): the
 schema, how to plug in a new external MCP, how to disable a built-in
@@ -24,13 +24,13 @@ tool you don't use, and how to hide a skill. Read this when deciding
 what capabilities to grant for your deployment.
 
 ### [deployment.md](deployment.md)
-Step-by-step guide for deploying pyclaudir to a VPS (Hetzner,
+Step-by-step guide for deploying hamroh to a VPS (Hetzner,
 DigitalOcean, Contabo…) using Docker, plus a continuous-deployment
 workflow. Read this when you're moving the bot from your laptop to a
 server, or wiring it into CI.
 
 ### [reference-architectures.md](reference-architectures.md)
-Notes on the two systems pyclaudir descends from: Anthropic's [official
+Notes on the two systems hamroh descends from: Anthropic's [official
 Telegram plugin](https://github.com/anthropics/claude-plugins-official/tree/main/external_plugins/telegram) and the [Rust Claudir](https://gist.github.com/nodir-t/da74c78281f203b0439609ebe5866f49). Read this *before*
 proposing architectural changes — it explains which patterns came from
 where and why, so you don't accidentally regress to a shape that's

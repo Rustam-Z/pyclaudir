@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from pyclaudir.config import Config
-from pyclaudir.logging_setup import (
+from hamroh.config import Config
+from hamroh.logging_setup import (
     JsonLogFormatter,
     _component,
     format_log_line,
@@ -33,13 +33,13 @@ def _record(
 @pytest.mark.parametrize(
     ("logger_name", "expected"),
     [
-        ("pyclaudir", "core"),
-        ("pyclaudir.telegram_io", "dispatcher"),
-        ("pyclaudir.telegram_io.commands", "dispatcher"),
-        ("pyclaudir.mcp_server", "mcp"),
-        ("pyclaudir.reminder", "reminder"),
-        ("pyclaudir.cc_worker", "cc_worker"),
-        ("pyclaudir.tx", "tx"),
+        ("hamroh", "core"),
+        ("hamroh.telegram_io", "dispatcher"),
+        ("hamroh.telegram_io.commands", "dispatcher"),
+        ("hamroh.mcp_server", "mcp"),
+        ("hamroh.reminder", "reminder"),
+        ("hamroh.cc_worker", "cc_worker"),
+        ("hamroh.tx", "tx"),
         ("httpx", "httpx"),
     ],
 )
@@ -54,7 +54,7 @@ def test_component_mapping(logger_name: str, expected: str) -> None:
 
 def test_formatter_emits_core_fields() -> None:
     # Given a plain INFO record from the dispatcher
-    record = _record("pyclaudir.telegram_io", "RX message")
+    record = _record("hamroh.telegram_io", "RX message")
 
     # When formatted as JSON
     payload = json.loads(JsonLogFormatter().format(record))
@@ -62,14 +62,14 @@ def test_formatter_emits_core_fields() -> None:
     # Then the structured fields are present and correct
     assert payload["level"] == "INFO", "level must be carried"
     assert payload["component"] == "dispatcher", "component derives from logger name"
-    assert payload["logger"] == "pyclaudir.telegram_io"
+    assert payload["logger"] == "hamroh.telegram_io"
     assert payload["msg"] == "RX message"
     assert payload["ts"].endswith("+00:00"), "timestamp must be UTC ISO-8601"
 
 
 def test_formatter_includes_optional_event_and_data() -> None:
     # Given a record carrying event/data via extra
-    record = _record("pyclaudir.mcp_server")
+    record = _record("hamroh.mcp_server")
     record.event = "tool_call"
     record.data = {"tool": "database_query", "ms": 4}
 
@@ -82,7 +82,7 @@ def test_formatter_includes_optional_event_and_data() -> None:
 
 
 def test_formatter_omits_event_and_data_when_absent() -> None:
-    payload = json.loads(JsonLogFormatter().format(_record("pyclaudir.engine")))
+    payload = json.loads(JsonLogFormatter().format(_record("hamroh.engine")))
     assert "event" not in payload, "event must be omitted when not provided"
     assert "data" not in payload, "data must be omitted when not provided"
 
@@ -95,7 +95,7 @@ def test_formatter_captures_exception() -> None:
         import sys
 
         record = logging.LogRecord(
-            "pyclaudir.cc_worker",
+            "hamroh.cc_worker",
             logging.ERROR,
             __file__,
             1,
@@ -130,12 +130,12 @@ def test_setup_logging_writes_json_file_and_is_idempotent(tmp_path: Path) -> Non
         assert len(root.handlers) == 2, "console + file handler, no duplicates"
 
         # When something is logged
-        logging.getLogger("pyclaudir.engine").info("a structured line")
+        logging.getLogger("hamroh.engine").info("a structured line")
         for handler in root.handlers:
             handler.flush()
 
         # Then the JSON file holds a parseable record
-        last = tail_log(cfg.log_dir / "pyclaudir.log", 1)
+        last = tail_log(cfg.log_dir / "hamroh.log", 1)
         assert last, "the log file must contain the line"
         assert json.loads(last[0])["msg"] == "a structured line"
     finally:
@@ -152,7 +152,7 @@ def test_setup_logging_writes_json_file_and_is_idempotent(tmp_path: Path) -> Non
 
 
 def test_tail_log_returns_last_n_oldest_first(tmp_path: Path) -> None:
-    path = tmp_path / "pyclaudir.log"
+    path = tmp_path / "hamroh.log"
     path.write_text("".join(f"line-{i}\n" for i in range(10)), encoding="utf-8")
     assert tail_log(path, 3) == ["line-7", "line-8", "line-9"], "last 3, oldest-first"
 

@@ -4,7 +4,7 @@ description: On-demand Uzbekistan research playbook. Sweeps local startups, VC, 
 license: MIT
 compatibility: Requires WebFetch, WebSearch, telegram_send_message.
 metadata:
-  pyclaudir-invocation: '<skill name="trends-uzbekistan">run</skill>'
+  hamroh-invocation: '<skill name="trends-uzbekistan">run</skill>'
 ---
 
 # Skill: trends-uzbekistan

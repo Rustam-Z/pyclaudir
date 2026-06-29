@@ -16,9 +16,9 @@ from pathlib import Path
 
 import pytest
 
-from pyclaudir.cc_schema import schema_json
-from pyclaudir.cc_worker import CcSpawnSpec, CcWorker
-from pyclaudir.config import Config
+from hamroh.cc_schema import schema_json
+from hamroh.cc_worker import CcSpawnSpec, CcWorker
+from hamroh.config import Config
 
 
 def _spec(

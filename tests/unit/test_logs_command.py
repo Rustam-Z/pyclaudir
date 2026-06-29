@@ -8,9 +8,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from pyclaudir.access import AccessConfig, save_access
-from pyclaudir.config import Config
-from pyclaudir.telegram_io import DispatcherDeps, TelegramDispatcher
+from hamroh.access import AccessConfig, save_access
+from hamroh.config import Config
+from hamroh.telegram_io import DispatcherDeps, TelegramDispatcher
 
 OWNER = 42
 STRANGER = 100
@@ -56,9 +56,7 @@ def _write_log(cfg: Config, *messages: str) -> None:
         )
         for m in messages
     ]
-    (cfg.log_dir / "pyclaudir.log").write_text(
-        "\n".join(lines) + "\n", encoding="utf-8"
-    )
+    (cfg.log_dir / "hamroh.log").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 @pytest.mark.asyncio
@@ -99,7 +97,7 @@ async def test_logs_is_silent_for_non_owner(tmp_path: Path) -> None:
 async def test_logs_reports_when_no_file_yet(tmp_path: Path) -> None:
     # Given no log file has been written
     cfg = _cfg(tmp_path)
-    (cfg.log_dir / "pyclaudir.log").unlink(missing_ok=True)
+    (cfg.log_dir / "hamroh.log").unlink(missing_ok=True)
     dispatcher = _dispatcher(cfg)
     update = _update(OWNER)
 

@@ -10,14 +10,14 @@ import pytest
 
 from pathlib import Path
 
-from pyclaudir.tools.browser.browser import (
+from hamroh.tools.browser.browser import (
     BrowserManager,
     BrowserSession,
     BrowserSessionTool,
     _safe_close,
     try_selector,
 )
-from pyclaudir.tools.browser.ssrf import check_navigable
+from hamroh.tools.browser.ssrf import check_navigable
 
 _VIEWPORT = {"width": 800, "height": 600}
 

@@ -7,11 +7,11 @@ from typing import Any
 
 import pytest
 
-from pyclaudir.tools.telegram.telegram_add_reaction import (
+from hamroh.tools.telegram.telegram_add_reaction import (
     AddReactionArgs,
     TelegramAddReactionTool,
 )
-from pyclaudir.tools.base import ToolContext
+from hamroh.tools.base import ToolContext
 
 
 class _BotStub:

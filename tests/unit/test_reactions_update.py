@@ -8,16 +8,16 @@ from pathlib import Path
 
 import pytest
 
-from pyclaudir.config import Config
-from pyclaudir.db.database import Database
-from pyclaudir.db.messages import (
+from hamroh.config import Config
+from hamroh.db.database import Database
+from hamroh.db.messages import (
     MessageKey,
     ReactionChange,
     add_bot_reaction,
     apply_user_reaction,
     insert_message,
 )
-from pyclaudir.models import ChatMessage
+from hamroh.models import ChatMessage
 
 
 async def _open(tmp_path: Path) -> Database:

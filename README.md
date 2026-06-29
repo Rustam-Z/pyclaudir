@@ -1,16 +1,16 @@
 <p align="center">
-  <img src="assets/pyclaudir-logo.jpg" alt="pyclaudir" width="600">
+  <img src="assets/hamroh-logo.jpg" alt="hamroh" width="600">
 </p>
 
 <p align="center">
-  <b>pyclaudir</b> is a framework for running your own persistent AI companion on Telegram — one you fully own, control, can extend, one that learns from you.
+  <b>hamroh</b> is a framework for running your own persistent AI companion on Telegram — one you fully own, control, can extend, one that learns from you.
 </p>
 
 ---
 
-> **Try it live:** a running instance lives in the [@rustamz_workshop](https://t.me/rustamz_workshop) Telegram group — join and message Luna, assistant running on top of pyclaudir, to see it in action before you install.
+> **Try it live:** a running instance lives in the [@rustamz_workshop](https://t.me/rustamz_workshop) Telegram group — join and message Luna, assistant running on top of hamroh, to see it in action before you install.
 
-**pyclaudir** runs a persistent AI assistant in your Telegram. Not a chatbot — an agent that has memory, runs scheduled tasks, can monitor things, and can be extended with any tool you wire up.
+**hamroh** runs a persistent AI assistant in your Telegram. Not a chatbot — an agent that has memory, runs scheduled tasks, can monitor things, and can be extended with any tool you wire up.
 
 You own everything: the memory files, the skill playbooks, the MCP connections, the logs, the tokens. Nothing is routed through a third-party product. You can read every decision it made and change any rule from a DM.
 
@@ -24,7 +24,7 @@ It is extendable: add MCPs to connect it to anything: GitHub, Jira, email, calen
 
 Runs on a laptop or small VPS.
 
-The goal is a [Jarvis](https://www.youtube.com/watch?v=Qav7NJIsKL4&t=2s) — an AI that lives with you, monitors what matters, and acts on your behalf. pyclaudir is the foundation.
+The goal is a [Jarvis](https://www.youtube.com/watch?v=Qav7NJIsKL4&t=2s) — an AI that lives with you, monitors what matters, and acts on your behalf. hamroh is the foundation.
 
 ## Quickstart (3 minutes)
 
@@ -36,12 +36,12 @@ Pre-requisite:
 
 **Instructions for running on Linux**
 ```bash
-git clone https://github.com/Rustam-Z/pyclaudir && cd pyclaudir
+git clone https://github.com/Rustam-Z/hamroh && cd hamroh
 
 cp .env.example .env && nano .env
 #   set TELEGRAM_BOT_TOKEN  (create a bot in @BotFather and copy its token here)
-#   set PYCLAUDIR_OWNER_ID  (your numeric Telegram user id, from @userinfobot)
-#   update if necessary: PYCLAUDIR_MODEL and PYCLAUDIR_EFFORT
+#   set HAMROH_OWNER_ID  (your numeric Telegram user id, from @userinfobot)
+#   update if necessary: HAMROH_MODEL and HAMROH_EFFORT
 
 cp access.json.example access.json
 #   give access to extra DMs and groups, you can use /access and /deny commands after bot started to update the list
@@ -52,9 +52,9 @@ cp plugins.json.example plugins.json && nano plugins.json
 cp prompts/project.md.example prompts/project.md && nano prompts/project.md
 #   set bot name, language, personality
 
-docker compose up -d --build                                              # build and run, wait for "pyclaudir is live"
+docker compose up -d --build                                              # build and run, wait for "hamroh is live"
 docker compose logs -f                                                    # [optional] monitor logs
-docker compose exec pyclaudir python -m pyclaudir.scripts.trace --follow  # [optional] monitor Claude Code I/O logs
+docker compose exec hamroh python -m hamroh.scripts.trace --follow  # [optional] monitor Claude Code I/O logs
 ```
 
 DM your bot. It replies.
@@ -67,8 +67,8 @@ DM your bot. It replies.
 
 ```bash
 uv sync --extra dev
-uv run python -m pyclaudir                                               # run, wait for "pyclaudir is live"
-uv run python -m pyclaudir.scripts.trace --follow                        # [optional] monitor, Claude Code I/O logs
+uv run python -m hamroh                                               # run, wait for "hamroh is live"
+uv run python -m hamroh.scripts.trace --follow                        # [optional] monitor, Claude Code I/O logs
 ```
 
 ## What you can do with it
@@ -94,7 +94,7 @@ Use as an **automation layer.** Wire up MCPs and schedule agents to do real work
 
 > **This README is the high-level intro.** Deeper material lives in
 > [docs/](docs/) — full technical manual, deployment walkthrough, tools
-> reference, and the systems pyclaudir descends from. Start at
+> reference, and the systems hamroh descends from. Start at
 > [docs/README.md](docs/README.md).
 
 Out of the box: messaging, memory, reminders, web, vision. Want shell access? Code editing? Plug in any other MCP server — GitHub, Jira, Notion, Slack, your own — same one-entry pattern, stdio or remote HTTP/SSE with auth headers.
@@ -120,7 +120,7 @@ One file, four blocks. Edit and restart to apply.
 
 - **`tool_groups`** — Claude Code's dangerous built-ins (shell / code editing / subagents). All off by default; flip to `true` to unlock.
 - **`mcps`** — external MCP servers (GitHub, Jira, Linear, Notion, your own). One array entry per server, `stdio` / `http` / `sse`, credentials pulled from `.env` via `${VAR}` references — no Python needed.
-- **`builtin_tools_disabled`** — pyclaudir built-ins to hide from the agent (e.g. `telegram_create_poll`).
+- **`builtin_tools_disabled`** — hamroh built-ins to hide from the agent (e.g. `telegram_create_poll`).
 - **`skills_disabled`** — skill directories under `skills/` to hide.
 
 A missing `plugins.json` boots locked-down (no integrations, no tool groups). A malformed file crashes boot loudly. Full schema, copy-paste examples, and per-MCP setup: [docs/tools.md](docs/tools.md).
@@ -128,14 +128,14 @@ A missing `plugins.json` boots locked-down (no integrations, no tool groups). A 
 ### `.env`
 
 All settings come from environment variables (or `.env`). Full list in
-[pyclaudir/config.py](pyclaudir/config.py). The ones you'll touch:
+[hamroh/config.py](hamroh/config.py). The ones you'll touch:
 
 | Variable | Required | Notes |
 |---|---|---|
 | `TELEGRAM_BOT_TOKEN` | yes | from @BotFather |
-| `PYCLAUDIR_OWNER_ID` | yes | your numeric Telegram user id |
-| `PYCLAUDIR_MODEL` | yes | e.g. `claude-sonnet-4-6` |
-| `PYCLAUDIR_EFFORT` | yes | `low` / `medium` / `high` / `max` |
+| `HAMROH_OWNER_ID` | yes | your numeric Telegram user id |
+| `HAMROH_MODEL` | yes | e.g. `claude-sonnet-4-6` |
+| `HAMROH_EFFORT` | yes | `low` / `medium` / `high` / `max` |
 
 Credentials for any external MCP you wire in live in `.env` and are
 pulled into `plugins.json` via `${VAR}` references. 
@@ -145,7 +145,7 @@ Access lives in `access.json` at the repo root (hot-reloaded). One `policy`
 gates DMs and groups: `owner_only` (default, owner DM only) · `allowlist`
 (`allowed_users` for DMs, `allowed_chats` for groups) · `open` (everyone).
 Owner-only commands: `/access`, `/allow`, `/deny`, `/policy`, `/pause`, `/resume`, `/kill`, `/health`, `/audit`, `/logs`, `/usage`, `/reset_session`.
-`/logs` tails the structured JSON log (`/logs` for the last 50 lines, `/logs N` for the last N). Logs are written to `data/logs/pyclaudir.log` (one JSON object per line, rotated daily, 7 days kept); set the level with `PYCLAUDIR_LOG_LEVEL`.
+`/logs` tails the structured JSON log (`/logs` for the last 50 lines, `/logs N` for the last N). Logs are written to `data/logs/hamroh.log` (one JSON object per line, rotated daily, 7 days kept); set the level with `HAMROH_LOG_LEVEL`.
 `/usage` relays Claude Code's own usage report (subscription session and weekly
 rate limits, with reset times) by shelling out to `claude --print /usage`.
 Blocked DMs get one canned "this is a private assistant" reply on their
@@ -153,7 +153,7 @@ first message; blocked groups stay silent.
 
 Details: [docs/documentation.md](docs/documentation.md).
 
-## What pyclaudir can do
+## What hamroh can do
 
 **communication:** send / reply / edit / delete text, emoji reactions, polls (regular + quiz, multi-answer, auto-close).
 
@@ -171,7 +171,7 @@ Details: [docs/documentation.md](docs/documentation.md).
 
 It reuses one warm Chromium kept alive for the whole session, and follows popups / new tabs automatically. Live network is allowed here (unlike renders), but localhost / RFC1918 / link-local / `file://` targets are refused. On by default; disable by listing the tools in `builtin_tools_disabled` in `plugins.json`.
 
-**scheduling:** one-shot + cron-recurring reminders. Optional daily self-reflection skill (off by default; enable with `PYCLAUDIR_SELF_REFLECTION_ENABLED`) that promotes corrections into durable rules with owner approval.
+**scheduling:** one-shot + cron-recurring reminders. Optional daily self-reflection skill (off by default; enable with `HAMROH_SELF_REFLECTION_ENABLED`) that promotes corrections into durable rules with owner approval.
 
 **self-edit:** append rules to `prompts/project.md` (owner-only); shipped `system.md` is git-tracked and not exposed.
 
@@ -188,7 +188,7 @@ It reuses one warm Chromium kept alive for the whole session, and follows popups
 - Idle-time sweeps: if no Telegram message for N hours, run a low-stakes routine (lint, dep audit, memory cleanup) and only ping if it finds something.
 - Self-followups
 
-**Make it yours.** Almost every axis is pluggable without touching the core — drop a `BaseTool` into [pyclaudir/tools/](pyclaudir/tools/), append an MCP server to `plugins.json`, add a skill at `skills/<name>/SKILL.md`, reshape the persona in `prompts/project.md`, or run a fleet with separate `PYCLAUDIR_DATA_DIR` paths. Full recipes in [docs/documentation.md](docs/documentation.md#adding-a-new-tool).
+**Make it yours.** Almost every axis is pluggable without touching the core — drop a `BaseTool` into [hamroh/tools/](hamroh/tools/), append an MCP server to `plugins.json`, add a skill at `skills/<name>/SKILL.md`, reshape the persona in `prompts/project.md`, or run a fleet with separate `HAMROH_DATA_DIR` paths. Full recipes in [docs/documentation.md](docs/documentation.md#adding-a-new-tool).
 
 Per-tool descriptions, the `plugins.json` schema, and how to add a new MCP / disable a built-in tool / hide a skill: [docs/tools.md](docs/tools.md).
 
@@ -209,21 +209,21 @@ Telegram  →  Engine (buffer + debounce)  →  Claude worker  →  claude proce
 - **Claude worker** runs the `claude` subprocess and restarts it on
   crash.
 - **MCP server** auto-loads every tool in
-  [pyclaudir/tools/](pyclaudir/tools/).
+  [hamroh/tools/](hamroh/tools/).
 
 The engine handles **one turn at a time**. A long task in chat A
 delays chat B until it finishes. Fine for one user; for busy setups,
 run a separate bot per chat group.
 
 The system prompt is two files: [prompts/system.md](prompts/system.md)
-(generic pyclaudir behaviour, shipped) and `prompts/project.md`
+(generic hamroh behaviour, shipped) and `prompts/project.md`
 (your overlay — gitignored, copy from
 [prompts/project.md.example](prompts/project.md.example)).
 
 ### Known limitations
 
 - **One process per data dir (enforced).** A second instance on the same
-  `PYCLAUDIR_DATA_DIR` refuses to start (`data/.lock` is held by the
+  `HAMROH_DATA_DIR` refuses to start (`data/.lock` is held by the
   first). Give each instance its own data dir to run a fleet.
 - **Crashes don't lose buffered messages.** Messages waiting for a turn
   are replayed on the next start (only ones newer than 24 hours). In rare

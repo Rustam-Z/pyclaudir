@@ -7,9 +7,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from pyclaudir.storage.memory import MemoryStore
-from pyclaudir.tools.base import ToolContext
-from pyclaudir.tools.telegram.telegram_send_memory_document import (
+from hamroh.storage.memory import MemoryStore
+from hamroh.tools.base import ToolContext
+from hamroh.tools.telegram.telegram_send_memory_document import (
     SendMemoryDocumentArgs,
     TelegramSendMemoryDocumentTool,
 )

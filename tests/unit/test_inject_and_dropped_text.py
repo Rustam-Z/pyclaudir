@@ -9,10 +9,10 @@ import pytest
 
 from pathlib import Path
 
-from pyclaudir.cc_worker import TurnResult
-from pyclaudir.config import Config
-from pyclaudir.engine import Engine, EngineOptions
-from pyclaudir.models import ChatMessage, ControlAction
+from hamroh.cc_worker import TurnResult
+from hamroh.config import Config
+from hamroh.engine import Engine, EngineOptions
+from hamroh.models import ChatMessage, ControlAction
 
 
 _CFG = Config.for_test(Path("/tmp"))
@@ -128,7 +128,7 @@ async def test_dropped_text_classified_failure_surfaces_error() -> None:
         assert len(notifications) == 1, "exactly one user-facing notification"
         chat_id, text = notifications[0]
         assert chat_id == -100
-        assert "pyclaudir_model" in text.lower(), "classified guidance shown to user"
+        assert "hamroh_model" in text.lower(), "classified guidance shown to user"
         assert "claude-sonnet-4-7" in text, "diagnostic snippet preserved for the user"
         assert len(worker.sent) == 1, "no retry turn kicked into the worker"
     finally:

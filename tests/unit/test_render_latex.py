@@ -7,10 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from pyclaudir.storage.render import RenderStore
-from pyclaudir.tools import render_html as render_html_mod
-from pyclaudir.tools.base import ToolContext
-from pyclaudir.tools.render_latex import (
+from hamroh.storage.render import RenderStore
+from hamroh.tools import render_html as render_html_mod
+from hamroh.tools.base import ToolContext
+from hamroh.tools.render_latex import (
     RenderLatexArgs,
     RenderLatexTool,
     _build_html,
@@ -132,7 +132,7 @@ async def test_render_html_does_not_pass_allow_list(
         req.out_path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"x" * 50)
 
     monkeypatch.setattr(render_html_mod, "_render_to_png", _fake)
-    from pyclaudir.tools.render_html import RenderHtmlArgs, RenderHtmlTool
+    from hamroh.tools.render_html import RenderHtmlArgs, RenderHtmlTool
 
     tool = RenderHtmlTool(ToolContext(render_store=store))
     await tool.run(RenderHtmlArgs(html="<p>x</p>"))

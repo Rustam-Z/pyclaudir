@@ -1,5 +1,5 @@
 services:
-  pyclaudir-init:
+  hamroh-init:
     # Pre-create ./access.json and ./plugins.json from their .example
     # files if they don't exist.
     image: alpine:3.19
@@ -8,26 +8,26 @@ services:
     command: >
       sh -c '
         if [ -f /host/access.json ]; then
-          echo "[pyclaudir-init] access.json already present on host, leaving it alone"
+          echo "[hamroh-init] access.json already present on host, leaving it alone"
         else
           cp /host/access.json.example /host/access.json
-          echo "[pyclaudir-init] seeded access.json from access.json.example"
+          echo "[hamroh-init] seeded access.json from access.json.example"
         fi
 
         if [ -f /host/plugins.json ]; then
-          echo "[pyclaudir-init] plugins.json already present on host, leaving it alone"
+          echo "[hamroh-init] plugins.json already present on host, leaving it alone"
         else
           cp /host/plugins.json.example /host/plugins.json
-          echo "[pyclaudir-init] seeded plugins.json from plugins.json.example"
+          echo "[hamroh-init] seeded plugins.json from plugins.json.example"
         fi
       '
 
-  pyclaudir:
+  hamroh:
     build: .
     restart: on-failure
     env_file: .env
     depends_on:
-      pyclaudir-init:
+      hamroh-init:
         condition: service_completed_successfully
     volumes:
       # Persistent data: SQLite, memories, session_id, cc_logs
@@ -46,12 +46,12 @@ services:
       - ~/.claude:/root/.claude
       - ~/.claude.json:/root/.claude.json
       # Access policy — single-file bind mount so /allow, /deny, /dmpolicy
-      # mutations from Telegram persist across restarts. The pyclaudir-init
+      # mutations from Telegram persist across restarts. The hamroh-init
       # sidecar above guarantees the host file exists before this mount is
       # set up.
       - ./access.json:/app/access.json
       # Plugin config — bind-mounted so host edits apply on restart without
-      # needing --build. Read once at boot. pyclaudir-init seeds it.
+      # needing --build. Read once at boot. hamroh-init seeds it.
       - ./plugins.json:/app/plugins.json
     working_dir: /app
     # Graceful shutdown: give CC subprocess time to save state

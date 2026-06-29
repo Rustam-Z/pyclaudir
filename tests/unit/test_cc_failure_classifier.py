@@ -1,4 +1,4 @@
-"""Unit tests for :mod:`pyclaudir.cc_failure_classifier`.
+"""Unit tests for :mod:`hamroh.cc_failure_classifier`.
 
 Data-driven classifier: matches CC stderr / text blocks against known
 failure keywords and returns a user-facing message. These tests pin the
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from pyclaudir.cc_failure_classifier import (
+from hamroh.cc_failure_classifier import (
     CC_FAILURE_PATTERNS,
     CcFailureClassification,
     CcFailurePattern,
@@ -56,7 +56,7 @@ def test_model_access_pattern_matches_sonnet_typo() -> None:
     result = classify_cc_failure(sources)
     assert result is not None
     assert result.kind == "model-access"
-    assert "pyclaudir_model" in result.user_message.lower()
+    assert "hamroh_model" in result.user_message.lower()
     assert "claude-sonnet-4-7" in result.matched_source
 
 

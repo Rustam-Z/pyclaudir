@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from pyclaudir.storage.memory import MAX_MEMORY_BYTES, MemoryPathError, MemoryStore
-from pyclaudir.tools.base import ToolContext
-from pyclaudir.tools.memory import (
+from hamroh.storage.memory import MAX_MEMORY_BYTES, MemoryPathError, MemoryStore
+from hamroh.tools.base import ToolContext
+from hamroh.tools.memory import (
     AppendMemoryArgs,
     AppendMemoryTool,
     ListMemoriesArgs,

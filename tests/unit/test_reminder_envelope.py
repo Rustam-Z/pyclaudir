@@ -13,8 +13,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from pyclaudir.engine import format_messages_as_xml
-from pyclaudir.models import ChatMessage
+from hamroh.engine import format_messages_as_xml
+from hamroh.models import ChatMessage
 
 _REMINDER_XML = (
     '<reminder id="7" chat_id="-100" user_id="-1">'

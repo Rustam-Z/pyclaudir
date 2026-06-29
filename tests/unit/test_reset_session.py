@@ -12,12 +12,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from pyclaudir.access import AccessConfig, save_access
-from pyclaudir.cc_worker import CcSpawnSpec, CcWorker, TurnResult
-from pyclaudir.config import Config
-from pyclaudir.engine import Engine
-from pyclaudir.engine.engine import TurnCallbacks
-from pyclaudir.telegram_io import DispatcherDeps, TelegramDispatcher
+from hamroh.access import AccessConfig, save_access
+from hamroh.cc_worker import CcSpawnSpec, CcWorker, TurnResult
+from hamroh.config import Config
+from hamroh.engine import Engine
+from hamroh.engine.engine import TurnCallbacks
+from hamroh.telegram_io import DispatcherDeps, TelegramDispatcher
 
 OWNER = 42
 STRANGER = 100
@@ -62,7 +62,7 @@ async def test_reset_session_resets_in_process(
     dispatcher, engine = _dispatcher(cfg)
     kills: list[int] = []
     monkeypatch.setattr(
-        "pyclaudir.telegram_io.commands.os.kill",
+        "hamroh.telegram_io.commands.os.kill",
         lambda _pid, sig: kills.append(sig),
     )
     update = _update(OWNER)
@@ -254,7 +254,7 @@ async def test_trailing_events_before_init_not_misattributed(
                     {
                         "type": "tool_use",
                         "id": "t1",
-                        "name": "mcp__pyclaudir__telegram_send_message",
+                        "name": "mcp__hamroh__telegram_send_message",
                         "input": {},
                     },
                 ]

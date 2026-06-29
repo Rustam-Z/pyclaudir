@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pyclaudir.formatting import chunk_text as _chunk_text
+from hamroh.formatting import chunk_text as _chunk_text
 
 
 def test_short_text_returns_single_chunk():

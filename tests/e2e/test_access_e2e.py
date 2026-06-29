@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 from telethon import TelegramClient  # type: ignore[import-untyped]
 
-from pyclaudir.access import AccessConfig, load_access
+from hamroh.access import AccessConfig, load_access
 from tests.e2e.support.client import expect_silence
 from tests.e2e.support.data import new_sentinel
 from tests.e2e.support.harness import Sut, set_access
@@ -20,7 +20,7 @@ from tests.e2e.support.state import unauthorized_rows
 
 @pytest.mark.smoke
 async def test_unauthorized_is_silent_and_logged_group(
-    pyclaudir_sut: Sut,
+    hamroh_sut: Sut,
     tester_client: TelegramClient,
     group: Conversation,
     group_id: int,
@@ -34,7 +34,7 @@ async def test_unauthorized_is_silent_and_logged_group(
     token = new_sentinel("NOAUTH")
     # Drop just this group from the real allowlist; restore the snapshot after so
     # any other groups (and the round-robin pool) stay intact.
-    original = load_access(pyclaudir_sut.access_path)
+    original = load_access(hamroh_sut.access_path)
     deny = AccessConfig(
         "allowlist",
         allowed_users=original.allowed_users,
@@ -42,7 +42,7 @@ async def test_unauthorized_is_silent_and_logged_group(
     )
     try:
         # given the test group is no longer in the allowlist
-        set_access(pyclaudir_sut, deny)
+        set_access(hamroh_sut, deny)
 
         # when the tester sends a message in the group
         replies = await expect_silence(tester_client, group, f"hello {token}", within=8)
@@ -53,11 +53,11 @@ async def test_unauthorized_is_silent_and_logged_group(
             f"got {[m.raw_text for m in replies]!r}"
         )
         # ... and recorded the denial (groups get refusal_sent=0)
-        rows = unauthorized_rows(pyclaudir_sut.db_path, token)
+        rows = unauthorized_rows(hamroh_sut.db_path, token)
         assert rows, f"no unauthorized_messages row for {token!r}"
         assert rows[0]["refusal_sent"] == 0, (
             f"group denial must be silent (refusal_sent=0); row={dict(rows[0])}"
         )
     finally:
         # restore so later tests can use the group again
-        set_access(pyclaudir_sut, original)
+        set_access(hamroh_sut, original)

@@ -14,8 +14,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from pyclaudir.cc_worker import CcSpawnSpec, CcWorker, TurnResult
-from pyclaudir.config import Config
+from hamroh.cc_worker import CcSpawnSpec, CcWorker, TurnResult
+from hamroh.config import Config
 
 
 def _spec(tmp_path: Path) -> CcSpawnSpec:
@@ -146,7 +146,7 @@ async def test_send_rearms_the_heartbeat(worker: CcWorker) -> None:
 async def test_tool_use_updates_last_action(worker: CcWorker) -> None:
     """The last real tool call is tracked (prefix stripped); StructuredOutput,
     the turn-end control signal, is ignored."""
-    worker._handle_event(_tool_use_event("mcp__pyclaudir__browser_get_text"))
+    worker._handle_event(_tool_use_event("mcp__hamroh__browser_get_text"))
     assert worker._last_tool_action == "browser_get_text", "prefix must be stripped"
 
     worker._handle_event(_tool_use_event("StructuredOutput"))

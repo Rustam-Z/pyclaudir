@@ -8,8 +8,8 @@ import pytest
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
-from pyclaudir.mcp_server import McpServer
-from pyclaudir.tools.base import ToolContext
+from hamroh.mcp_server import McpServer
+from hamroh.tools.base import ToolContext
 
 
 @pytest.mark.asyncio
@@ -41,7 +41,7 @@ async def test_mcp_config_file_round_trips() -> None:
     try:
         path = server.write_mcp_config()
         text = path.read_text()
-        assert "pyclaudir" in text
+        assert "hamroh" in text
         assert f":{server.port}/mcp" in text
     finally:
         await server.stop()

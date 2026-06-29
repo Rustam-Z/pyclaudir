@@ -15,11 +15,11 @@ from pathlib import Path
 
 import pytest
 
-from pyclaudir.config import Config
-from pyclaudir.db.database import Database
-from pyclaudir.db.reminders import fetch_due_reminders
-from pyclaudir.tools.base import ToolContext
-from pyclaudir.tools.reminder import SetReminderArgs, SetReminderTool
+from hamroh.config import Config
+from hamroh.db.database import Database
+from hamroh.db.reminders import fetch_due_reminders
+from hamroh.tools.base import ToolContext
+from hamroh.tools.reminder import SetReminderArgs, SetReminderTool
 
 
 async def _open(tmp_path: Path) -> Database:

@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from pyclaudir.storage.memory import MemoryPathError, MemoryStore
-from pyclaudir.tools.base import ToolContext
-from pyclaudir.tools.memory import SearchMemoryArgs, SearchMemoryTool
+from hamroh.storage.memory import MemoryPathError, MemoryStore
+from hamroh.tools.base import ToolContext
+from hamroh.tools.memory import SearchMemoryArgs, SearchMemoryTool
 
 
 @pytest.fixture()

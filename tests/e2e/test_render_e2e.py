@@ -70,7 +70,7 @@ async def _assert_renders(
 @pytest.mark.smoke
 @pytest.mark.slow
 async def test_bot_renders_and_sends_photo_dm(
-    pyclaudir_sut: Sut, tester_client: TelegramClient, dm: Conversation
+    hamroh_sut: Sut, tester_client: TelegramClient, dm: Conversation
 ) -> None:
     """Bot renders content as an image and sends it as a photo.
 
@@ -78,12 +78,12 @@ async def test_bot_renders_and_sends_photo_dm(
     when   the tester asks in a DM
     then   a photo arrives within MAX_RENDER_REPLY_S and a PNG lands in data/renders/.
     """
-    await _assert_renders(pyclaudir_sut, tester_client, dm)
+    await _assert_renders(hamroh_sut, tester_client, dm)
 
 
 @pytest.mark.slow
 async def test_bot_renders_and_sends_photo_group(
-    pyclaudir_sut: Sut, tester_client: TelegramClient, group: Conversation
+    hamroh_sut: Sut, tester_client: TelegramClient, group: Conversation
 ) -> None:
     """Bot renders content as an image and sends it as a photo.
 
@@ -91,4 +91,4 @@ async def test_bot_renders_and_sends_photo_group(
     when   the tester asks in a group
     then   a photo arrives within MAX_RENDER_REPLY_S and a PNG lands in data/renders/.
     """
-    await _assert_renders(pyclaudir_sut, tester_client, group)
+    await _assert_renders(hamroh_sut, tester_client, group)

@@ -7,7 +7,7 @@ Telegram sends you, and your 2FA password if set):
 
 It reads E2E_TG_API_ID / E2E_TG_API_HASH from the project root ``.env`` (or
 prompts if they're missing), logs in, then writes E2E_TG_SESSION and
-PYCLAUDIR_OWNER_ID back into that file — preserving every other line. Fill
+HAMROH_OWNER_ID back into that file — preserving every other line. Fill
 E2E_BOT_USERNAME in by hand. The test group comes from access.json
 allowed_chats, not the env.
 """
@@ -86,13 +86,13 @@ def main() -> None:
         "E2E_TG_API_ID": str(api_id),
         "E2E_TG_API_HASH": api_hash,
         "E2E_TG_SESSION": session,
-        "PYCLAUDIR_OWNER_ID": str(user_id),
+        "HAMROH_OWNER_ID": str(user_id),
     }
     # Placeholder the operator fills by hand; keep any value already set.
     updates["E2E_BOT_USERNAME"] = saved.get("E2E_BOT_USERNAME", "")
     _merge_env_file(ENV_FILE, updates)
     log.info(
-        "Wrote E2E_TG_SESSION + PYCLAUDIR_OWNER_ID (your id=%s) to %s",
+        "Wrote E2E_TG_SESSION + HAMROH_OWNER_ID (your id=%s) to %s",
         user_id,
         ENV_FILE,
     )

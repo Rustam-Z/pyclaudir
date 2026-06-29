@@ -9,9 +9,9 @@ import pytest
 
 from pathlib import Path
 
-from pyclaudir.config import Config
-from pyclaudir.engine import Engine, EngineOptions, format_messages_as_xml
-from pyclaudir.models import ChatMessage
+from hamroh.config import Config
+from hamroh.engine import Engine, EngineOptions, format_messages_as_xml
+from hamroh.models import ChatMessage
 
 
 #: Test Config constant. Engine doesn't touch the filesystem (the worker
@@ -130,8 +130,8 @@ async def test_typing_indicator_fires_on_turn_start() -> None:
 @pytest.mark.asyncio
 async def test_typing_indicator_stops_when_turn_ends() -> None:
     """Once the turn finishes, the typing refresh loop should stop firing."""
-    from pyclaudir.cc_worker import TurnResult
-    from pyclaudir.models import ControlAction
+    from hamroh.cc_worker import TurnResult
+    from hamroh.models import ControlAction
 
     worker = FakeWorker()
     typing_calls: list[int] = []
@@ -232,7 +232,7 @@ async def test_notify_chat_replied_stops_typing_after_min_visible_duration(
     The prod default is currently 0 (deferral disabled); we override it
     here so the deferral branch is still exercised.
     """
-    import pyclaudir.engine as engine_mod
+    import hamroh.engine as engine_mod
 
     monkeypatch.setattr(engine_mod, "MIN_TYPING_VISIBLE_SECONDS", 1)
     MIN_TYPING_VISIBLE_SECONDS = engine_mod.MIN_TYPING_VISIBLE_SECONDS
@@ -277,7 +277,7 @@ async def test_notify_chat_replied_stops_immediately_when_already_visible_long_e
     """If typing has already been visible for ``MIN_TYPING_VISIBLE_SECONDS``,
     the stop happens immediately. Used by slow turns where the indicator
     has been on screen for several seconds already."""
-    from pyclaudir.engine import MIN_TYPING_VISIBLE_SECONDS
+    from hamroh.engine import MIN_TYPING_VISIBLE_SECONDS
 
     worker = FakeWorker()
     typing_calls: list[int] = []
@@ -357,8 +357,8 @@ async def test_typing_fires_on_two_consecutive_turns() -> None:
     again) and assert that the typing_action was called for BOTH turns,
     not just the first.
     """
-    from pyclaudir.cc_worker import TurnResult
-    from pyclaudir.models import ControlAction
+    from hamroh.cc_worker import TurnResult
+    from hamroh.models import ControlAction
 
     worker = FakeWorker()
     typing_calls: list[int] = []
@@ -456,7 +456,7 @@ async def test_inject_after_notify_restarts_typing() -> None:
 
         # telegram_send_message lands → notify_chat_replied stops typing
         # (slow turn so MIN_TYPING_VISIBLE_SECONDS doesn't kick in)
-        from pyclaudir.engine import MIN_TYPING_VISIBLE_SECONDS
+        from hamroh.engine import MIN_TYPING_VISIBLE_SECONDS
 
         await asyncio.sleep(MIN_TYPING_VISIBLE_SECONDS + 0.1)
         eng.notify_chat_replied(-100)

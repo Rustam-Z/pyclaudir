@@ -1,7 +1,7 @@
 """E2E: a turn that outlives the status interval gets a progress heartbeat.
 
 The worker promises that a long task is never silent: every
-``PYCLAUDIR_STATUS_INTERVAL_SECONDS`` it tells the waiting chat it is still
+``HAMROH_STATUS_INTERVAL_SECONDS`` it tells the waiting chat it is still
 working (see ``worker._status_heartbeat``). The interval is squeezed to
 ``STATUS_SUT_INTERVAL_S`` on a dedicated bot (the ``status_sut`` fixture), so
 only this test sees it — every other test keeps the production interval.
@@ -40,7 +40,7 @@ _PING_FLOOR_SLACK_S = 5.0
 
 #: A valid CSS selector that will never match — the bot's wait runs its full
 #: timeout, holding the turn open without doing any real work.
-_MISSING_SELECTOR = "#pyclaudir-e2e-heartbeat-never"
+_MISSING_SELECTOR = "#hamroh-e2e-heartbeat-never"
 
 
 def _light_sleep_request(done_marker: str) -> str:

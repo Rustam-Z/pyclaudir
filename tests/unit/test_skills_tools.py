@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from pyclaudir.skills_store import SkillsStore
-from pyclaudir.tools.base import ToolContext
-from pyclaudir.tools.skills import (
+from hamroh.skills_store import SkillsStore
+from hamroh.tools.base import ToolContext
+from hamroh.tools.skills import (
     ListSkillsArgs,
     ListSkillsTool,
     ReadSkillArgs,

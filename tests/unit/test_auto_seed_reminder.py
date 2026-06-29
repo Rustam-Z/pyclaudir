@@ -14,10 +14,10 @@ from pathlib import Path
 
 import pytest
 
-from pyclaudir.__main__ import _seed_default_reminders
-from pyclaudir.config import Config
-from pyclaudir.db.database import Database
-from pyclaudir.db.reminders import pending_with_auto_seed_key
+from hamroh.__main__ import _seed_default_reminders
+from hamroh.config import Config
+from hamroh.db.database import Database
+from hamroh.db.reminders import pending_with_auto_seed_key
 
 
 async def _open(tmp_path: Path) -> Database:
@@ -134,8 +134,8 @@ async def test_reminder_tool_refuses_to_cancel_auto_seeded(tmp_path: Path) -> No
     """Hard gate at the tool layer — reminder_cancel refuses auto-seeded
     rows, so even if the bot is prompt-injected into calling it, it
     cannot stop the self-reflection loop."""
-    from pyclaudir.tools.base import ToolContext
-    from pyclaudir.tools.reminder import CancelReminderArgs, CancelReminderTool
+    from hamroh.tools.base import ToolContext
+    from hamroh.tools.reminder import CancelReminderArgs, CancelReminderTool
 
     db = await _open(tmp_path)
     try:

@@ -7,11 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from pyclaudir.config import Config
-from pyclaudir.db.database import Database
-from pyclaudir.db.messages import fetch_reply_chain, insert_message
-from pyclaudir.engine import format_messages_with_context
-from pyclaudir.models import ChatMessage
+from hamroh.config import Config
+from hamroh.db.database import Database
+from hamroh.db.messages import fetch_reply_chain, insert_message
+from hamroh.engine import format_messages_with_context
+from hamroh.models import ChatMessage
 
 
 def _msg(

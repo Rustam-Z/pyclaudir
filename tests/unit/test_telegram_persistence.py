@@ -7,15 +7,15 @@ from pathlib import Path
 
 import pytest
 
-from pyclaudir.config import Config
-from pyclaudir.db.database import Database
-from pyclaudir.db.messages import (
+from hamroh.config import Config
+from hamroh.db.database import Database
+from hamroh.db.messages import (
     insert_message,
     mark_deleted,
     mark_edited,
     upsert_user,
 )
-from pyclaudir.models import ChatMessage
+from hamroh.models import ChatMessage
 
 
 def _msg(
@@ -99,7 +99,7 @@ async def test_upsert_user_increments_count(db: Database) -> None:
 async def test_dispatcher_drops_disallowed_chats() -> None:
     """The gate() function blocks disallowed chats. Owner DMs always pass;
     stranger DMs and unlisted groups are dropped."""
-    from pyclaudir.access import AccessConfig, Principal, gate
+    from hamroh.access import AccessConfig, Principal, gate
 
     access = AccessConfig(policy="owner_only", allowed_users=[], allowed_chats=[])
     assert (

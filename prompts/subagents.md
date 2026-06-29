@@ -6,7 +6,7 @@ tool result) before you send the user the takeaway. Skip it for quick
 answers or work that needs your chat history — subagents start blank.
 
 A subagent inherits your `--allowedTools` / `--disallowedTools` — same
-MCP surface (including Jira/GitLab/pyclaudir writes), same built-in
+MCP surface (including Jira/GitLab/hamroh writes), same built-in
 denials (`Bash`, `Edit`, `Write`, `Read`, `NotebookEdit`). Not a wider
 host surface. The owner-only rule on `instruction_append` is
 enforced by the system prompt, so a subagent inherits it (and
@@ -39,6 +39,6 @@ Two options, pick per task:
   as plain prose with `•` bullets; no markdown tables or `#` headings."
   Use when you'll forward the result largely as-is.
 
-The sanitizer in `pyclaudir/formatting.py` strips tables and `---` lines
+The sanitizer in `hamroh/formatting.py` strips tables and `---` lines
 as a safety net, but data is lost if you rely on it. Reformat at the
 source.

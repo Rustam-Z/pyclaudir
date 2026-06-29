@@ -48,7 +48,7 @@ async def _assert_scheduled(
 
 @pytest.mark.smoke
 async def test_reminder_is_scheduled_dm(
-    pyclaudir_sut: Sut, tester_client: TelegramClient, dm: Conversation
+    hamroh_sut: Sut, tester_client: TelegramClient, dm: Conversation
 ) -> None:
     """The bot schedules a 30-minute reminder in a DM.
 
@@ -57,12 +57,12 @@ async def test_reminder_is_scheduled_dm(
     then   a pending row lands with a ~30-minute trigger, replied within
            MAX_REMINDER_REPLY_S.
     """
-    await _assert_scheduled(pyclaudir_sut, tester_client, dm)
+    await _assert_scheduled(hamroh_sut, tester_client, dm)
 
 
 @pytest.mark.smoke
 async def test_reminder_is_scheduled_group(
-    pyclaudir_sut: Sut, tester_client: TelegramClient, group: Conversation
+    hamroh_sut: Sut, tester_client: TelegramClient, group: Conversation
 ) -> None:
     """The bot schedules a 30-minute reminder in a group.
 
@@ -71,13 +71,13 @@ async def test_reminder_is_scheduled_group(
     then   a pending row lands with a ~30-minute trigger, replied within
            MAX_REMINDER_REPLY_S.
     """
-    await _assert_scheduled(pyclaudir_sut, tester_client, group)
+    await _assert_scheduled(hamroh_sut, tester_client, group)
 
 
 @pytest.mark.slow
 @pytest.mark.smoke
 async def test_reminder_fires_dm(
-    pyclaudir_sut: Sut, tester_client: TelegramClient, dm: Conversation
+    hamroh_sut: Sut, tester_client: TelegramClient, dm: Conversation
 ) -> None:
     """A scheduled reminder fires and is marked sent in a DM.
 
@@ -103,9 +103,7 @@ async def test_reminder_fires_dm(
     # the delivered reminder's row must flip from pending to sent
     sent = await wait_until(
         lambda: [
-            r
-            for r in reminder_rows(pyclaudir_sut.db_path, token)
-            if r["status"] == "sent"
+            r for r in reminder_rows(hamroh_sut.db_path, token) if r["status"] == "sent"
         ]
     )
     assert sent, f"reminder {token!r} row was not marked sent"

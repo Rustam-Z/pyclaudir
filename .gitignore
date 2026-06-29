@@ -16,7 +16,7 @@ data/
 .env
 .env.local
 
-# Project-specific prompt (not shipped with open-source pyclaudir)
+# Project-specific prompt (not shipped with open-source hamroh)
 prompts/project.md
 
 # Local plugin config — operator copies plugins.json.example on setup,

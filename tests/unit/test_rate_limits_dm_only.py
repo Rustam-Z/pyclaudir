@@ -13,11 +13,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from pyclaudir.access import AccessConfig, save_access
-from pyclaudir.config import Config
-from pyclaudir.db.database import Database
-from pyclaudir.rate_limiter import RateLimitConfig, RateLimiter
-from pyclaudir.telegram_io import DispatcherDeps, TelegramDispatcher
+from hamroh.access import AccessConfig, save_access
+from hamroh.config import Config
+from hamroh.db.database import Database
+from hamroh.rate_limiter import RateLimitConfig, RateLimiter
+from hamroh.telegram_io import DispatcherDeps, TelegramDispatcher
 
 
 OWNER = 42

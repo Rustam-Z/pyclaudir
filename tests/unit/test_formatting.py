@@ -1,6 +1,6 @@
-"""Tests for pyclaudir.formatting — Markdown → Telegram HTML conversion."""
+"""Tests for hamroh.formatting — Markdown → Telegram HTML conversion."""
 
-from pyclaudir.formatting import markdown_to_telegram_html
+from hamroh.formatting import markdown_to_telegram_html
 
 
 def test_bold():

@@ -13,7 +13,7 @@ uv run -m pytest tests/unit
 
 ## E2E tests
 
-Drive a real `pyclaudir` bot from a real Telegram user account (Telethon) and
+Drive a real `hamroh` bot from a real Telegram user account (Telethon) and
 assert on what the bot actually does — DB rows, files, media, latency. Opt-in:
 without credentials they **skip**, so a plain `pytest` stays green.
 

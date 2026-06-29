@@ -1,5 +1,5 @@
 [project]
-name = "pyclaudir"
+name = "hamroh"
 version = "0.1.0"
 description = "Python harness for running a Telegram agent powered by a Claude Code subprocess and a local MCP server."
 readme = "README.md"
@@ -35,14 +35,14 @@ dev = [
 ]
 
 [project.scripts]
-pyclaudir = "pyclaudir.__main__:main"
+hamroh = "hamroh.__main__:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["pyclaudir"]
+packages = ["hamroh"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

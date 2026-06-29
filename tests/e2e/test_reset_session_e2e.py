@@ -57,7 +57,7 @@ async def _assert_reset_and_recover(
 
 @pytest.mark.smoke
 async def test_reset_session_command_dm(
-    pyclaudir_sut: Sut, tester_client: TelegramClient, dm: Conversation
+    hamroh_sut: Sut, tester_client: TelegramClient, dm: Conversation
 ) -> None:
     """/reset_session respawns the engine with a NEW session id and recovers (DM).
 
@@ -66,11 +66,11 @@ async def test_reset_session_command_dm(
     then   the bot acks within MAX_RESET_REPLY_S, the next message is answered,
            and the cc session id has changed.
     """
-    await _assert_reset_and_recover(pyclaudir_sut, tester_client, dm)
+    await _assert_reset_and_recover(hamroh_sut, tester_client, dm)
 
 
 async def test_reset_session_command_group(
-    pyclaudir_sut: Sut, tester_client: TelegramClient, group: Conversation
+    hamroh_sut: Sut, tester_client: TelegramClient, group: Conversation
 ) -> None:
     """/reset_session respawns the engine with a NEW session id and recovers (group).
 
@@ -79,4 +79,4 @@ async def test_reset_session_command_group(
     then   the bot acks within MAX_RESET_REPLY_S, the next message is answered,
            and the cc session id has changed.
     """
-    await _assert_reset_and_recover(pyclaudir_sut, tester_client, group)
+    await _assert_reset_and_recover(hamroh_sut, tester_client, group)

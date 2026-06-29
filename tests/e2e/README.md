@@ -44,7 +44,7 @@ Run the helper once, in your own terminal:
 
 It asks for your `api_id`/`api_hash` (if not already in `.env`), then your phone
 number, the login code, and your 2FA password (if set). It writes
-`E2E_TG_SESSION` and `PYCLAUDIR_OWNER_ID` into the root `.env` for you —
+`E2E_TG_SESSION` and `HAMROH_OWNER_ID` into the root `.env` for you —
 preserving every other line — then you fill in `E2E_BOT_USERNAME` by hand. (The
 test group is not an env var; it comes from `access.json` — see below.) Treat
 the session string like a password: it grants full access to that account.
@@ -52,7 +52,7 @@ the session string like a password: it grants full access to that account.
 ## Environment variables
 
 All of these live in the root `.env`. The app vars (`TELEGRAM_BOT_TOKEN`,
-`PYCLAUDIR_MODEL`, `PYCLAUDIR_EFFORT`, …) are the ones the bot already uses; the
+`HAMROH_MODEL`, `HAMROH_EFFORT`, …) are the ones the bot already uses; the
 suite adds only the tester-client vars below.
 
 | Var | Meaning |
@@ -60,7 +60,7 @@ suite adds only the tester-client vars below.
 | `E2E_TG_API_ID` / `E2E_TG_API_HASH` | Tester account's API creds. |
 | `E2E_TG_SESSION` | The session string from above. |
 | `E2E_BOT_USERNAME` | The bot's username (with or without `@`). |
-| `PYCLAUDIR_OWNER_ID` | The tester account's **own** numeric user id — the app's owner. The bot treats it as owner, so DMs and owner commands pass. |
+| `HAMROH_OWNER_ID` | The tester account's **own** numeric user id — the app's owner. The bot treats it as owner, so DMs and owner commands pass. |
 
 The test group is **not** an env var: it comes from `access.json`'s
 `allowed_chats` (the `-100…` form for supergroups). With several entries the
@@ -90,18 +90,18 @@ pytest tests/e2e/test_memory_e2e.py -m e2e
 
 Each run starts one bot subprocess for the whole session and reuses it; tests
 stay independent by using a unique token per test. Before any test runs, the
-harness waits for the bot to be 100% ready: it waits for the `pyclaudir is live`
+harness waits for the bot to be 100% ready: it waits for the `hamroh is live`
 log line, then sends one warm-up DM and waits for the reply, which forces the
 `claude` CLI to finish loading its tools/MCP servers. The bot's own log lines
 (`[RX]`/`[TX]` traffic, `hot-path … t_ms=…` timing) stream live — the harness
-forwards them through the `pyclaudir.sut` logger and `log_cli` (set in
+forwards them through the `hamroh.sut` logger and `log_cli` (set in
 `pyproject.toml`) prints them. On failure, the last 400 lines are also dumped.
 
 Every reply spawns a real `claude` turn, so a run costs real model tokens and
-takes real wall-clock time. The bot uses whatever `PYCLAUDIR_MODEL` /
-`PYCLAUDIR_EFFORT` your `.env` sets. To keep e2e cheap and fast without changing
+takes real wall-clock time. The bot uses whatever `HAMROH_MODEL` /
+`HAMROH_EFFORT` your `.env` sets. To keep e2e cheap and fast without changing
 `.env`, set `SUT_ENV_OVERRIDES` in `support/config.py` (e.g. a cheap model and
-`PYCLAUDIR_EFFORT="low"`).
+`HAMROH_EFFORT="low"`).
 
 ## Speed eval
 

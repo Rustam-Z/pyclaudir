@@ -14,13 +14,13 @@ from pathlib import Path
 
 import pytest
 
-from pyclaudir.plugins import (
+from hamroh.plugins import (
     McpPluginSpec,
     Plugins,
     PluginsConfigError,
     load_plugins,
 )
-from pyclaudir.skills_store import SkillsStore
+from hamroh.skills_store import SkillsStore
 
 
 # ---------------------------------------------------------------------------
@@ -363,7 +363,7 @@ def test_unresolved_var_skip_logs_at_error(tmp_path: Path, caplog) -> None:
     p.write_text(
         json.dumps({"mcps": [_mcp(name="needs-cred", env={"TOKEN": "${MISSING}"})]})
     )
-    with caplog.at_level(logging.WARNING, logger="pyclaudir.plugins"):
+    with caplog.at_level(logging.WARNING, logger="hamroh.plugins"):
         load_plugins(p, env={})
     assert any(
         r.levelno == logging.ERROR
@@ -457,8 +457,8 @@ def test_builtin_tools_disabled_filters_mcp_server(tmp_path: Path) -> None:
     """End-to-end: a name in ``builtin_tools_disabled`` is skipped at
     MCP registration time, so the tool simply doesn't exist on the
     server side and the model can't see or invoke it."""
-    from pyclaudir.mcp_server import build_fastmcp, discover_tool_classes
-    from pyclaudir.tools.base import ToolContext
+    from hamroh.mcp_server import build_fastmcp, discover_tool_classes
+    from hamroh.tools.base import ToolContext
 
     ctx = ToolContext(
         bot=None,
@@ -493,8 +493,8 @@ def test_builtin_tools_disabled_unknown_name_crashes(tmp_path: Path) -> None:
     """A typo in ``builtin_tools_disabled`` (e.g. ``poll`` instead of
     ``telegram_create_poll``) must fail boot loudly with a list of available
     tool names — not silently do nothing."""
-    from pyclaudir.mcp_server import build_fastmcp
-    from pyclaudir.tools.base import ToolContext
+    from hamroh.mcp_server import build_fastmcp
+    from hamroh.tools.base import ToolContext
 
     ctx = ToolContext(
         bot=None,
@@ -513,7 +513,7 @@ def test_builtin_tools_disabled_unknown_name_crashes(tmp_path: Path) -> None:
 def test_skills_disabled_blocks_read(tmp_path: Path) -> None:
     """A disabled skill must not be readable either, so envelope-driven
     invocation (`<skill name="...">`) can't bypass the toggle."""
-    from pyclaudir.skills_store import SkillsError
+    from hamroh.skills_store import SkillsError
 
     skills_root = tmp_path / "skills"
     skills_root.mkdir()
@@ -560,7 +560,7 @@ def test_missing_file_with_example_present_logs_hint(tmp_path: Path, caplog) -> 
     example.write_text("{}")
     target = tmp_path / "plugins.json"
 
-    with caplog.at_level(logging.WARNING, logger="pyclaudir.plugins"):
+    with caplog.at_level(logging.WARNING, logger="hamroh.plugins"):
         plugins = load_plugins(target)
     assert plugins == Plugins()
     assert any(

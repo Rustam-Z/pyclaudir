@@ -13,8 +13,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from pyclaudir.cc_worker import CcSpawnSpec, CcWorker, TurnResult
-from pyclaudir.config import Config
+from hamroh.cc_worker import CcSpawnSpec, CcWorker, TurnResult
+from hamroh.config import Config
 
 
 def _spec(tmp_path: Path) -> CcSpawnSpec:
@@ -52,12 +52,12 @@ def _init_event(servers: list[dict]) -> dict:
 
 
 def test_failed_mcp_server_logs_error(worker: CcWorker, caplog) -> None:
-    with caplog.at_level(logging.WARNING, logger="pyclaudir.cc_worker"):
+    with caplog.at_level(logging.WARNING, logger="hamroh.cc_worker"):
         worker._handle_event(
             _init_event(
                 [
                     {"name": "mcp-atlassian", "status": "failed"},
-                    {"name": "pyclaudir", "status": "connected"},
+                    {"name": "hamroh", "status": "connected"},
                 ]
             )
         )
@@ -67,15 +67,15 @@ def test_failed_mcp_server_logs_error(worker: CcWorker, caplog) -> None:
     msg = errors[0].getMessage()
     assert "mcp-atlassian" in msg
     assert "failed" in msg
-    assert "pyclaudir" not in msg
+    assert "hamroh" not in msg
 
 
 def test_all_connected_emits_no_log(worker: CcWorker, caplog) -> None:
-    with caplog.at_level(logging.WARNING, logger="pyclaudir.cc_worker"):
+    with caplog.at_level(logging.WARNING, logger="hamroh.cc_worker"):
         worker._handle_event(
             _init_event(
                 [
-                    {"name": "pyclaudir", "status": "connected"},
+                    {"name": "hamroh", "status": "connected"},
                     {"name": "deepwiki", "status": "connected"},
                 ]
             )
@@ -86,7 +86,7 @@ def test_all_connected_emits_no_log(worker: CcWorker, caplog) -> None:
 
 def test_missing_mcp_servers_field_is_fine(worker: CcWorker, caplog) -> None:
     """Older Claude Code versions (or odd payloads) may omit the field."""
-    with caplog.at_level(logging.WARNING, logger="pyclaudir.cc_worker"):
+    with caplog.at_level(logging.WARNING, logger="hamroh.cc_worker"):
         worker._handle_event(
             {
                 "type": "system",
@@ -100,7 +100,7 @@ def test_missing_mcp_servers_field_is_fine(worker: CcWorker, caplog) -> None:
 def test_result_with_api_error_status_errors(worker: CcWorker, caplog) -> None:
     """Turn-level API error on a ``result`` event should surface as an
     ERROR — currently silent without the generic relay."""
-    with caplog.at_level(logging.WARNING, logger="pyclaudir.cc_worker"):
+    with caplog.at_level(logging.WARNING, logger="hamroh.cc_worker"):
         worker._handle_event(
             {
                 "type": "result",
@@ -115,7 +115,7 @@ def test_result_with_api_error_status_errors(worker: CcWorker, caplog) -> None:
 
 def test_event_with_error_field_errors(worker: CcWorker, caplog) -> None:
     """Any event carrying a top-level ``error`` field is relayed."""
-    with caplog.at_level(logging.WARNING, logger="pyclaudir.cc_worker"):
+    with caplog.at_level(logging.WARNING, logger="hamroh.cc_worker"):
         worker._handle_event({"type": "system", "subtype": "boom", "error": "kaboom"})
     msgs = [r.getMessage() for r in caplog.records if r.levelno == logging.ERROR]
     assert any("error=kaboom" in m for m in msgs)
@@ -124,7 +124,7 @@ def test_event_with_error_field_errors(worker: CcWorker, caplog) -> None:
 def test_user_event_is_skipped_by_generic_relay(worker: CcWorker, caplog) -> None:
     """Per-tool ``is_error`` on user/tool_result blocks is the breaker's
     job — generic relay must not double-log them."""
-    with caplog.at_level(logging.WARNING, logger="pyclaudir.cc_worker"):
+    with caplog.at_level(logging.WARNING, logger="hamroh.cc_worker"):
         worker._handle_event(
             {
                 "type": "user",

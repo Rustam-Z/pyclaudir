@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 
-from pyclaudir.access import AccessConfig, Principal, gate, load_access, save_access
+from hamroh.access import AccessConfig, Principal, gate, load_access, save_access
 
 OWNER = 42
 

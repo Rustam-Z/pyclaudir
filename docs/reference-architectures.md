@@ -1,6 +1,6 @@
 # Reference Architectures
 
-Two systems pyclaudir descends from. Read before proposing changes.
+Two systems hamroh descends from. Read before proposing changes.
 
 ---
 
@@ -115,13 +115,13 @@ The plugin can forward Claude Code's tool-approval prompts to Telegram:
 
 ## 2. Claudir (Rust) — The Ancestor
 
-Claudir is the original Rust architecture (~33k LoC) that pyclaudir is a "Python distillation" of. It was described in a multi-part internal design series. The reference write-up lives at <https://gist.github.com/nodir-t/da74c78281f203b0439609ebe5866f49> — read it before changing anything in this doc. The summary below is reconstructed from that gist, the build prompt, code comments referencing "Claudir Part N", the pyclaudir codebase itself, and the operator's session log.
+Claudir is the original Rust architecture (~33k LoC) that hamroh is a "Python distillation" of. It was described in a multi-part internal design series. The reference write-up lives at <https://gist.github.com/nodir-t/da74c78281f203b0439609ebe5866f49> — read it before changing anything in this doc. The summary below is reconstructed from that gist, the build prompt, code comments referencing "Claudir Part N", the hamroh codebase itself, and the operator's session log.
 
 ### Core architecture
 
 Three-tier model: **Harness → Engine → Worker**, all in one process.
 
-| Tier | Claudir (Rust) | pyclaudir (Python) |
+| Tier | Claudir (Rust) | hamroh (Python) |
 |------|---------------|-------------------|
 | Harness | Rust binary, owns lifecycle | `__main__.py`, owns startup/shutdown order |
 | Engine | std threads, channels | asyncio tasks, Queue/Event |
@@ -137,7 +137,7 @@ The critical innovation: pushing messages into a **running** CC turn.
 4. CC reads stdin at message boundaries → picks up the inject between tool calls.
 5. Model sees injected `<msg>` blocks as "additional context for the same conversation."
 
-In Claudir this was implemented with Rust channels. In pyclaudir it's `asyncio.Queue` + direct stdin writes. The fallback (broken pipe) queues for the next turn.
+In Claudir this was implemented with Rust channels. In hamroh it's `asyncio.Queue` + direct stdin writes. The fallback (broken pipe) queues for the next turn.
 
 ### The heartbeat problem (Claudir Part 3)
 
@@ -147,13 +147,13 @@ CC goes silent on stdout during long MCP calls. The health monitor must distingu
 
 Solution: a shared `last_activity_at` timestamp. Every MCP tool invocation bumps it. The liveness monitor reads it. If both stdout AND MCP activity have been silent for N seconds, the subprocess is truly wedged.
 
-In pyclaudir: `Heartbeat` class on `ToolContext`, bumped by every tool wrapper. The liveness-check loop that reads it is designed but not yet wired.
+In hamroh: `Heartbeat` class on `ToolContext`, bumped by every tool wrapper. The liveness-check loop that reads it is designed but not yet wired.
 
 ### The read-before-write invariant (Claudir Part 3)
 
 Before overwriting or appending to an existing memory file, the model must first read it in the same session. This prevents blindly destroying operator-curated notes.
 
-In pyclaudir: enforced by `MemoryStore._read_paths` set. New files exempt. Set resets on process restart.
+In hamroh: enforced by `MemoryStore._read_paths` set. New files exempt. Set resets on process restart.
 
 ### Multi-agent architecture (Nodira / Mirzo / Dilya)
 
@@ -174,7 +174,7 @@ From the shutdown log we saw:
 
 Mirzo is the conductor. He sees the raw Claude Code TUI (the `●`/`⎿`/`❯` format in the log) because his "user" is the operator's terminal, not a Telegram chat. His text blocks are visible to the operator — unlike Nodira where text blocks are dropped.
 
-In pyclaudir: **only Nodira is implemented**. Mirzo and Dilya are future work. The codebase is single-agent.
+In hamroh: **only Nodira is implemented**. Mirzo and Dilya are future work. The codebase is single-agent.
 
 ### The reminder pseudo-user
 
@@ -187,7 +187,7 @@ From the shutdown log:
 
 Claudir injects **scheduled events** as synthetic messages from a virtual user (`user="-1"`, `name="reminder"`, negative `id`). This is a cron-like scheduler that pushes XML envelopes into the engine queue at configured times. The model processes them as if they came from a real user.
 
-In pyclaudir: **implemented** via `pyclaudir/tools/reminder.py` (MCP tools) + `pyclaudir/db/reminders.py` (persistence) + a background `_reminder_loop` in `__main__.py` that polls every 60s and injects due reminders as synthetic `ChatMessage` objects into the engine.
+In hamroh: **implemented** via `hamroh/tools/reminder.py` (MCP tools) + `hamroh/db/reminders.py` (persistence) + a background `_reminder_loop` in `__main__.py` that polls every 60s and injects due reminders as synthetic `ChatMessage` objects into the engine.
 
 ### Claudir's display format
 
@@ -202,7 +202,7 @@ This is NOT a custom renderer — it's the actual Claude Code REPL output.
 
 ### Message format
 
-Same XML format pyclaudir uses (we copied it):
+Same XML format hamroh uses (we copied it):
 ```xml
 <msg id="123" chat="-100..." user="67890" name="Alice" time="10:31">
   hello everyone
@@ -266,10 +266,10 @@ tooling as needed.
 
 Surface:
 
-- `pyclaudir/skills_store.py` — path-hardened read-only store scoped
+- `hamroh/skills_store.py` — path-hardened read-only store scoped
   to the top-level `skills/` directory. Only first-level subdirs that
   contain a `SKILL.md` count as skills.
-- `pyclaudir/tools/skills.py` — `skill_list`, `skill_read` MCP tools.
+- `hamroh/tools/skills.py` — `skill_list`, `skill_read` MCP tools.
 
 **Invocation pattern.** A reminder fires with text
 `<skill name="X">run</skill>`. The reminder loop wraps that in a
@@ -324,11 +324,11 @@ migration 005.
 
 Two MCP tools expose `prompts/project.md` (and only that file) to the bot: `instruction_read` and `instruction_append`. system.md is intentionally not exposed — it's git-tracked, so any bot edit would land as a working-tree diff and pollute the repo. Operator-driven customisations therefore accumulate in project.md (gitignored). The owner-only policy is enforced **in the system prompt**, not in code; the owner can invoke these tools from any chat.
 
-What the code enforces, via `InstructionsStore` (`pyclaudir/instructions_store.py`):
+What the code enforces, via `InstructionsStore` (`hamroh/instructions_store.py`):
 
 - **Hardcoded path** to `prompts/project.md` — no path resolution, no traversal surface, no logical-name indirection.
 - **128 KiB cap** (10× headroom over a typical project.md).
-- **Backup-before-append**: every append first copies the current file to `data/prompt_backups/project-<UTC timestamp>.md`. Revert is `mv <backup> prompts/project.md && docker compose restart pyclaudir`.
+- **Backup-before-append**: every append first copies the current file to `data/prompt_backups/project-<UTC timestamp>.md`. Revert is `mv <backup> prompts/project.md && docker compose restart hamroh`.
 - **Atomic write** via tmp+rename.
 
 Changes take effect on the next CC spawn — the operator's container restart is the final manual review gate before a new prompt goes live.
@@ -341,10 +341,10 @@ Changes take effect on the next CC spawn — the operator's container restart is
 |---|---|
 | Scope | **DM only.** `chat_type == "private"`. Group messages bypass the limiter entirely. |
 | Keyed by | `user_id` — one budget per person, not shared across group members. |
-| Default cap | `PYCLAUDIR_RATE_LIMIT_PER_MIN=20` (messages per 60s). |
+| Default cap | `HAMROH_RATE_LIMIT_PER_MIN=20` (messages per 60s). |
 | Bucket scheme | Fixed-minute: `bucket_start = floor(now / window) * window`. Allows up to ~2× burst at boundary; acceptable for 20/min. |
 | Persistence | SQLite `rate_limits(user_id, bucket_start, count, notice_sent)` — survives restart. |
-| Owner bypass | `PYCLAUDIR_OWNER_ID` never ticks the counter; no row created for owner. Wired via `RateLimiter(owner_id=...)`. |
+| Owner bypass | `HAMROH_OWNER_ID` never ticks the counter; no row created for owner. Wired via `RateLimiter(owner_id=...)`. |
 | Exceed UX | Raises `RateLimitExceeded(user_id, limit, retry_after_s, notify)`. `notify` is True only for the first exceed in a bucket — dispatcher sends a one-shot "you're sending too fast, retry in ~Ns" Telegram message. Subsequent exceeds in the same bucket stay silent. |
 | Cleanup | Opportunistic `DELETE FROM rate_limits WHERE bucket_start < now - 2 * window` on every exceed path. |
 
@@ -361,16 +361,16 @@ From the log, Claudir uses kill-marker files:
 
 Each agent watches for a `.kill_marker` file. When it appears, the agent initiates graceful shutdown. This lets one agent (Mirzo) kill another (Nodira) without direct IPC — just file system signaling.
 
-In pyclaudir: **not implemented**. We use SIGTERM/SIGINT for shutdown and `/kill` Telegram command for remote kill. A kill-marker mechanism would be needed if we ever add Mirzo.
+In hamroh: **not implemented**. We use SIGTERM/SIGINT for shutdown and `/kill` Telegram command for remote kill. A kill-marker mechanism would be needed if we ever add Mirzo.
 
 ---
 
-## 3. How pyclaudir Differs from Both
+## 3. How hamroh Differs from Both
 
-| Feature | Official Plugin | Claudir (Rust) | pyclaudir |
+| Feature | Official Plugin | Claudir (Rust) | hamroh |
 |---------|----------------|----------------|-----------|
 | Language | TypeScript/Bun | Rust | Python/asyncio |
-| CC integration | MCP plugin (Claude owns the process) | Subprocess (Claudir owns the process) | Subprocess (pyclaudir owns) |
+| CC integration | MCP plugin (Claude owns the process) | Subprocess (Claudir owns the process) | Subprocess (hamroh owns) |
 | Tool count | 4 | ~40 | 25 MCP + 2 built-in (WebFetch, WebSearch) by default, +1 (Agent) when `tool_groups.subagents` is on. Surface is configured in `plugins.json`: tool-group toggles, external-MCP entries, `builtin_tools_disabled`, `skills_disabled`. Claude Code built-ins not on either allow/deny list (Grep, Glob, ToolSearch, Skill, ListMcpResourcesTool) are implicitly reachable by the agent; with subagents enabled they also appear inside each subagent. |
 | Multi-agent | No | Yes (3 agents) | No (Nodira only) |
 | Memory | No | Yes (read/write) | Yes (read/write, read-before-write) |
@@ -400,7 +400,7 @@ In pyclaudir: **not implemented**. We use SIGTERM/SIGINT for shutdown and `/kill
 
 ## 4. Patterns Worth Porting
 
-### From the official plugin (not yet in pyclaudir)
+### From the official plugin (not yet in hamroh)
 
 1. **File attachments in `reply`** — send photos and documents. Our `telegram_send_message` is text-only.
 2. **`download_attachment`** — lazy download of user-sent files so the model can see photos/documents.
@@ -410,19 +410,19 @@ In pyclaudir: **not implemented**. We use SIGTERM/SIGINT for shutdown and `/kill
 6. **Ack reaction on receipt** — configurable emoji reaction when a message is received, before any processing starts. Gives instant feedback.
 7. **Text chunking** — auto-split long messages at Telegram's 4096-char limit.
 
-### From Claudir (not yet in pyclaudir)
+### From Claudir (not yet in hamroh)
 
 1. **Liveness monitor** — the heartbeat mechanism is in place but the monitor loop that reads `last_activity` and kills wedged subprocesses isn't wired.
 2. **Kill-marker files** — needed if we ever add a Mirzo-style operator agent.
 3. **Multi-agent split** — separate CC subprocesses with different trust levels and tool sets.
 
-### From Claudir (now implemented in pyclaudir)
+### From Claudir (now implemented in hamroh)
 
 1. **Scheduled events / reminders** — `reminder_set`, `reminder_list`, `reminder_cancel` MCP tools backed by a `reminders` SQLite table. A background asyncio task polls every 60s and injects due reminders as synthetic inbound messages. Supports one-shot (ISO8601) and recurring (cron) schedules.
 
 ---
 
-## 5. Features Original to pyclaudir
+## 5. Features Original to hamroh
 
 Things we built during operator-Claude sessions that neither the
 official plugin nor Claudir had (as far as we've observed). If you're
@@ -431,7 +431,7 @@ pieces to know about.
 
 ### 5.1 Rate limiting — per-user inbound DM only (migration 004)
 
-**File:** `pyclaudir/rate_limiter.py`, wired in `pyclaudir/telegram_io.py:_on_message`.
+**File:** `hamroh/rate_limiter.py`, wired in `hamroh/telegram_io.py:_on_message`.
 
 Earlier iterations rate-limited the **bot's outbound** messages per
 chat_id. That was solving the wrong problem: it let a spammer flood
@@ -446,7 +446,7 @@ Key properties:
 
 - **DM-only.** `chat_type == "private"` is a precondition. Groups are
   not rate-limited (group chatter is part of the design, not abuse).
-- **Owner exempt.** `PYCLAUDIR_OWNER_ID` never ticks the counter;
+- **Owner exempt.** `HAMROH_OWNER_ID` never ticks the counter;
   exemption is baked into `RateLimiter.check_and_record`.
 - **Fixed-minute buckets** via `rate_limits(user_id, bucket_start)`.
   Cleaner than a sliding window; tolerates up to ~2× burst at bucket
@@ -462,7 +462,7 @@ Key properties:
 
 ### 5.2 Reactions as first-class on `messages` (migration 003)
 
-**Files:** `pyclaudir/telegram_io.py:_on_reaction`, `pyclaudir/db/messages.py:apply_user_reaction`, `pyclaudir/tools/telegram_add_reaction.py:add_bot_reaction`.
+**Files:** `hamroh/telegram_io.py:_on_reaction`, `hamroh/db/messages.py:apply_user_reaction`, `hamroh/tools/telegram_add_reaction.py:add_bot_reaction`.
 
 Originally there was a separate `reactions` table that only recorded
 *outbound* bot reactions — writes went in, nothing ever read them,
@@ -501,7 +501,7 @@ WHERE message_id = ?
 
 ### 5.3 Owner-only self-editing of project prompt (prompt-enforced)
 
-**Files:** `pyclaudir/instructions_store.py`, `pyclaudir/tools/instructions.py`, `data/prompt_backups/`.
+**Files:** `hamroh/instructions_store.py`, `hamroh/tools/instructions.py`, `data/prompt_backups/`.
 
 Two MCP tools — `instruction_read` and `instruction_append` —
 expose `prompts/project.md` (only) to the bot. system.md is
@@ -519,7 +519,7 @@ Code-level rails on every append:
 - **Atomic write** via tmp+rename.
 - **Auto-backup** to `data/prompt_backups/project-<UTC timestamp>.md`
   before every append. Revert is `mv <backup> prompts/project.md &&
-  docker compose restart pyclaudir`.
+  docker compose restart hamroh`.
 
 Edits take effect on next CC spawn (prompts reload at
 `cc_worker.py:build_argv`). The container restart is the final
@@ -527,7 +527,7 @@ review gate.
 
 ### 5.4 Agent skills and the self-reflection loop
 
-**Files:** `skills/`, `pyclaudir/skills_store.py`, `pyclaudir/tools/skills.py`, `skills/self-reflection/SKILL.md`, migration 005.
+**Files:** `skills/`, `hamroh/skills_store.py`, `hamroh/tools/skills.py`, `skills/self-reflection/SKILL.md`, migration 005.
 
 See § 4 "Agent skills" above for the invocation mechanics. The
 extension pattern for future Claude Code sessions:
@@ -536,7 +536,7 @@ extension pattern for future Claude Code sessions:
    by `SkillsStore`. No code change needed to make the file visible.
 2. **Trigger.** For on-demand skills, the owner can use `reminder_set`
    to schedule `<skill name="X">run</skill>`. For mandatory skills,
-   add an entry in `pyclaudir/__main__.py:_seed_default_reminders`
+   add an entry in `hamroh/__main__.py:_seed_default_reminders`
    with a unique `auto_seed_key`.
 3. **Protection tier.** An `auto_seed_key`-tagged reminder is
    **mandatory** — `CancelReminderTool` refuses to cancel it and the
@@ -556,7 +556,7 @@ the bottom.
 
 ### 5.5 Mandatory-reminder seeding and cancel-protection
 
-**Files:** `pyclaudir/__main__.py:_seed_default_reminders`, `pyclaudir/tools/reminder.py:CancelReminderTool`, migration 005 (`auto_seed_key` column).
+**Files:** `hamroh/__main__.py:_seed_default_reminders`, `hamroh/tools/reminder.py:CancelReminderTool`, migration 005 (`auto_seed_key` column).
 
 The `auto_seed_key` column on `reminders` tags rows that were
 inserted by the startup hook (vs. by the agent via `reminder_set`).
@@ -606,13 +606,13 @@ markdown form.
 
 ### 5.8 Secrets scrubber at persistence
 
-**File:** `pyclaudir/secrets_scrubber.py`, wired in `telegram_io._to_chat_message`.
+**File:** `hamroh/secrets_scrubber.py`, wired in `telegram_io._to_chat_message`.
 
 System-prompt rule #2 (data-handling) tells the bot not to echo
 secrets. The scrubber is the defense-in-depth layer: it redacts
 credential-shaped strings **before** `insert_message` writes them to
 SQLite. Otherwise an accidental paste of an `sk-…` key would sit in
-`data/pyclaudir.db` forever, readable via `database_query` and grep-able in
+`data/hamroh.db` forever, readable via `database_query` and grep-able in
 any dump.
 
 Conservative patterns only — Bearer headers, `sk-` keys, GitHub
@@ -624,8 +624,8 @@ content.
 
 ### 5.9 Liveness monitor for wedged subprocesses
 
-**Files:** `pyclaudir/cc_worker.py:_liveness_loop`, env var
-`PYCLAUDIR_LIVENESS_TIMEOUT_SECONDS` (default 300s).
+**Files:** `hamroh/cc_worker.py:_liveness_loop`, env var
+`HAMROH_LIVENESS_TIMEOUT_SECONDS` (default 300s).
 
 Claudir Part 3's "heartbeat problem": a CC subprocess can go silent
 on stdout during a long MCP call. The health monitor needs to
@@ -665,7 +665,7 @@ adversarial examples untouched.
 
 ### 5.11 Owner-only operational commands
 
-**Files:** `pyclaudir/telegram_io.py:_cmd_*`, `_register_owner_commands`.
+**Files:** `hamroh/telegram_io.py:_cmd_*`, `_register_owner_commands`.
 
 - `/health` — last bot send, reminder status, rate-limit notice count.
 - `/audit` — recent tool failures, prompt backups, memory footprint.
@@ -677,7 +677,7 @@ appears in the owner's DM.
 
 ### 5.12 Agent Skills spec conformance + validator
 
-**Files:** `pyclaudir/skills_store.py`, `pyclaudir/scripts/validate_skills.py`.
+**Files:** `hamroh/skills_store.py`, `hamroh/scripts/validate_skills.py`.
 
 All skills under `skills/<name>/SKILL.md` follow the Agent Skills
 spec (<https://agentskills.io/specification>). `SkillsStore` parses
@@ -686,7 +686,7 @@ YAML frontmatter, validates `name` matches the directory + the
 `skill_list` implements the spec's progressive-disclosure pattern —
 metadata only at list time, full body only on `skill_read`.
 
-`uv run python -m pyclaudir.scripts.validate_skills` walks every
+`uv run python -m hamroh.scripts.validate_skills` walks every
 first-level skill and reports conformance. Runs cheap; wire into
 pre-commit or CI to prevent shipping a malformed skill.
 
@@ -703,12 +703,12 @@ this change helps the fallback password case.
 
 ### 5.14 Fast-fail tool-error breaker
 
-**Files:** `pyclaudir/cc_worker.py` (`_record_tool_error`,
+**Files:** `hamroh/cc_worker.py` (`_record_tool_error`,
 `TurnResult.aborted_reason`). Knobs: `Config.tool_error_max_count`
 (3), `Config.tool_error_window_seconds` (30),
 `Config.liveness_timeout_seconds` (300) — all flow through
-`pyclaudir.config.Config` from env vars of the same name (UPPERCASE,
-`PYCLAUDIR_` prefix). No other module reads these env vars directly;
+`hamroh.config.Config` from env vars of the same name (UPPERCASE,
+`HAMROH_` prefix). No other module reads these env vars directly;
 the engine and worker resolve them at construction time and store the
 values as instance attributes.
 
@@ -750,8 +750,8 @@ pile up fast enough to trip it in normal use.
 
 ### 5.15 StructuredOutput contract — conditional `reason`, capped length
 
-**Files:** `pyclaudir/cc_schema.py` (`CONTROL_ACTION_SCHEMA`,
-`REASON_MAX_LENGTH`), `pyclaudir/models.py` (`ControlAction`
+**Files:** `hamroh/cc_schema.py` (`CONTROL_ACTION_SCHEMA`,
+`REASON_MAX_LENGTH`), `hamroh/models.py` (`ControlAction`
 `@model_validator`), `prompts/system.md § Tool discipline`.
 
 Every turn ends with a `StructuredOutput` tool call whose input

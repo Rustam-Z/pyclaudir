@@ -54,7 +54,7 @@ async def _assert_context(client: TelegramClient, convo: Conversation) -> None:
 
 @pytest.mark.smoke
 async def test_reply_linkage_is_captured_dm(
-    pyclaudir_sut: Sut, tester_client: TelegramClient, dm: Conversation
+    hamroh_sut: Sut, tester_client: TelegramClient, dm: Conversation
 ) -> None:
     """A reply in a DM records its parent on the inbound row.
 
@@ -62,12 +62,12 @@ async def test_reply_linkage_is_captured_dm(
     when   they reply to an earlier message in a DM
     then   the inbound row carries reply_to_id back to the parent within MAX_TEXT_REPLY_S.
     """
-    await _assert_reply_linkage(pyclaudir_sut, tester_client, dm)
+    await _assert_reply_linkage(hamroh_sut, tester_client, dm)
 
 
 @pytest.mark.smoke
 async def test_reply_linkage_is_captured_group(
-    pyclaudir_sut: Sut, tester_client: TelegramClient, group: Conversation
+    hamroh_sut: Sut, tester_client: TelegramClient, group: Conversation
 ) -> None:
     """A reply in a group records its parent on the inbound row.
 
@@ -75,7 +75,7 @@ async def test_reply_linkage_is_captured_group(
     when   they reply to an earlier message in a group
     then   the inbound row carries reply_to_id back to the parent within MAX_TEXT_REPLY_S.
     """
-    await _assert_reply_linkage(pyclaudir_sut, tester_client, group)
+    await _assert_reply_linkage(hamroh_sut, tester_client, group)
 
 
 @pytest.mark.smoke

@@ -7,10 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from pyclaudir.config import Config
-from pyclaudir.db.database import Database
-from pyclaudir.db.unauthorized import RETENTION_DAYS, insert_unauthorized_message
-from pyclaudir.models import ChatMessage
+from hamroh.config import Config
+from hamroh.db.database import Database
+from hamroh.db.unauthorized import RETENTION_DAYS, insert_unauthorized_message
+from hamroh.models import ChatMessage
 
 
 async def _open(tmp_path: Path) -> Database:

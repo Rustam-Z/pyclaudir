@@ -12,7 +12,7 @@ import logging
 import pytest
 from telethon import TelegramClient  # type: ignore[import-untyped]
 
-from pyclaudir.access import AccessConfig, load_access
+from hamroh.access import AccessConfig, load_access
 from tests.e2e.support.assertions import assert_reply_within
 from tests.e2e.support.client import expect_silence, send_and_wait
 from tests.e2e.support.config import MAX_COMMAND_REPLY_S, MAX_TEXT_REPLY_S, E2EConfig
@@ -49,7 +49,7 @@ async def _assert_allow_adds(
 
 @pytest.mark.slow
 async def test_allow_command_dm(
-    tester_client: TelegramClient, dm: Conversation, pyclaudir_sut: Sut
+    tester_client: TelegramClient, dm: Conversation, hamroh_sut: Sut
 ) -> None:
     """/allow in a DM adds a user to the allowlist.
 
@@ -57,11 +57,11 @@ async def test_allow_command_dm(
     when   they allow a dummy user in a DM
     then   the bot acks within MAX_COMMAND_REPLY_S and the id is persisted to access.json (state restored after).
     """
-    await _assert_allow_adds(tester_client, dm, pyclaudir_sut, _DUMMY_ALLOW_DM)
+    await _assert_allow_adds(tester_client, dm, hamroh_sut, _DUMMY_ALLOW_DM)
 
 
 async def test_allow_command_group(
-    tester_client: TelegramClient, group: Conversation, pyclaudir_sut: Sut
+    tester_client: TelegramClient, group: Conversation, hamroh_sut: Sut
 ) -> None:
     """/allow in a group adds a user to the allowlist.
 
@@ -69,7 +69,7 @@ async def test_allow_command_group(
     when   they allow a dummy user in a group
     then   the bot acks within MAX_COMMAND_REPLY_S and the id is persisted to access.json (state restored after).
     """
-    await _assert_allow_adds(tester_client, group, pyclaudir_sut, _DUMMY_ALLOW_GROUP)
+    await _assert_allow_adds(tester_client, group, hamroh_sut, _DUMMY_ALLOW_GROUP)
 
 
 @pytest.mark.smoke
@@ -77,7 +77,7 @@ async def test_group_access_commands_take_effect_group(
     tester_client: TelegramClient,
     group: Conversation,
     group_id: int,
-    pyclaudir_sut: Sut,
+    hamroh_sut: Sut,
     e2e_config: E2EConfig,
 ) -> None:
     """/deny group then /allow group actually flip the bot's acceptance.
@@ -98,9 +98,9 @@ async def test_group_access_commands_take_effect_group(
     # arrange: snapshot to restore, then pin a deterministic allowlist baseline
     # so the gate decision is unambiguous (open/owner_only would hide the deny).
     owner, gid = e2e_config.owner_id, group_id
-    original = load_access(pyclaudir_sut.access_path)
+    original = load_access(hamroh_sut.access_path)
     set_access(
-        pyclaudir_sut,
+        hamroh_sut,
         AccessConfig("allowlist", allowed_users=[owner], allowed_chats=[gid]),
     )
     try:
@@ -126,7 +126,7 @@ async def test_group_access_commands_take_effect_group(
         assert_reply_within(reply, MAX_TEXT_REPLY_S, "group after re-allow")
     finally:
         # always restore the shared SUT's original access
-        set_access(pyclaudir_sut, original)
+        set_access(hamroh_sut, original)
 
 
 # --- /deny ---------------------------------------------------------------
@@ -150,7 +150,7 @@ async def _assert_deny_removes(
 
 @pytest.mark.smoke
 async def test_deny_command_dm(
-    tester_client: TelegramClient, dm: Conversation, pyclaudir_sut: Sut
+    tester_client: TelegramClient, dm: Conversation, hamroh_sut: Sut
 ) -> None:
     """/deny in a DM removes a user from the allowlist.
 
@@ -158,11 +158,11 @@ async def test_deny_command_dm(
     when   they deny the dummy user in a DM
     then   the bot acks within MAX_COMMAND_REPLY_S and the id is gone from access.json (state restored after).
     """
-    await _assert_deny_removes(tester_client, dm, pyclaudir_sut, _DUMMY_DENY_DM)
+    await _assert_deny_removes(tester_client, dm, hamroh_sut, _DUMMY_DENY_DM)
 
 
 async def test_deny_command_group(
-    tester_client: TelegramClient, group: Conversation, pyclaudir_sut: Sut
+    tester_client: TelegramClient, group: Conversation, hamroh_sut: Sut
 ) -> None:
     """/deny in a group removes a user from the allowlist.
 
@@ -170,7 +170,7 @@ async def test_deny_command_group(
     when   they deny the dummy user in a group
     then   the bot acks within MAX_COMMAND_REPLY_S and the id is gone from access.json (state restored after).
     """
-    await _assert_deny_removes(tester_client, group, pyclaudir_sut, _DUMMY_DENY_GROUP)
+    await _assert_deny_removes(tester_client, group, hamroh_sut, _DUMMY_DENY_GROUP)
 
 
 # --- /policy -------------------------------------------------------------
@@ -193,7 +193,7 @@ async def _assert_policy_sets(
 
 @pytest.mark.smoke
 async def test_policy_command_dm(
-    tester_client: TelegramClient, dm: Conversation, pyclaudir_sut: Sut
+    tester_client: TelegramClient, dm: Conversation, hamroh_sut: Sut
 ) -> None:
     """/policy in a DM switches the allowlist policy.
 
@@ -201,11 +201,11 @@ async def test_policy_command_dm(
     when   they switch the policy to open in a DM
     then   the bot acks within MAX_COMMAND_REPLY_S and the new policy is persisted to access.json (original restored after).
     """
-    await _assert_policy_sets(tester_client, dm, pyclaudir_sut)
+    await _assert_policy_sets(tester_client, dm, hamroh_sut)
 
 
 async def test_policy_command_group(
-    tester_client: TelegramClient, group: Conversation, pyclaudir_sut: Sut
+    tester_client: TelegramClient, group: Conversation, hamroh_sut: Sut
 ) -> None:
     """/policy in a group switches the allowlist policy.
 
@@ -213,7 +213,7 @@ async def test_policy_command_group(
     when   they switch the policy to open in a group
     then   the bot acks within MAX_COMMAND_REPLY_S and the new policy is persisted to access.json (original restored after).
     """
-    await _assert_policy_sets(tester_client, group, pyclaudir_sut)
+    await _assert_policy_sets(tester_client, group, hamroh_sut)
 
 
 # --- missing arguments: every command replies with usage, mutates nothing ---
@@ -238,7 +238,7 @@ async def _assert_usage_on_missing_args(
 
 
 async def test_allow_without_args_dm(
-    tester_client: TelegramClient, dm: Conversation, pyclaudir_sut: Sut
+    tester_client: TelegramClient, dm: Conversation, hamroh_sut: Sut
 ) -> None:
     """/allow with no arguments shows usage and changes nothing, in a DM.
 
@@ -246,11 +246,11 @@ async def test_allow_without_args_dm(
     when   they send a bare /allow in a DM
     then   the bot replies with a usage hint within MAX_COMMAND_REPLY_S and access.json is unchanged.
     """
-    await _assert_usage_on_missing_args(tester_client, dm, pyclaudir_sut, "/allow")
+    await _assert_usage_on_missing_args(tester_client, dm, hamroh_sut, "/allow")
 
 
 async def test_allow_without_args_group(
-    tester_client: TelegramClient, group: Conversation, pyclaudir_sut: Sut
+    tester_client: TelegramClient, group: Conversation, hamroh_sut: Sut
 ) -> None:
     """/allow with no arguments shows usage and changes nothing, in a group.
 
@@ -258,11 +258,11 @@ async def test_allow_without_args_group(
     when   they send a bare /allow in a group
     then   the bot replies with a usage hint within MAX_COMMAND_REPLY_S and access.json is unchanged.
     """
-    await _assert_usage_on_missing_args(tester_client, group, pyclaudir_sut, "/allow")
+    await _assert_usage_on_missing_args(tester_client, group, hamroh_sut, "/allow")
 
 
 async def test_deny_without_args_dm(
-    tester_client: TelegramClient, dm: Conversation, pyclaudir_sut: Sut
+    tester_client: TelegramClient, dm: Conversation, hamroh_sut: Sut
 ) -> None:
     """/deny with no arguments shows usage and changes nothing, in a DM.
 
@@ -270,11 +270,11 @@ async def test_deny_without_args_dm(
     when   they send a bare /deny in a DM
     then   the bot replies with a usage hint within MAX_COMMAND_REPLY_S and access.json is unchanged.
     """
-    await _assert_usage_on_missing_args(tester_client, dm, pyclaudir_sut, "/deny")
+    await _assert_usage_on_missing_args(tester_client, dm, hamroh_sut, "/deny")
 
 
 async def test_deny_without_args_group(
-    tester_client: TelegramClient, group: Conversation, pyclaudir_sut: Sut
+    tester_client: TelegramClient, group: Conversation, hamroh_sut: Sut
 ) -> None:
     """/deny with no arguments shows usage and changes nothing, in a group.
 
@@ -282,11 +282,11 @@ async def test_deny_without_args_group(
     when   they send a bare /deny in a group
     then   the bot replies with a usage hint within MAX_COMMAND_REPLY_S and access.json is unchanged.
     """
-    await _assert_usage_on_missing_args(tester_client, group, pyclaudir_sut, "/deny")
+    await _assert_usage_on_missing_args(tester_client, group, hamroh_sut, "/deny")
 
 
 async def test_policy_without_args_dm(
-    tester_client: TelegramClient, dm: Conversation, pyclaudir_sut: Sut
+    tester_client: TelegramClient, dm: Conversation, hamroh_sut: Sut
 ) -> None:
     """/policy with no arguments shows usage and changes nothing, in a DM.
 
@@ -294,11 +294,11 @@ async def test_policy_without_args_dm(
     when   they send a bare /policy in a DM
     then   the bot replies with a usage hint within MAX_COMMAND_REPLY_S and access.json is unchanged.
     """
-    await _assert_usage_on_missing_args(tester_client, dm, pyclaudir_sut, "/policy")
+    await _assert_usage_on_missing_args(tester_client, dm, hamroh_sut, "/policy")
 
 
 async def test_policy_without_args_group(
-    tester_client: TelegramClient, group: Conversation, pyclaudir_sut: Sut
+    tester_client: TelegramClient, group: Conversation, hamroh_sut: Sut
 ) -> None:
     """/policy with no arguments shows usage and changes nothing, in a group.
 
@@ -306,4 +306,4 @@ async def test_policy_without_args_group(
     when   they send a bare /policy in a group
     then   the bot replies with a usage hint within MAX_COMMAND_REPLY_S and access.json is unchanged.
     """
-    await _assert_usage_on_missing_args(tester_client, group, pyclaudir_sut, "/policy")
+    await _assert_usage_on_missing_args(tester_client, group, hamroh_sut, "/policy")

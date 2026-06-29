@@ -16,8 +16,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from pyclaudir.cc_worker import CcSpawnSpec, CcWorker, TurnResult
-from pyclaudir.config import Config
+from hamroh.cc_worker import CcSpawnSpec, CcWorker, TurnResult
+from hamroh.config import Config
 
 
 def _spec(tmp_path: Path) -> CcSpawnSpec:

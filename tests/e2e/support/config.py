@@ -14,7 +14,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from pyclaudir.access import load_access
+from hamroh.access import load_access
 
 #: The project's root ``.env`` — the single source of truth for both the app
 #: and the e2e suite (the SUT inherits it; see ``child_env``).
@@ -33,9 +33,9 @@ _REQUIRED_ENV = (
     "E2E_TG_SESSION",
     "E2E_BOT_USERNAME",
     "TELEGRAM_BOT_TOKEN",
-    "PYCLAUDIR_OWNER_ID",
-    "PYCLAUDIR_MODEL",
-    "PYCLAUDIR_EFFORT",
+    "HAMROH_OWNER_ID",
+    "HAMROH_MODEL",
+    "HAMROH_EFFORT",
 )
 
 #: The status heartbeat interval for the dedicated ``status_sut`` bot only
@@ -48,20 +48,20 @@ STATUS_SUT_INTERVAL_S = 10.0
 
 #: The env override the ``status_sut`` fixture applies — and nothing else does.
 STATUS_SUT_ENV: dict[str, str] = {
-    "PYCLAUDIR_STATUS_INTERVAL_SECONDS": str(int(STATUS_SUT_INTERVAL_S))
+    "HAMROH_STATUS_INTERVAL_SECONDS": str(int(STATUS_SUT_INTERVAL_S))
 }
 
 #: The env override the ``draft_sut`` fixture applies — and nothing else does.
 #: Turns on the live "working…" progress draft (``sendMessageDraft``) so the
 #: draft-mode regression test can confirm DM replies still land unaffected.
-DRAFT_SUT_ENV: dict[str, str] = {"PYCLAUDIR_PROGRESS_DRAFT_ENABLED": "true"}
+DRAFT_SUT_ENV: dict[str, str] = {"HAMROH_PROGRESS_DRAFT_ENABLED": "true"}
 
 #: Overrides applied over the operator's ``.env`` for the SUT (see ``child_env``).
-#: ``PYCLAUDIR_EFFORT="low"`` is pinned so turn latency stays fast and consistent
+#: ``HAMROH_EFFORT="low"`` is pinned so turn latency stays fast and consistent
 #: regardless of the operator's setting — the per-test latency gates flake when a
 #: high-effort turn lands in the slow tail. Add e.g.
-#: ``PYCLAUDIR_RATE_LIMIT_PER_MIN="120"`` here if the burst test hits the default.
-SUT_ENV_OVERRIDES: dict[str, str] = {"PYCLAUDIR_EFFORT": "low"}
+#: ``HAMROH_RATE_LIMIT_PER_MIN="120"`` here if the burst test hits the default.
+SUT_ENV_OVERRIDES: dict[str, str] = {"HAMROH_EFFORT": "low"}
 
 _QUIET_WINDOW_S = 3.0  # silence that marks a multi-chunk reply as complete
 _BURST_TIMEOUT_S = 90.0  # how long to wait for every burst reply to land
@@ -132,7 +132,7 @@ def child_env(
     env.update(SUT_ENV_OVERRIDES)
     if extra_env:
         env.update(extra_env)
-    env["PYCLAUDIR_DATA_DIR"] = str(data_dir)
+    env["HAMROH_DATA_DIR"] = str(data_dir)
     return env
 
 
@@ -157,5 +157,5 @@ class E2EConfig:
             api_hash=os.environ["E2E_TG_API_HASH"],
             session=os.environ["E2E_TG_SESSION"],
             bot_username=os.environ["E2E_BOT_USERNAME"].lstrip("@"),
-            owner_id=int(os.environ["PYCLAUDIR_OWNER_ID"]),
+            owner_id=int(os.environ["HAMROH_OWNER_ID"]),
         )

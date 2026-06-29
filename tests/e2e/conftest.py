@@ -67,7 +67,7 @@ def e2e_config() -> E2EConfig:
 
 @pytest.fixture(scope="session")
 def _free_bot_token() -> None:
-    """Kill stray pyclaudir processes once, so the SUT can claim the token.
+    """Kill stray hamroh processes once, so the SUT can claim the token.
 
     Only one process may poll a bot token; an orphan from a crashed run (or a
     dev bot) would make Telegram reject the SUT's getUpdates.
@@ -76,7 +76,7 @@ def _free_bot_token() -> None:
 
 
 @pytest.fixture(scope="session")
-def pyclaudir_sut(
+def hamroh_sut(
     _free_bot_token: None,
     e2e_config: E2EConfig,
     tmp_path_factory: pytest.TempPathFactory,
@@ -92,7 +92,7 @@ def pyclaudir_sut(
 
 @pytest.fixture
 def killable_sut(
-    pyclaudir_sut: Sut, e2e_config: E2EConfig, tmp_path: Path
+    hamroh_sut: Sut, e2e_config: E2EConfig, tmp_path: Path
 ) -> Iterator[Sut]:
     """A throwaway bot the test is free to /kill, with the shared SUT revived after.
 
@@ -102,20 +102,20 @@ def killable_sut(
     SUT *in place* — swapping ``proc``/``_log`` on the same object keeps the
     session fixture's reference valid, so later tests reuse the revived bot.
     """
-    stop_sut(pyclaudir_sut)
+    stop_sut(hamroh_sut)
     victim = launch_sut(e2e_config, tmp_path / "victim")
     try:
         yield victim
     finally:
         stop_sut(victim)
-        revived = launch_sut(e2e_config, pyclaudir_sut.data_dir)
-        pyclaudir_sut.proc = revived.proc
-        pyclaudir_sut._log = revived._log
+        revived = launch_sut(e2e_config, hamroh_sut.data_dir)
+        hamroh_sut.proc = revived.proc
+        hamroh_sut._log = revived._log
 
 
 @pytest.fixture(scope="module")
 def status_sut(
-    pyclaudir_sut: Sut,
+    hamroh_sut: Sut,
     e2e_config: E2EConfig,
     tmp_path_factory: pytest.TempPathFactory,
 ) -> Iterator[Sut]:
@@ -129,7 +129,7 @@ def status_sut(
     dance runs once. Every other test keeps the production 300s interval and
     never sees a "still working" ping.
     """
-    stop_sut(pyclaudir_sut)
+    stop_sut(hamroh_sut)
     sut = launch_sut(
         e2e_config,
         tmp_path_factory.mktemp("status-data"),
@@ -139,14 +139,14 @@ def status_sut(
         yield sut
     finally:
         stop_sut(sut)
-        revived = launch_sut(e2e_config, pyclaudir_sut.data_dir)
-        pyclaudir_sut.proc = revived.proc
-        pyclaudir_sut._log = revived._log
+        revived = launch_sut(e2e_config, hamroh_sut.data_dir)
+        hamroh_sut.proc = revived.proc
+        hamroh_sut._log = revived._log
 
 
 @pytest.fixture(scope="module")
 def draft_sut(
-    pyclaudir_sut: Sut,
+    hamroh_sut: Sut,
     e2e_config: E2EConfig,
     tmp_path_factory: pytest.TempPathFactory,
 ) -> Iterator[Sut]:
@@ -157,7 +157,7 @@ def draft_sut(
     process may poll the bot token). Every other test keeps the draft off and
     sees the plain typing indicator.
     """
-    stop_sut(pyclaudir_sut)
+    stop_sut(hamroh_sut)
     sut = launch_sut(
         e2e_config,
         tmp_path_factory.mktemp("draft-data"),
@@ -167,9 +167,9 @@ def draft_sut(
         yield sut
     finally:
         stop_sut(sut)
-        revived = launch_sut(e2e_config, pyclaudir_sut.data_dir)
-        pyclaudir_sut.proc = revived.proc
-        pyclaudir_sut._log = revived._log
+        revived = launch_sut(e2e_config, hamroh_sut.data_dir)
+        hamroh_sut.proc = revived.proc
+        hamroh_sut._log = revived._log
 
 
 @pytest_asyncio.fixture
@@ -243,10 +243,10 @@ def pytest_runtest_makereport(
 
 @pytest.fixture(autouse=True)
 def _dump_sut_log_on_failure(
-    request: pytest.FixtureRequest, pyclaudir_sut: Sut
+    request: pytest.FixtureRequest, hamroh_sut: Sut
 ) -> Iterator[None]:
     """On test failure, print the bot's recent output for debugging."""
     yield
     report = getattr(request.node, "rep_call", None)
     if report is not None and report.failed:
-        log.error("pyclaudir SUT log tail:\n%s", pyclaudir_sut.log_tail())
+        log.error("hamroh SUT log tail:\n%s", hamroh_sut.log_tail())

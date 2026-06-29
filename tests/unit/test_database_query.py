@@ -7,12 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from pyclaudir.config import Config
-from pyclaudir.db.database import Database
-from pyclaudir.db.messages import insert_message
-from pyclaudir.models import ChatMessage
-from pyclaudir.tools.base import ToolContext
-from pyclaudir.tools.database_query import (
+from hamroh.config import Config
+from hamroh.db.database import Database
+from hamroh.db.messages import insert_message
+from hamroh.models import ChatMessage
+from hamroh.tools.base import ToolContext
+from hamroh.tools.database_query import (
     DatabaseQueryArgs,
     DatabaseQueryTool,
     is_safe_select,

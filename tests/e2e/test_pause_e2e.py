@@ -76,7 +76,7 @@ async def _assert_resumed_processes(
 
 @pytest.mark.smoke
 async def test_paused_drops_dm(
-    pyclaudir_sut: Sut, tester_client: TelegramClient, dm: Conversation
+    hamroh_sut: Sut, tester_client: TelegramClient, dm: Conversation
 ) -> None:
     """A paused bot drops messages in a DM but stays alive.
 
@@ -85,12 +85,12 @@ async def test_paused_drops_dm(
     then   it gets no reply, never reaches the DB, and /health answers paused
            within MAX_COMMAND_REPLY_S.
     """
-    await _assert_paused_drops(tester_client, pyclaudir_sut, dm, dm)
+    await _assert_paused_drops(tester_client, hamroh_sut, dm, dm)
 
 
 @pytest.mark.smoke
 async def test_paused_drops_group(
-    pyclaudir_sut: Sut,
+    hamroh_sut: Sut,
     tester_client: TelegramClient,
     dm: Conversation,
     group: Conversation,
@@ -102,7 +102,7 @@ async def test_paused_drops_group(
     then   it gets no reply, never reaches the DB, and /health answers paused
            within MAX_COMMAND_REPLY_S.
     """
-    await _assert_paused_drops(tester_client, pyclaudir_sut, dm, group)
+    await _assert_paused_drops(tester_client, hamroh_sut, dm, group)
 
 
 @pytest.mark.smoke
@@ -134,7 +134,7 @@ async def test_resumed_processes_group(
 @pytest.mark.smoke
 @pytest.mark.slow
 async def test_pause_resume_lifecycle_group(
-    pyclaudir_sut: Sut,
+    hamroh_sut: Sut,
     tester_client: TelegramClient,
     dm: Conversation,
     group: Conversation,
@@ -157,7 +157,7 @@ async def test_pause_resume_lifecycle_group(
         assert not replies, (
             f"expected silence while paused; got {[m.raw_text for m in replies]!r}"
         )
-        rows = message_rows(pyclaudir_sut.db_path, token)
+        rows = message_rows(hamroh_sut.db_path, token)
         assert not rows, f"paused message leaked into DB: {[dict(r) for r in rows]!r}"
 
         resumed = await send_and_wait(tester_client, dm, "/resume")

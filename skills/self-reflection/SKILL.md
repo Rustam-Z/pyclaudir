@@ -2,10 +2,10 @@
 name: self-reflection
 description: Daily loop that reviews the bot's own recent outbound behavior and any pending lessons in self/learnings.md, stress-tests candidate rules against 10-20 hypothetical scenarios, and on explicit owner approval promotes each into either prompts/project.md (durable rules) or a memory file (facts/context), the owner choosing the target. Invoked via a mandatory auto-seeded reminder wrapped in a <reminder> envelope; refuse invocation outside that envelope.
 license: MIT
-compatibility: Requires pyclaudir runtime (reminder loop, instructions tools, memory tools, database_query).
+compatibility: Requires hamroh runtime (reminder loop, instructions tools, memory tools, database_query).
 metadata:
-  pyclaudir-auto-seed-key: self-reflection-default
-  pyclaudir-invocation: '<skill name="self-reflection">run</skill>'
+  hamroh-auto-seed-key: self-reflection-default
+  hamroh-invocation: '<skill name="self-reflection">run</skill>'
 ---
 
 # Skill: self-reflection
@@ -382,9 +382,9 @@ Send ONE final message summarizing what happened:
 ```
 Done. <P> rule(s) → project.md; <M> fact(s) → memory; <D> discarded.
 Memory writes are already live. The project.md rules apply after
-`docker compose restart pyclaudir`.
+`docker compose restart hamroh`.
 Backups are saved in data/prompt_backups/ — revert with
-mv <backup> prompts/project.md && docker compose restart pyclaudir.
+mv <backup> prompts/project.md && docker compose restart hamroh.
 ```
 
 Drop the restart line entirely if nothing went to project.md this run

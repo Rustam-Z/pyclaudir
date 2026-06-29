@@ -4,7 +4,7 @@ description: On-demand global research playbook covering tech, startup, AI, fina
 license: MIT
 compatibility: Requires WebFetch, WebSearch, telegram_send_message.
 metadata:
-  pyclaudir-invocation: '<skill name="trends">run</skill>'
+  hamroh-invocation: '<skill name="trends">run</skill>'
 ---
 
 # Skill: trends

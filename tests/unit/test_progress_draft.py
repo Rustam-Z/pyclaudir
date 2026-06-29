@@ -15,8 +15,8 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
-from pyclaudir.config import Config
-from pyclaudir.startup import (
+from hamroh.config import Config
+from hamroh.startup import (
     PROGRESS_DRAFT_ID,
     _App,
     _make_typing_action,

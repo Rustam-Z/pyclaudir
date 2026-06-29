@@ -97,7 +97,7 @@ async def _assert_drives_browser(
 @pytest.mark.smoke
 @pytest.mark.slow
 async def test_bot_google_images_screenshot_dm(
-    pyclaudir_sut: Sut, tester_client: TelegramClient, dm: Conversation
+    hamroh_sut: Sut, tester_client: TelegramClient, dm: Conversation
 ) -> None:
     """Bot opens Google Images and sends a screenshot of the results.
 
@@ -107,7 +107,7 @@ async def test_bot_google_images_screenshot_dm(
            lands in data/renders/, and the turn completes within MAX_BROWSER_REPLY_S.
     """
     await _assert_drives_browser(
-        pyclaudir_sut,
+        hamroh_sut,
         tester_client,
         dm,
         _GOOGLE_REQUEST,
@@ -117,7 +117,7 @@ async def test_bot_google_images_screenshot_dm(
 
 @pytest.mark.slow
 async def test_bot_google_images_screenshot_group(
-    pyclaudir_sut: Sut, tester_client: TelegramClient, group: Conversation
+    hamroh_sut: Sut, tester_client: TelegramClient, group: Conversation
 ) -> None:
     """Bot opens Google Images and sends a screenshot of the results.
 
@@ -127,7 +127,7 @@ async def test_bot_google_images_screenshot_group(
            lands in data/renders/, and the turn completes within MAX_BROWSER_REPLY_S.
     """
     await _assert_drives_browser(
-        pyclaudir_sut,
+        hamroh_sut,
         tester_client,
         group,
         _GOOGLE_REQUEST,
@@ -143,7 +143,7 @@ async def test_bot_google_images_screenshot_group(
 @pytest.mark.smoke
 @pytest.mark.slow
 async def test_bot_clicks_link_and_screenshots_dm(
-    pyclaudir_sut: Sut, tester_client: TelegramClient, dm: Conversation
+    hamroh_sut: Sut, tester_client: TelegramClient, dm: Conversation
 ) -> None:
     """Bot clicks an in-article link, then screenshots and sends the page.
 
@@ -153,7 +153,7 @@ async def test_bot_clicks_link_and_screenshots_dm(
            ran, a PNG lands in data/renders/, and the turn stays in budget.
     """
     await _assert_drives_browser(
-        pyclaudir_sut,
+        hamroh_sut,
         tester_client,
         dm,
         _WIKI_REQUEST,
@@ -163,7 +163,7 @@ async def test_bot_clicks_link_and_screenshots_dm(
 
 @pytest.mark.slow
 async def test_bot_clicks_link_and_screenshots_group(
-    pyclaudir_sut: Sut, tester_client: TelegramClient, group: Conversation
+    hamroh_sut: Sut, tester_client: TelegramClient, group: Conversation
 ) -> None:
     """Bot clicks an in-article link, then screenshots and sends the page.
 
@@ -173,7 +173,7 @@ async def test_bot_clicks_link_and_screenshots_group(
            ran, a PNG lands in data/renders/, and the turn stays in budget.
     """
     await _assert_drives_browser(
-        pyclaudir_sut,
+        hamroh_sut,
         tester_client,
         group,
         _WIKI_REQUEST,

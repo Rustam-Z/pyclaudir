@@ -6,7 +6,7 @@ import logging
 
 import pytest
 
-from pyclaudir.transcript import (
+from hamroh.transcript import (
     ChatRef,
     MsgRef,
     UserRef,
@@ -21,7 +21,7 @@ from pyclaudir.transcript import (
 
 @pytest.fixture()
 def caplog_tx(caplog: pytest.LogCaptureFixture) -> pytest.LogCaptureFixture:
-    caplog.set_level(logging.INFO, logger="pyclaudir.tx")
+    caplog.set_level(logging.INFO, logger="hamroh.tx")
     return caplog
 
 
@@ -139,7 +139,7 @@ def test_edit_and_delete_and_reaction(caplog_tx) -> None:
 
 def test_tool_context_chat_titles_default_is_independent_dict() -> None:
     """Two ToolContext instances must not share the same dict."""
-    from pyclaudir.tools.base import ToolContext
+    from hamroh.tools.base import ToolContext
 
     a = ToolContext()
     b = ToolContext()

@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from pyclaudir.config import Config
-from pyclaudir.db.database import Database
+from hamroh.config import Config
+from hamroh.db.database import Database
 
 
 EXPECTED_TABLES = {

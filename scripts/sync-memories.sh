@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 #
-# Sync pyclaudir data between local and remote server.
+# Sync hamroh data between local and remote server.
 #
 # Usage:
 #   ./scripts/sync-memories.sh pull user@server                  # default ssh
 #   ./scripts/sync-memories.sh pull user@server --key ~/.ssh/k   # custom key
 #   ./scripts/sync-memories.sh pull user@server --password       # ssh prompts
 #
-# The remote path defaults to ~/pyclaudir. Override with REMOTE_DIR:
-#   REMOTE_DIR='~/pyclaudir' ./scripts/sync-memories.sh pull user@server
+# The remote path defaults to ~/hamroh. Override with REMOTE_DIR:
+#   REMOTE_DIR='~/hamroh' ./scripts/sync-memories.sh pull user@server
 
 set -euo pipefail
 
-REMOTE_DIR="${REMOTE_DIR:-~/pyclaudir}"
+REMOTE_DIR="${REMOTE_DIR:-~/hamroh}"
 LOCAL_DIR="$(pwd)"
 
 usage() {
@@ -28,7 +28,7 @@ usage() {
     echo "                 NOTE: prompts 3x per run (one per rsync call)."
     echo ""
     echo "Environment:"
-    echo "  REMOTE_DIR     Remote pyclaudir directory (default: ~/pyclaudir)"
+    echo "  REMOTE_DIR     Remote hamroh directory (default: ~/hamroh)"
     exit 1
 }
 
@@ -68,8 +68,8 @@ pull() {
 
     echo "  database..."
     rsync -avz "${RSYNC_E[@]}" \
-        "$SERVER:$REMOTE_DIR/data/pyclaudir.db" \
-        "$LOCAL_DIR/data/pyclaudir.db"
+        "$SERVER:$REMOTE_DIR/data/hamroh.db" \
+        "$LOCAL_DIR/data/hamroh.db"
 
     echo "=== Pull complete ==="
 }
@@ -89,8 +89,8 @@ push() {
 
     echo "  database..."
     rsync -avz "${RSYNC_E[@]}" \
-        "$LOCAL_DIR/data/pyclaudir.db" \
-        "$SERVER:$REMOTE_DIR/data/pyclaudir.db"
+        "$LOCAL_DIR/data/hamroh.db" \
+        "$SERVER:$REMOTE_DIR/data/hamroh.db"
 
     echo "=== Push complete ==="
     echo "Note: restart the container for project.md changes to take effect:"

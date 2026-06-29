@@ -13,9 +13,9 @@ from pathlib import Path
 
 import pytest
 
-from pyclaudir.config import Config
-from pyclaudir.db.database import Database
-from pyclaudir.db.reminders import (
+from hamroh.config import Config
+from hamroh.db.database import Database
+from hamroh.db.reminders import (
     NewReminder,
     advance_recurring_reminder,
     claim_reminder,

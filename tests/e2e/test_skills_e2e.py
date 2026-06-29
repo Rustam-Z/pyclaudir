@@ -45,7 +45,7 @@ async def _assert_consults_skill(
 
 @pytest.mark.smoke
 async def test_skill_consulted_in_dm(
-    pyclaudir_sut: Sut, tester_client: TelegramClient, dm: Conversation
+    hamroh_sut: Sut, tester_client: TelegramClient, dm: Conversation
 ) -> None:
     """Bot consults a skill to answer a request.
 
@@ -53,12 +53,12 @@ async def test_skill_consulted_in_dm(
     when   the tester asks in a DM
     then   the bot invokes a skills tool and replies within MAX_SKILL_REPLY_S.
     """
-    await _assert_consults_skill(pyclaudir_sut, tester_client, dm, "trends")
+    await _assert_consults_skill(hamroh_sut, tester_client, dm, "trends")
 
 
 @pytest.mark.smoke
 async def test_skill_consulted_in_group(
-    pyclaudir_sut: Sut, tester_client: TelegramClient, group: Conversation
+    hamroh_sut: Sut, tester_client: TelegramClient, group: Conversation
 ) -> None:
     """Bot consults a skill to answer a request.
 
@@ -66,6 +66,4 @@ async def test_skill_consulted_in_group(
     when   the tester asks in a group
     then   the bot invokes a skills tool and replies within MAX_SKILL_REPLY_S.
     """
-    await _assert_consults_skill(
-        pyclaudir_sut, tester_client, group, "trends-uzbekistan"
-    )
+    await _assert_consults_skill(hamroh_sut, tester_client, group, "trends-uzbekistan")

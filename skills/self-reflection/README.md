@@ -29,7 +29,7 @@ Daily loop that drives the bot's own learning:
 
 Phases run back-to-back in one invocation, triggered by a
 single auto-seeded recurring reminder (midnight UTC every day by
-default — `PYCLAUDIR_SELF_REFLECTION_CRON` overrides). The reminder
+default — `HAMROH_SELF_REFLECTION_CRON` overrides). The reminder
 is mandatory — attempts to cancel it are
 refused at the tool layer, and if it ever goes missing (manual SQL,
 DB corruption, etc.) the startup hook re-seeds it. Learning does

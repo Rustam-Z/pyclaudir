@@ -1,4 +1,4 @@
-"""Auto-discovery: dropping a new file in pyclaudir/tools/ should be enough."""
+"""Auto-discovery: dropping a new file in hamroh/tools/ should be enough."""
 
 from __future__ import annotations
 
@@ -10,12 +10,12 @@ import pytest
 
 from mcp.server.fastmcp.utilities.func_metadata import func_metadata
 
-from pyclaudir import tools as tools_pkg
-from pyclaudir.cc_worker.event_handlers import USER_VISIBLE_TOOLS
-from pyclaudir.mcp_server import _make_wrapper, discover_tool_classes
-from pyclaudir.tools.base import BaseTool, ToolContext
+from hamroh import tools as tools_pkg
+from hamroh.cc_worker.event_handlers import USER_VISIBLE_TOOLS
+from hamroh.mcp_server import _make_wrapper, discover_tool_classes
+from hamroh.tools.base import BaseTool, ToolContext
 
-MCP_PREFIX = "mcp__pyclaudir__"
+MCP_PREFIX = "mcp__hamroh__"
 
 
 def _input_schema(tool: BaseTool) -> dict:
@@ -30,7 +30,7 @@ def test_field_descriptions_and_constraints_reach_the_schema() -> None:
     """The wrapper must carry each pydantic ``Field`` description AND its
     constraints into the MCP input schema — otherwise everything we write in
     ``Field(description=..., max_length=...)`` is invisible to the model."""
-    from pyclaudir.tools.telegram.telegram_create_poll import TelegramCreatePollTool
+    from hamroh.tools.telegram.telegram_create_poll import TelegramCreatePollTool
 
     props = _input_schema(TelegramCreatePollTool(ToolContext()))["properties"]
 
@@ -88,7 +88,7 @@ def test_dropping_a_file_registers_a_new_tool(tmp_path: Path) -> None:
         textwrap.dedent(
             """
             from pydantic import BaseModel
-            from pyclaudir.tools.base import BaseTool, ToolResult
+            from hamroh.tools.base import BaseTool, ToolResult
 
             class EchoArgs(BaseModel):
                 text: str
@@ -105,18 +105,18 @@ def test_dropping_a_file_registers_a_new_tool(tmp_path: Path) -> None:
     )
     try:
         # Drop any cached import so discover() reloads the package
-        sys.modules.pop("pyclaudir.tools._disco_test_echo", None)
+        sys.modules.pop("hamroh.tools._disco_test_echo", None)
         classes = discover_tool_classes()
         names = {c.name for c in classes}
         assert "_disco_test_echo" in names
     finally:
         new_file.unlink(missing_ok=True)
-        sys.modules.pop("pyclaudir.tools._disco_test_echo", None)
+        sys.modules.pop("hamroh.tools._disco_test_echo", None)
 
 
 @pytest.mark.asyncio
 async def test_now_tool_runs() -> None:
-    from pyclaudir.tools.now import NowArgs, NowTool
+    from hamroh.tools.now import NowArgs, NowTool
 
     tool = NowTool(ToolContext())
     result = await tool.run(NowArgs())

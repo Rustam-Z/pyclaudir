@@ -17,17 +17,17 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from pyclaudir.cc_worker import CcSpawnSpec, CcWorker, TurnResult
-from pyclaudir.config import Config
-from pyclaudir.db.database import Database
-from pyclaudir.db.messages import (
+from hamroh.cc_worker import CcSpawnSpec, CcWorker, TurnResult
+from hamroh.config import Config
+from hamroh.db.database import Database
+from hamroh.db.messages import (
     insert_message,
     mark_messages_consumed,
     mark_messages_processed,
 )
-from pyclaudir.engine import Engine, EngineOptions
-from pyclaudir.engine.engine import TurnCallbacks
-from pyclaudir.models import ChatMessage
+from hamroh.engine import Engine, EngineOptions
+from hamroh.engine.engine import TurnCallbacks
+from hamroh.models import ChatMessage
 
 POLICY_ERROR = (
     "API Error: Claude Code is unable to respond to this request, "

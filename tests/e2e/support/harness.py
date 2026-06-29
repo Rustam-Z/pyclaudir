@@ -1,6 +1,6 @@
 """Launch the bot subprocess, detect readiness, and authorize the tester.
 
-The system under test (``Sut``) is a real ``python -m pyclaudir`` process; this
+The system under test (``Sut``) is a real ``python -m hamroh`` process; this
 module owns its lifecycle and the ``access.json`` that gates its messages.
 """
 
@@ -22,13 +22,13 @@ from pathlib import Path
 from telethon import TelegramClient  # type: ignore[import-untyped]
 from telethon.sessions import StringSession  # type: ignore[import-untyped]
 
-from pyclaudir.access import AccessConfig, save_access
+from hamroh.access import AccessConfig, save_access
 
 from tests.e2e.support.client import send_and_wait
 from tests.e2e.support.config import E2EConfig, child_env
 from tests.e2e.support.models import Conversation
 
-#: Repo root (…/pyclaudir). The SUT runs with this as its cwd so it picks
+#: Repo root (…/hamroh). The SUT runs with this as its cwd so it picks
 #: up the operator's ``plugins.json`` and ``prompts/``.
 REPO_ROOT = Path(__file__).resolve().parents[3]
 #: ``__main__.py`` logs this exact line once the dispatcher starts polling.
@@ -38,7 +38,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 #: wait for that. What it can't tell us is that the *model* is warm: the first
 #: turn still pays an inference cold-start. So readiness adds a warm-up
 #: round-trip (see ``_warm_up_round_trip``) on top of this line.
-READY_LINE = "pyclaudir is live"
+READY_LINE = "hamroh is live"
 _READY_TIMEOUT_S = 90.0
 #: A first-ever turn is slow: the model spins up (first-token cold-start) before
 #: any reply is produced. The text itself is irrelevant — we just need one turn.
@@ -48,13 +48,13 @@ _LOG_RING = 400  # keep the last N output lines for failure dumps
 #: The bot runs as a subprocess; forward its output through this logger so
 #: pytest's live log (``log_cli``) streams the RX/TX/timing lines as they
 #: happen, not just on failure.
-_SUT_LOG = logging.getLogger("pyclaudir.sut")
+_SUT_LOG = logging.getLogger("hamroh.sut")
 log = logging.getLogger(__name__)
 
 
 @dataclass
 class Sut:
-    """A running pyclaudir subprocess plus the paths a test inspects."""
+    """A running hamroh subprocess plus the paths a test inspects."""
 
     proc: subprocess.Popen[str]
     data_dir: Path
@@ -62,7 +62,7 @@ class Sut:
 
     @property
     def db_path(self) -> Path:
-        return self.data_dir / "pyclaudir.db"
+        return self.data_dir / "hamroh.db"
 
     @property
     def memories_dir(self) -> Path:
@@ -130,21 +130,21 @@ def _finish_readiness(cfg: E2EConfig, sut: Sut) -> None:
     except Exception as exc:
         stop_sut(sut)
         raise RuntimeError(
-            f"pyclaudir warm-up round-trip failed: {exc}\n"
+            f"hamroh warm-up round-trip failed: {exc}\n"
             f"--- last output ---\n{sut.log_tail()}"
         ) from exc
 
 
 def _stray_sut_pids() -> list[int]:
-    """PIDs of leftover ``python -m pyclaudir`` processes (this one excluded).
+    """PIDs of leftover ``python -m hamroh`` processes (this one excluded).
 
-    The bot's argv ends with ``pyclaudir`` so we anchor the pattern there; the
-    ``claude`` child only *contains* "pyclaudir" (inside its system prompt) and
+    The bot's argv ends with ``hamroh`` so we anchor the pattern there; the
+    ``claude`` child only *contains* "hamroh" (inside its system prompt) and
     is correctly skipped. A missing ``pgrep`` or no matches yields an empty list.
     """
     try:
         result = subprocess.run(
-            ["pgrep", "-f", "m pyclaudir$"],
+            ["pgrep", "-f", "m hamroh$"],
             capture_output=True,
             text=True,
             check=False,
@@ -156,7 +156,7 @@ def _stray_sut_pids() -> list[int]:
 
 
 def kill_stray_suts(timeout: float = 10.0) -> None:
-    """SIGTERM any leftover ``python -m pyclaudir`` process before the SUT starts.
+    """SIGTERM any leftover ``python -m hamroh`` process before the SUT starts.
 
     Only one process may poll a bot token, so an orphan from a crashed run (or a
     dev bot) would make Telegram reject the SUT's getUpdates. Runs once per
@@ -166,7 +166,7 @@ def kill_stray_suts(timeout: float = 10.0) -> None:
     pids = _stray_sut_pids()
     if not pids:
         return
-    log.warning("killing stray pyclaudir processes before e2e suite: %s", pids)
+    log.warning("killing stray hamroh processes before e2e suite: %s", pids)
     for pid in pids:
         with contextlib.suppress(ProcessLookupError):
             os.kill(pid, signal.SIGTERM)
@@ -181,7 +181,7 @@ def kill_stray_suts(timeout: float = 10.0) -> None:
 def launch_sut(
     cfg: E2EConfig, data_dir: Path, extra_env: dict[str, str] | None = None
 ) -> Sut:
-    """Start ``python -m pyclaudir`` and block until it is 100% ready.
+    """Start ``python -m hamroh`` and block until it is 100% ready.
 
     Readiness is two-stage: wait for the ``READY_LINE`` (stack up, MCP/tools
     loaded), then drive a warm-up round-trip so the model's first-turn cold-start
@@ -191,7 +191,7 @@ def launch_sut(
     data_dir.mkdir(parents=True, exist_ok=True)
 
     proc = subprocess.Popen(
-        [sys.executable, "-m", "pyclaudir"],
+        [sys.executable, "-m", "hamroh"],
         cwd=REPO_ROOT,
         env=child_env(data_dir, extra_env),
         stdout=subprocess.PIPE,
@@ -207,7 +207,7 @@ def launch_sut(
     if not ready.wait(_READY_TIMEOUT_S):
         stop_sut(sut)
         raise RuntimeError(
-            f"pyclaudir did not become ready in {_READY_TIMEOUT_S:.0f}s\n"
+            f"hamroh did not become ready in {_READY_TIMEOUT_S:.0f}s\n"
             f"--- last output ---\n{sut.log_tail()}"
         )
     _finish_readiness(cfg, sut)

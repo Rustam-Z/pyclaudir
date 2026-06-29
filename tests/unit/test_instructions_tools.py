@@ -10,9 +10,9 @@ from pathlib import Path
 
 import pytest
 
-from pyclaudir.instructions_store import InstructionsStore
-from pyclaudir.tools.base import ToolContext
-from pyclaudir.tools.instructions import (
+from hamroh.instructions_store import InstructionsStore
+from hamroh.tools.base import ToolContext
+from hamroh.tools.instructions import (
     AppendInstructionsArgs,
     AppendInstructionsTool,
     ReadInstructionsArgs,

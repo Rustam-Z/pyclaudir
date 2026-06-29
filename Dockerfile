@@ -6,7 +6,7 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 WORKDIR /app
 COPY pyproject.toml README.md ./
-COPY pyclaudir/ pyclaudir/
+COPY hamroh/ hamroh/
 
 # Create venv and install production dependencies (not dev/test)
 RUN uv venv /app/.venv && \
@@ -40,7 +40,7 @@ WORKDIR /app
 RUN /app/.venv/bin/playwright install --with-deps chromium
 
 # Copy application source, prompts, and skill playbooks
-COPY pyclaudir/ pyclaudir/
+COPY hamroh/ hamroh/
 COPY prompts/system.md prompts/system.md
 COPY skills/ skills/
 
@@ -62,4 +62,4 @@ COPY access.json.example access.json* ./
 VOLUME /app/data
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["python", "-m", "pyclaudir"]
+CMD ["python", "-m", "hamroh"]

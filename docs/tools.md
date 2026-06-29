@@ -4,7 +4,7 @@ This is the canonical list of every tool available to the bot, organised
 by what's on by default and what's opt-in. Each opt-in section names the
 env var(s) that flip the gate.
 
-For Claude Code's full upstream tool catalogue (some of which pyclaudir
+For Claude Code's full upstream tool catalogue (some of which hamroh
 doesn't currently expose) see
 <https://code.claude.com/docs/en/tools-reference>. The
 "Other CC tools you can wire in" section at the bottom of this page
@@ -12,10 +12,10 @@ points at the ones a fork might want to add.
 
 ---
 
-## Always on — pyclaudir built-ins
+## Always on — hamroh built-ins
 
-These are the bot's core surface, served by the local pyclaudir MCP
-server. Auto-discovered from `pyclaudir/tools/*.py` (each tool is a
+These are the bot's core surface, served by the local hamroh MCP
+server. Auto-discovered from `hamroh/tools/*.py` (each tool is a
 `BaseTool` subclass). All available every turn; no env flag needed.
 
 ### Messaging
@@ -200,7 +200,7 @@ spec](https://modelcontextprotocol.io) and Claude Code's
 `--mcp-config` define them. Mixing fields across transports
 (e.g. `command` on an `http` entry) crashes boot.
 
-**`stdio`** — local subprocess (default). pyclaudir spawns the
+**`stdio`** — local subprocess (default). hamroh spawns the
 command, talks over stdin/stdout. Auth via the subprocess `env`
 block.
 
@@ -245,7 +245,7 @@ remote MCP, etc.) where you've already issued a PAT or OAuth token.
 }
 ```
 
-**Auth.** Pyclaudir doesn't manage OAuth flows — supply an
+**Auth.** Hamroh doesn't manage OAuth flows — supply an
 already-issued token via `${VAR}` interpolation. For interactive
 OAuth-managed servers, see Claude Code's MCP docs (it can run the
 flow on your behalf when configured outside `plugins.json`).
@@ -300,10 +300,10 @@ The Telegram-assistant deployment leaves this off and relies on memory
 4. Tail logs — you should see `mcp <name> configured (...)`. If it
    says `skipped (unresolved ${VAR} ...)`, an env var is empty.
 
-### Disabling a built-in pyclaudir tool
+### Disabling a built-in hamroh tool
 
-The built-ins under "Always on — pyclaudir built-ins" are
-auto-discovered from `pyclaudir/tools/*.py` and registered every
+The built-ins under "Always on — hamroh built-ins" are
+auto-discovered from `hamroh/tools/*.py` and registered every
 boot. To hide one (e.g. you don't use polls, or you don't want LaTeX
 rendering eating context), list its name in `builtin_tools_disabled`:
 
@@ -346,7 +346,7 @@ Atlassian's official remote MCP (`https://mcp.atlassian.com/v1/sse`,
 advertise the `mcp__mcp-atlassian` tools on `--allowedTools`.
 
 **Auth is OAuth, not env vars.** The remote server authenticates via
-OAuth, which pyclaudir does not manage. Establish the grant once on the
+OAuth, which hamroh does not manage. Establish the grant once on the
 host with Claude Code (`claude mcp add --transport sse atlassian
 https://mcp.atlassian.com/v1/sse`, then complete the browser login);
 Claude Code reuses the stored token. The headless bot can't run the
@@ -382,7 +382,7 @@ github.com users aren't blocked by an unset var.)
 **How to generate the token (fine-grained PAT — recommended):**
 
 1. Go to <https://github.com/settings/tokens?type=beta>.
-2. **Token name:** `pyclaudir` (or your bot's name).
+2. **Token name:** `hamroh` (or your bot's name).
 3. **Expiration:** 90 days (max for fine-grained). Set a calendar
    reminder to rotate.
 4. **Resource owner:** your account, or the org if the bot acts on
@@ -459,22 +459,22 @@ lines explain each MCP's outcome.
 
 ## Other CC tools you can wire in
 
-pyclaudir doesn't currently expose every Claude Code built-in. Most
+hamroh doesn't currently expose every Claude Code built-in. Most
 omissions are deliberate (planning/team tools that don't fit the
 Telegram-bot context); a fork that wants any of these can add them to
 `BASE_ALLOWED_TOOLS` (always on) or define a new gated set in
-`pyclaudir/cc_worker.py` (opt-in).
+`hamroh/cc_worker.py` (opt-in).
 
 Notable upstream tools not currently exposed:
 
 - **Planning & worktrees** — `EnterPlanMode`, `ExitPlanMode`,
   `EnterWorktree`, `ExitWorktree`. Useful for code-work forks.
 - **Task list** — `TaskCreate`, `TaskGet`, `TaskList`, `TaskUpdate`,
-  `TaskStop`, `TodoWrite`. Replace pyclaudir's progress tracking if
+  `TaskStop`, `TodoWrite`. Replace hamroh's progress tracking if
   you want CC's native version.
 - **Scheduled tasks** — `CronCreate`, `CronDelete`, `CronList`.
   Session-scoped, restored on `--resume`. Could complement
-  pyclaudir's reminder system.
+  hamroh's reminder system.
 - **MCP discovery** — `ListMcpResourcesTool`, `ReadMcpResourceTool`.
   Useful when forks add MCP servers that expose resources beyond
   tools.
@@ -483,7 +483,7 @@ Notable upstream tools not currently exposed:
 - **SendMessage** — agent-team teammate messaging. Experimental;
   requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`.
 - **Skill** — execute a CC-defined skill (different mechanism from
-  pyclaudir's `<reminder><skill>` envelope flow).
+  hamroh's `<reminder><skill>` envelope flow).
 
 For each, the upstream
 <https://code.claude.com/docs/en/tools-reference> is authoritative —

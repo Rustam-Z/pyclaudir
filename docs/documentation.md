@@ -1,4 +1,4 @@
-# pyclaudir documentation
+# hamroh documentation
 
 Deep-dive technical documentation. The README is the high-level intro;
 this is the manual. Read this when you're modifying internals,
@@ -6,7 +6,7 @@ debugging, or auditing.
 
 ## Highlights
 
-The parts of pyclaudir:
+The parts of hamroh:
 
 - Custom MCP tools: Telegram messaging (text/reply/edit/delete/reactions/polls), memory, chat history, web search/fetch
 - Vision + media: read inbound photos/docs/PDFs, render HTML and LaTeX to PNG, send photos back
@@ -52,10 +52,10 @@ The parts of pyclaudir:
 
 ## What gets passed to `claude`
 
-pyclaudir runs Claude inside a long-lived
+hamroh runs Claude inside a long-lived
 `claude --print --input-format stream-json` process and limits what Claude
 can do with the `--allowedTools` and `--disallowedTools` flags. By
-default the bot has only its own MCP tools (in `pyclaudir/tools/`,
+default the bot has only its own MCP tools (in `hamroh/tools/`,
 served by a local MCP server) plus `WebFetch` and `WebSearch`. The
 local server is registered with `alwaysLoad: true` so its tools are
 always in the model's context — never deferred behind Claude Code's
@@ -75,26 +75,26 @@ the repo root:
   carries sample Jira / GitLab / GitHub entries you can keep, edit,
   or delete — they're starting points, not first-class. Add a new
   entry to plug in any other MCP server.
-* `builtin_tools_disabled` — names of pyclaudir built-in tools to
+* `builtin_tools_disabled` — names of hamroh built-in tools to
   hide (e.g. `telegram_create_poll`, `render_html`). Filtered at MCP
   registration time, never advertised to Claude.
 * `skills_disabled` — names of skill directories to hide.
 
 The full per-tool list and the schema reference live in
-[tools.md](tools.md); the loader is `pyclaudir/plugins.py`; the
-allow/deny argv is assembled in `pyclaudir/cc_worker/spec.py`.
+[tools.md](tools.md); the loader is `hamroh/plugins.py`; the
+allow/deny argv is assembled in `hamroh/cc_worker/spec.py`.
 
 ## Full configuration
 
 All settings come from environment variables (or a `.env` file). They are
-read once when the bot starts, in `pyclaudir/config.py` (`Config.from_env`).
+read once when the bot starts, in `hamroh/config.py` (`Config.from_env`).
 The rest of the code reads values from the `Config` object, never from
 `os.environ` directly. To add a new setting, add a field to `Config`
 instead of calling `os.environ.get` from somewhere else. Tests build a
 `Config.for_test(tmp_path)` and set values on it, so they don't depend on
 what's in your environment.
 
-The one allowed exception is `pyclaudir/plugins.py` — it reads
+The one allowed exception is `hamroh/plugins.py` — it reads
 `os.environ` directly to substitute `${VAR}` references in
 `plugins.json` `mcps[].args`, `env`, `url`, and `headers` values.
 That's how an external MCP's credentials reach the spawned server
@@ -104,28 +104,28 @@ into a `Config` field.
 | Variable | Required | Default | Notes |
 |---|---|---|---|
 | `TELEGRAM_BOT_TOKEN` | yes | — | from @BotFather |
-| `PYCLAUDIR_OWNER_ID` | yes | — | your numeric Telegram user id |
-| `PYCLAUDIR_MODEL` | yes | — | which Claude model to use (e.g. `claude-sonnet-4-6`); passed to `--model` |
-| `PYCLAUDIR_EFFORT` | yes | — | how hard Claude thinks; passed to `--effort` (one of `low`, `medium`, `high`, `max`) |
-| `PYCLAUDIR_DATA_DIR` | no | `./data` | SQLite, memories, access config, raw CC logs |
-| `PYCLAUDIR_ACCESS_PATH` | no | repo-root `access.json` | override where `access.json` lives (mainly so the e2e harness can point at a temp file). |
+| `HAMROH_OWNER_ID` | yes | — | your numeric Telegram user id |
+| `HAMROH_MODEL` | yes | — | which Claude model to use (e.g. `claude-sonnet-4-6`); passed to `--model` |
+| `HAMROH_EFFORT` | yes | — | how hard Claude thinks; passed to `--effort` (one of `low`, `medium`, `high`, `max`) |
+| `HAMROH_DATA_DIR` | no | `./data` | SQLite, memories, access config, raw CC logs |
+| `HAMROH_ACCESS_PATH` | no | repo-root `access.json` | override where `access.json` lives (mainly so the e2e harness can point at a temp file). |
 | `CLAUDE_CODE_BIN` | no | `claude` | name or full path of the `claude` program |
-| `PYCLAUDIR_DEBOUNCE_MS` | no | `0` | wait this long after a message before sending it to Claude. Messages that arrive during the wait are bundled into one turn. `0` = send right away. |
-| `PYCLAUDIR_RATE_LIMIT_PER_MIN` | no | `20` | max DMs per minute from one user. The owner is not limited. Group chats are not limited. |
-| `PYCLAUDIR_ATTACHMENT_MAX_BYTES` | no | `20000000` | largest inbound photo/document (20 MB) the bot will download and read; bigger files are refused with a marker. |
-| `PYCLAUDIR_BROWSER_HEADLESS` | no | `true` | run the automation Chromium headless. Set `false` only for local debugging (visible window). |
-| `PYCLAUDIR_STATUS_INTERVAL_SECONDS` | no | `300` | while a turn is still running, ping the waiting chats with a progress note this often (seconds) so a long task isn't silent. |
-| `PYCLAUDIR_PROGRESS_DRAFT_ENABLED` | no | `false` | show a live "working…" draft in DMs while a long turn runs (Telegram's `sendMessageDraft`), updating with elapsed time + current step, then replaced by the real reply. Private chats only — groups keep the typing indicator. |
-| `PYCLAUDIR_SELF_REFLECTION_ENABLED` | no | `false` | master switch for the daily self-reflection loop (off by default). When off, the auto-seeded reflection reminder is removed at boot. |
-| `PYCLAUDIR_SELF_REFLECTION_CRON` | no | `0 0 * * *` | when the daily self-reflection task runs (UTC cron). Default: midnight UTC. Only used when the loop is enabled. |
-| `PYCLAUDIR_LIVENESS_TIMEOUT_SECONDS` | no | `300` | if Claude is mid-turn and goes silent (no output, no tool activity) for this many seconds, the bot kills it and starts it again. |
-| `PYCLAUDIR_LIVENESS_POLL_SECONDS` | no | `30` | how often the watcher wakes up to check the timeout above. |
-| `PYCLAUDIR_TOOL_ERROR_MAX_COUNT` | no | `3` | how many tool errors trigger a stop. Used in two places: (a) failed tool calls in one turn — too many ends the turn; (b) turns where Claude wrote text but didn't call `telegram_send_message` — too many in a row makes the bot show the underlying error to the user. Stops the bot from looping forever on a broken tool or a broken model setup. |
-| `PYCLAUDIR_TOOL_ERROR_WINDOW_SECONDS` | no | `30` | if errors keep arriving for this many seconds after the first one in a turn, end the turn — even below the count above. |
-| `PYCLAUDIR_CRASH_BACKOFF_BASE` | no | `2` | seconds to wait before the first restart after Claude crashes. Doubles after each crash, up to `CRASH_BACKOFF_CAP`. |
-| `PYCLAUDIR_CRASH_BACKOFF_CAP` | no | `64` | maximum wait between restarts. Once the wait reaches this, it stops growing. |
-| `PYCLAUDIR_CRASH_LIMIT` | no | `10` | how many crashes within `CRASH_WINDOW_SECONDS` count as "too many". When reached, the bot tells the owner and active chats, then exits — and something outside (systemd, docker) is expected to restart the whole bot. |
-| `PYCLAUDIR_CRASH_WINDOW_SECONDS` | no | `600` | the time window used for `CRASH_LIMIT`. Only crashes from the last X seconds are counted. |
+| `HAMROH_DEBOUNCE_MS` | no | `0` | wait this long after a message before sending it to Claude. Messages that arrive during the wait are bundled into one turn. `0` = send right away. |
+| `HAMROH_RATE_LIMIT_PER_MIN` | no | `20` | max DMs per minute from one user. The owner is not limited. Group chats are not limited. |
+| `HAMROH_ATTACHMENT_MAX_BYTES` | no | `20000000` | largest inbound photo/document (20 MB) the bot will download and read; bigger files are refused with a marker. |
+| `HAMROH_BROWSER_HEADLESS` | no | `true` | run the automation Chromium headless. Set `false` only for local debugging (visible window). |
+| `HAMROH_STATUS_INTERVAL_SECONDS` | no | `300` | while a turn is still running, ping the waiting chats with a progress note this often (seconds) so a long task isn't silent. |
+| `HAMROH_PROGRESS_DRAFT_ENABLED` | no | `false` | show a live "working…" draft in DMs while a long turn runs (Telegram's `sendMessageDraft`), updating with elapsed time + current step, then replaced by the real reply. Private chats only — groups keep the typing indicator. |
+| `HAMROH_SELF_REFLECTION_ENABLED` | no | `false` | master switch for the daily self-reflection loop (off by default). When off, the auto-seeded reflection reminder is removed at boot. |
+| `HAMROH_SELF_REFLECTION_CRON` | no | `0 0 * * *` | when the daily self-reflection task runs (UTC cron). Default: midnight UTC. Only used when the loop is enabled. |
+| `HAMROH_LIVENESS_TIMEOUT_SECONDS` | no | `300` | if Claude is mid-turn and goes silent (no output, no tool activity) for this many seconds, the bot kills it and starts it again. |
+| `HAMROH_LIVENESS_POLL_SECONDS` | no | `30` | how often the watcher wakes up to check the timeout above. |
+| `HAMROH_TOOL_ERROR_MAX_COUNT` | no | `3` | how many tool errors trigger a stop. Used in two places: (a) failed tool calls in one turn — too many ends the turn; (b) turns where Claude wrote text but didn't call `telegram_send_message` — too many in a row makes the bot show the underlying error to the user. Stops the bot from looping forever on a broken tool or a broken model setup. |
+| `HAMROH_TOOL_ERROR_WINDOW_SECONDS` | no | `30` | if errors keep arriving for this many seconds after the first one in a turn, end the turn — even below the count above. |
+| `HAMROH_CRASH_BACKOFF_BASE` | no | `2` | seconds to wait before the first restart after Claude crashes. Doubles after each crash, up to `CRASH_BACKOFF_CAP`. |
+| `HAMROH_CRASH_BACKOFF_CAP` | no | `64` | maximum wait between restarts. Once the wait reaches this, it stops growing. |
+| `HAMROH_CRASH_LIMIT` | no | `10` | how many crashes within `CRASH_WINDOW_SECONDS` count as "too many". When reached, the bot tells the owner and active chats, then exits — and something outside (systemd, docker) is expected to restart the whole bot. |
+| `HAMROH_CRASH_WINDOW_SECONDS` | no | `600` | the time window used for `CRASH_LIMIT`. Only crashes from the last X seconds are counted. |
 External-service credentials referenced by the default `plugins.json`
 via `${VAR}`. Set these in `.env` to make the corresponding MCP
 spawn; clear them to silently skip its MCP at boot.
@@ -151,12 +151,12 @@ Telegram listener  →  Engine (buffer + send/inject)  →  Claude worker  →  
                                SQLite                                   MCP server (HTTP, localhost:0)
 ```
 
-1. **Telegram listener** (`pyclaudir/telegram_io/`). Uses
+1. **Telegram listener** (`hamroh/telegram_io/`). Uses
    python-telegram-bot v21 in polling mode. For each message it does two
    things: save it to SQLite, then hand it to the engine. Owner-only
    commands (`/kill`, `/health`, `/audit`, the access commands) skip the
    engine and run directly.
-2. **Engine** (`pyclaudir/engine/`). Holds the pending message buffer,
+2. **Engine** (`hamroh/engine/`). Holds the pending message buffer,
    the debounce timer, the mid-turn processing flag, and the inject path.
    Bundles messages that arrive close together. If a new message comes in
    while Claude is mid-reply, the engine sends it via `worker.inject()` so
@@ -164,16 +164,16 @@ Telegram listener  →  Engine (buffer + send/inject)  →  Claude worker  →  
    `telegram_send_message` call (we call this "dropped text"), the engine sends a
    corrective `<error>...</error>` block to nudge Claude into using the
    tool.
-3. **Claude worker** (`pyclaudir/cc_worker/`). Starts the `claude`
+3. **Claude worker** (`hamroh/cc_worker/`). Starts the `claude`
    process and watches it. Reads stream-json events from stdout, saves
    stderr for diagnostics, stores `session_id` so a restart can resume
    the same conversation, and starts Claude again after a crash —
    waiting longer each time (`CRASH_BACKOFF_BASE`=2s up to
    `CRASH_BACKOFF_CAP`=64s, with a give-up after `CRASH_LIMIT`=10
    crashes in `CRASH_WINDOW_SECONDS`=600s).
-4. **MCP server** (`pyclaudir/mcp_server.py`). A FastMCP server on a
+4. **MCP server** (`hamroh/mcp_server.py`). A FastMCP server on a
    random port on `127.0.0.1`. It finds every `BaseTool` subclass in
-   `pyclaudir/tools/` and registers it. It writes a small JSON config
+   `hamroh/tools/` and registers it. It writes a small JSON config
    file so Claude can connect via `--mcp-config`.
 
 ## Known limitations
@@ -187,7 +187,7 @@ sit in the buffer and only go through after the current turn ends.
 
 So a 3-minute code review for Chat A will delay replies to Chat B by up
 to 3 minutes. For one user or a small group, this is fine. For busy
-setups with many chats, run a separate pyclaudir for each chat group.
+setups with many chats, run a separate hamroh for each chat group.
 
 The system prompt tells the bot to send a quick "On it, reviewing
 now..." reply via `telegram_send_message` before it starts a long task, so users
@@ -195,12 +195,12 @@ know the bot got their message even when the full reply takes time.
 
 ## Adding a new tool
 
-Drop a single file in `pyclaudir/tools/`. No core code changes:
+Drop a single file in `hamroh/tools/`. No core code changes:
 
 ```python
-# pyclaudir/tools/echo.py
+# hamroh/tools/echo.py
 from pydantic import BaseModel, Field
-from pyclaudir.tools.base import BaseTool, ToolResult
+from hamroh.tools.base import BaseTool, ToolResult
 
 
 class EchoArgs(BaseModel):
@@ -216,7 +216,7 @@ class EchoTool(BaseTool):
         return ToolResult(content=args.text)
 ```
 
-Restart `python -m pyclaudir`. The tool is live.
+Restart `python -m hamroh`. The tool is live.
 
 ## Access control
 
@@ -254,7 +254,7 @@ fully silent. Server-side logs continue to record every attempt.
 ### Owner commands
 
 Owner-only — silently no-op for everyone else. `update.effective_user.id
-== PYCLAUDIR_OWNER_ID` is the actual gate; `BotCommandScopeChat` just
+== HAMROH_OWNER_ID` is the actual gate; `BotCommandScopeChat` just
 hides the `/` menu from non-owners.
 
 ```
@@ -283,10 +283,10 @@ hides the `/` menu from non-owners.
 
 Application logs are written two ways: human-readable text to the console
 (captured by `docker logs`) and a structured JSON line per record to
-`data/logs/pyclaudir.log` (rotated daily, 7 days kept). Each JSON record carries
+`data/logs/hamroh.log` (rotated daily, 7 days kept). Each JSON record carries
 `ts`, `level`, `component` (derived from the logger — `dispatcher`, `cc_worker`,
 `tx`, `mcp`, `reminder`, …), `logger`, and `msg`. The root level is set by
-`PYCLAUDIR_LOG_LEVEL` (default `INFO`); `/logs` tails this file from Telegram.
+`HAMROH_LOG_LEVEL` (default `INFO`); `/logs` tails this file from Telegram.
 
 Edit `access.json` directly if you prefer — changes are hot-reloaded.
 
@@ -383,7 +383,7 @@ by name via `builtin_tools_disabled` in `plugins.json`.
 
 A daily two-phase loop that drives self-improvement. Triggered by an
 auto-seeded recurring reminder (default midnight UTC every day; override
-with `PYCLAUDIR_SELF_REFLECTION_CRON`):
+with `HAMROH_SELF_REFLECTION_CRON`):
 
 - **Phase A — introspect.** Bot reads the last 24h of outbound messages
   + their reactions via `database_query`, applies a checklist (over-long
@@ -476,7 +476,7 @@ The SkillsStore auto-discovers any first-level directory that contains a
 schedule:
 
 1. To make the skill fire daily/weekly, add an auto-seeded reminder in
-   `_seed_default_reminders` (`pyclaudir/__main__.py`) with a unique
+   `_seed_default_reminders` (`hamroh/__main__.py`) with a unique
    `auto_seed_key` (e.g. `"your-skill-default"`).
 2. Add a migration if you need new DB columns/tables.
 3. Remember: auto-seeded reminders are protected by default —
@@ -522,7 +522,7 @@ reminders.
 
 The system prompt is assembled from two files:
 
-1. **`prompts/system.md`** — generic pyclaudir template covering tool
+1. **`prompts/system.md`** — generic hamroh template covering tool
    discipline, message format, memory, reminders, and prompt-injection
    resistance. Ships with the repo.
 2. **`prompts/project.md`** — project-specific overlay (identity,
@@ -534,7 +534,7 @@ If `project.md` doesn't exist, only the base prompt is used.
 
 ## External MCP integrations
 
-pyclaudir can optionally connect to external MCP servers alongside
+hamroh can optionally connect to external MCP servers alongside
 its own. There's no built-in integration list — every external MCP
 is just an entry in `plugins.json` `mcps[]`. The shipped
 `plugins.json.example` includes three sample entries you can keep,
@@ -565,7 +565,7 @@ shape.
 
 ## Monitoring & observability
 
-Pyclaudir gives you **four complementary windows** into what the bot is
+Hamroh gives you **four complementary windows** into what the bot is
 doing. Pick whichever fits the moment.
 
 ### 1. The live tagged log (the running terminal)
@@ -573,7 +573,7 @@ doing. Pick whichever fits the moment.
 When the bot is running, the foreground terminal prints two streams of
 structured tag lines on top of the usual lifecycle messages:
 
-**Conversation transcript** (`pyclaudir.tx` logger):
+**Conversation transcript** (`hamroh.tx` logger):
 
 | Tag | Meaning |
 |---|---|
@@ -583,7 +583,7 @@ structured tag lines on top of the usual lifecycle messages:
 | `[TX]` | outbound `telegram_send_message` / `telegram_reply_to_message` |
 | `[EDIT]` / `[DEL]` / `[REACT]` | outbound edits, deletions, reactions |
 
-**Claude Code subprocess transcript** (`pyclaudir.cc` logger):
+**Claude Code subprocess transcript** (`hamroh.cc` logger):
 
 | Tag | Meaning |
 |---|---|
@@ -596,26 +596,26 @@ structured tag lines on top of the usual lifecycle messages:
 Sample (DM with one message):
 
 ```
-21:34:12 INFO  pyclaudir.tx       [RX] DM Alice[12345] m42 | how fast are you
-21:34:12 INFO  pyclaudir.engine   starting turn with 1 msgs
-21:34:12 INFO  pyclaudir.cc       [CC.user] <msg id="42" chat="12345" ...>↵how fast are you↵</msg>
-21:34:13 INFO  pyclaudir.cc       [CC.tool→] mcp__pyclaudir__send_message({"chat_id":12345,"text":"Honestly?…"}) id=toolu_01
-21:34:14 INFO  pyclaudir.tx       [TX] DM Alice[12345] m43 | Honestly? Not blazing fast 😅 …
-21:34:14 INFO  pyclaudir.cc       [CC.tool✓] id=toolu_01 | sent message_id=43
-21:34:14 INFO  pyclaudir.cc       [CC.done]  action=stop reason=Answered the user's question
+21:34:12 INFO  hamroh.tx       [RX] DM Alice[12345] m42 | how fast are you
+21:34:12 INFO  hamroh.engine   starting turn with 1 msgs
+21:34:12 INFO  hamroh.cc       [CC.user] <msg id="42" chat="12345" ...>↵how fast are you↵</msg>
+21:34:13 INFO  hamroh.cc       [CC.tool→] mcp__hamroh__send_message({"chat_id":12345,"text":"Honestly?…"}) id=toolu_01
+21:34:14 INFO  hamroh.tx       [TX] DM Alice[12345] m43 | Honestly? Not blazing fast 😅 …
+21:34:14 INFO  hamroh.cc       [CC.tool✓] id=toolu_01 | sent message_id=43
+21:34:14 INFO  hamroh.cc       [CC.done]  action=stop reason=Answered the user's question
 ```
 
 The `httpx`/`mcp` per-poll noise is silenced by default. To bring it
 back for debugging, comment the relevant lines in
-`pyclaudir/startup.py:_setup_logging()`.
+`hamroh/startup.py:_setup_logging()`.
 
-### 2. The replayable session viewer (`pyclaudir.scripts.trace`)
+### 2. The replayable session viewer (`hamroh.scripts.trace`)
 
 Claude Code persists every CC session as a JSONL file at
 `~/.claude/projects/<encoded-project-dir>/<session_id>.jsonl`, where
 `<encoded-project-dir>` is the absolute project path with every
-non-alphanumeric character replaced by `-` (e.g. `/home/alice/pyclaudir`
-→ `-home-alice-pyclaudir`). `pyclaudir.scripts.trace` computes this
+non-alphanumeric character replaced by `-` (e.g. `/home/alice/hamroh`
+→ `-home-alice-hamroh`). `hamroh.scripts.trace` computes this
 automatically from the cwd; override with `CLAUDE_PROJECT_DIR` if
 needed. This is the **complete conversation log** — every user
 envelope, every assistant message, every tool_use, every tool_result,
@@ -625,24 +625,24 @@ Render it as a human-readable transcript:
 
 ```bash
 # List every session in the project dir; the bot's file is marked
-uv run python -m pyclaudir.scripts.trace --list
+uv run python -m hamroh.scripts.trace --list
 
 # Replay the bot's session (resolved via data/session_id, NOT
 # "most-recent-file" — important if you also have your own Claude Code
 # session running in the same cwd)
-uv run python -m pyclaudir.scripts.trace
+uv run python -m hamroh.scripts.trace
 
 # Replay one specific session
-uv run python -m pyclaudir.scripts.trace --session 87f472fa-5e1a-48d6-bddc-824efca1fea5
+uv run python -m hamroh.scripts.trace --session 87f472fa-5e1a-48d6-bddc-824efca1fea5
 
 # Tail the bot's running session live (refreshes every 0.5s)
-uv run python -m pyclaudir.scripts.trace --follow
+uv run python -m hamroh.scripts.trace --follow
 
 # Truncate huge text blocks
-uv run python -m pyclaudir.scripts.trace --max 200
+uv run python -m hamroh.scripts.trace --max 200
 
 # Escape hatch: pick the most-recently-modified JSONL regardless of owner
-uv run python -m pyclaudir.scripts.trace --latest --follow
+uv run python -m hamroh.scripts.trace --latest --follow
 ```
 
 The default picker reads `data/session_id` first, then falls back to
@@ -652,13 +652,13 @@ renderer from accidentally tailing your own Claude Code session that
 happens to be the most recently modified file in the same project
 directory.
 
-The renderer is **read-only** and never touches the running pyclaudir
+The renderer is **read-only** and never touches the running hamroh
 process — totally safe to run in a second terminal while the bot is
 live.
 
 ### 3. The raw wire-stream capture (`data/cc_logs/`)
 
-Independent from Claude Code's own session JSONL, pyclaudir also
+Independent from Claude Code's own session JSONL, hamroh also
 captures the raw bytes coming out of the CC subprocess on stdout/stderr
 to:
 
@@ -687,26 +687,26 @@ respawns of the same session, and survive crashes.
 ### 4. SQLite — auditable, queryable history
 
 Everything that touches Telegram or any MCP tool is in
-`data/pyclaudir.db`. Useful one-liners:
+`data/hamroh.db`. Useful one-liners:
 
 ```bash
 # Last 10 messages in/out (from any chat)
-sqlite3 data/pyclaudir.db \
+sqlite3 data/hamroh.db \
   "SELECT direction, chat_id, user_id, substr(text,1,80) AS text
    FROM messages ORDER BY timestamp DESC LIMIT 10;"
 
 # Every MCP tool call the bot has made (newest first)
-sqlite3 data/pyclaudir.db \
+sqlite3 data/hamroh.db \
   "SELECT created_at, tool_name, duration_ms, error
    FROM tool_calls ORDER BY id DESC LIMIT 20;"
 
 # Per-user activity in a specific chat
-sqlite3 data/pyclaudir.db \
+sqlite3 data/hamroh.db \
   "SELECT username, first_name, message_count, last_message_date
    FROM users WHERE chat_id = 12345 ORDER BY message_count DESC;"
 
 # Find every reply chain involving a specific user
-sqlite3 data/pyclaudir.db \
+sqlite3 data/hamroh.db \
   "SELECT message_id, reply_to_id, substr(text,1,100)
    FROM messages WHERE user_id = 12345 AND reply_to_id IS NOT NULL;"
 ```
@@ -721,14 +721,14 @@ Drop into the bot's *exact* conversation state in a real Claude Code
 interactive session:
 
 ```bash
-# Stop pyclaudir first, OR use --fork-session to branch safely
+# Stop hamroh first, OR use --fork-session to branch safely
 claude --resume $(cat data/session_id)
 ```
 
 You're now talking to Claude Code with the bot's full history loaded.
 Ask "why did you reply that way to message 591?" and you'll get its
 perspective on its own past turns. ⚠️ Don't run this on the same
-session id as a live pyclaudir process unless you pass `--fork-session`.
+session id as a live hamroh process unless you pass `--fork-session`.
 
 ### Cheatsheet
 
@@ -736,10 +736,10 @@ session id as a live pyclaudir process unless you pass `--fork-session`.
 |---|---|
 | Who said what to who right now | the foreground terminal (`[RX]`/`[TX]` lines) |
 | Which tools is it calling and why | the foreground terminal (`[CC.tool→]`/`[CC.done]` lines) |
-| The full story of a past conversation | `python -m pyclaudir.scripts.trace --session <sid>` |
+| The full story of a past conversation | `python -m hamroh.scripts.trace --session <sid>` |
 | Whether the parser is missing events | `data/cc_logs/<sid>.stream.jsonl` |
 | Whether CC is hitting rate limits | `data/cc_logs/<sid>.stderr.log` |
-| Aggregate stats / cross-session queries | `sqlite3 data/pyclaudir.db` |
+| Aggregate stats / cross-session queries | `sqlite3 data/hamroh.db` |
 | What it would say *now* about its own history | `claude --resume $(cat data/session_id) --fork-session` |
 
 ## Security model
@@ -751,7 +751,7 @@ is enforced by code, not by hope, and tested in
 
 - **No shell, no edits, no writes outside `memories/`, no general reads
   outside `memories/`, no subagents — by default.** The CC subprocess
-  is spawned with `--allowedTools mcp__pyclaudir,WebFetch,WebSearch`
+  is spawned with `--allowedTools mcp__hamroh,WebFetch,WebSearch`
   (the always-on base) and a deny list covering every gated tool:
   `--disallowedTools Bash,PowerShell,Monitor,Edit,Write,Read,
   NotebookEdit,Glob,Grep,LSP,Agent --strict-mcp-config`. Each gated
@@ -771,8 +771,8 @@ is enforced by code, not by hope, and tested in
   the bot on a host with sensitive internal endpoints reachable from
   the same network.**
 - **MCP namespace lockdown.** The local MCP server is registered as
-  `pyclaudir`, so every pyclaudir tool Claude sees is named
-  `mcp__pyclaudir__<x>`. The two web tools are Claude Code built-ins,
+  `hamroh`, so every hamroh tool Claude sees is named
+  `mcp__hamroh__<x>`. The two web tools are Claude Code built-ins,
   not MCP tools, so they show up unprefixed (`WebFetch`, `WebSearch`).
 - **Memory writes with safety rails.** `memory_write` and
   `memory_append` exist, but are guarded by:
@@ -790,11 +790,11 @@ is enforced by code, not by hope, and tested in
   module.
 - **No subprocess calls in tools.** AST scan rejects `subprocess.*`,
   `os.system`, `os.popen`, `asyncio.create_subprocess_*` anywhere
-  under `pyclaudir/tools/`. The *only* place those primitives are
+  under `hamroh/tools/`. The *only* place those primitives are
   allowed is `cc_worker/worker.py`, which spawns `claude` itself.
 - **Owner-only privileged commands.** `/kill`, `/health`, `/audit`,
   `/access`, `/allow`, `/deny`, `/policy` check
-  `update.effective_user.id == PYCLAUDIR_OWNER_ID` before running and
+  `update.effective_user.id == HAMROH_OWNER_ID` before running and
   silently no-op for anyone else.
 - **`database_query` is read-only.** Inputs are parsed with `sqlglot` and
   rejected unless they're a single SELECT. CTEs are walked
@@ -807,7 +807,7 @@ is enforced by code, not by hope, and tested in
   `engine.submit()`: over-limit DMs are still persisted (audit trail)
   but never reach the CC subprocess. **Groups are not rate-limited** —
   noisy users in groups are the group's problem. **The owner
-  (`PYCLAUDIR_OWNER_ID`) is fully exempt** — the counter never ticks
+  (`HAMROH_OWNER_ID`) is fully exempt** — the counter never ticks
   for the owner. When a user exhausts their bucket they get one
   Telegram notice ("you're sending too fast…") then the bot goes quiet
   until the bucket rolls over.
@@ -830,15 +830,15 @@ is enforced by code, not by hope, and tested in
   agent to treat instructions in flagged messages as adversarial.
 - **Wedged-subprocess detection.** `CcWorker._liveness_loop` watches
   for silent-mid-turn subprocesses: if `max(last stdout event, last
-  MCP tool call) < now - PYCLAUDIR_LIVENESS_TIMEOUT_SECONDS` (default
+  MCP tool call) < now - HAMROH_LIVENESS_TIMEOUT_SECONDS` (default
   300s) and a turn is in progress, the subprocess is terminated so
   the crash-recovery path respawns it with the same session id.
   Doesn't fire when idle (silence is expected between turns).
 - **Tool-error circuit breaker.** A stream-json `tool_result` with
   `is_error=true` increments a per-turn counter in `CcWorker`; when
-  the counter hits `PYCLAUDIR_TOOL_ERROR_MAX_COUNT` (default 3) or
+  the counter hits `HAMROH_TOOL_ERROR_MAX_COUNT` (default 3) or
   the first-error window exceeds
-  `PYCLAUDIR_TOOL_ERROR_WINDOW_SECONDS` (default 30s), the worker
+  `HAMROH_TOOL_ERROR_WINDOW_SECONDS` (default 30s), the worker
   puts a sentinel `TurnResult` on the result queue and schedules
   `_terminate_proc`. The engine unblocks immediately; `_on_cc_crash`
   notifies the user on respawn. Prevents Claude from burning minutes
@@ -847,11 +847,11 @@ is enforced by code, not by hope, and tested in
 - **Dropped-text retry cap.** A turn that ends with text blocks but
   no `telegram_send_message` call (`dropped_text=True`) increments
   `Engine._dropped_text_retries` — a *cross-turn* counter that
-  shares the `PYCLAUDIR_TOOL_ERROR_MAX_COUNT` ceiling with the
+  shares the `HAMROH_TOOL_ERROR_MAX_COUNT` ceiling with the
   tool-error breaker. Below the cap the engine injects a corrective
   `<error>Use telegram_send_message</error>`; at the cap it calls
   `classify_cc_failure` on the text blocks, surfaces a targeted
-  message (e.g. "model unavailable — fix `PYCLAUDIR_MODEL`") to the
+  message (e.g. "model unavailable — fix `HAMROH_MODEL`") to the
   user, and resets. Catches CC-native diagnostics (invalid model,
   auth failure, quota) that would otherwise loop silently.
 - **Crash-loop terminal notification.** When the crash budget
@@ -861,7 +861,7 @@ is enforced by code, not by hope, and tested in
   + any active chats get a clear "I'm shutting down, operator needs
   to intervene" message (classified where possible) instead of the
   supervisor task dying silently.
-- **Failure classifier.** `pyclaudir/cc_failure_classifier.py` is the
+- **Failure classifier.** `hamroh/cc_failure_classifier.py` is the
   single authoritative mapping from CC stderr / text blocks to
   user-facing messages. Used by the engine's post-turn stderr sweep,
   the dropped-text handler, the on_crash hook, and the on_giveup
@@ -876,7 +876,7 @@ is enforced by code, not by hope, and tested in
   prompt. Code rails that DO enforce: the file path is hardcoded,
   the size cap (128 KiB), atomic write, and a timestamped backup
   before every append. Revert is `mv <backup> prompts/project.md &&
-  docker compose restart pyclaudir`. Edits take effect on the next
+  docker compose restart hamroh`. Edits take effect on the next
   CC spawn, not mid-session, which gives the operator a natural
   review window.
 - **Skills are operator-curated playbooks.** Markdown files under
@@ -904,8 +904,8 @@ Once configured, you should be able to:
 3. Send 5 messages in 2 seconds, see them batched into one turn
    (debounce).
 4. Send a 6th message *while* it's mid-turn, see it injected.
-5. `sqlite3 data/pyclaudir.db 'SELECT direction, text FROM messages ORDER BY timestamp DESC LIMIT 10;'`
-6. Drop `pyclaudir/tools/echo.py` (above), restart, and watch the bot
+5. `sqlite3 data/hamroh.db 'SELECT direction, text FROM messages ORDER BY timestamp DESC LIMIT 10;'`
+6. Drop `hamroh/tools/echo.py` (above), restart, and watch the bot
    gain the new tool with zero other code changes.
 7. `kill -9 $(pgrep -f 'claude --print')`, watch the worker respawn
    within seconds and resume the conversation.
@@ -967,7 +967,7 @@ One file, four blocks. Edit and restart to apply.
     }
     // …Notion, Slack, Postgres, Playwright, your own — same shape; sse also supported
   ],
-  "builtin_tools_disabled": [ // pyclaudir built-ins to hide from the agent
+  "builtin_tools_disabled": [ // hamroh built-ins to hide from the agent
     // e.g. "telegram_create_poll", "telegram_stop_poll", "render_html", "render_latex", "telegram_send_photo"
   ],
   "skills_disabled": [       // skill directories under skills/ to hide
@@ -977,14 +977,14 @@ One file, four blocks. Edit and restart to apply.
 ```
 
 - **Tool groups.** Claude Code's dangerous built-ins (shell / code edit / subagents). All off by default. Flip to `true` and restart to unlock.
-- **External MCPs.** Three transports supported, exactly as the [MCP spec](https://modelcontextprotocol.io) defines them: `stdio` (local subprocess, auth via `env`), `http` (remote streamable HTTP, auth via static `headers`), and `sse` (Server-Sent Events, same field shape as http). `${VAR}` references pull credentials from `.env`; if any required var is empty the MCP is silently skipped at boot. To stop advertising one without removing credentials, flip `"enabled": false`. Adding a new MCP (Linear, Notion, Slack, your own) is just a new array entry — no Python. Pyclaudir doesn't manage OAuth flows; supply an already-issued token via `${VAR}`.
-- **Built-in tool toggles.** Names of pyclaudir built-ins (e.g. `telegram_create_poll`, `render_latex`) you want hidden. Filtered at MCP registration — the agent literally can't see them. A typo crashes boot with the available list.
+- **External MCPs.** Three transports supported, exactly as the [MCP spec](https://modelcontextprotocol.io) defines them: `stdio` (local subprocess, auth via `env`), `http` (remote streamable HTTP, auth via static `headers`), and `sse` (Server-Sent Events, same field shape as http). `${VAR}` references pull credentials from `.env`; if any required var is empty the MCP is silently skipped at boot. To stop advertising one without removing credentials, flip `"enabled": false`. Adding a new MCP (Linear, Notion, Slack, your own) is just a new array entry — no Python. Hamroh doesn't manage OAuth flows; supply an already-issued token via `${VAR}`.
+- **Built-in tool toggles.** Names of hamroh built-ins (e.g. `telegram_create_poll`, `render_latex`) you want hidden. Filtered at MCP registration — the agent literally can't see them. A typo crashes boot with the available list.
 - **Skill toggles.** Directory names under `skills/` to hide. The skill stays on disk but isn't listed or readable, so it can't be invoked.
 
 ## Repo layout
 
 ```
-pyclaudir/
+hamroh/
 ├── pyproject.toml
 ├── README.md
 ├── docs/
@@ -999,7 +999,7 @@ pyclaudir/
 ├── access.json                 # DM policy + allowed users/chats (gitignored, hot-reloaded)
 ├── access.json.example         # template for access.json
 ├── prompts/
-│   ├── system.md               # generic pyclaudir system prompt (shipped)
+│   ├── system.md               # generic hamroh system prompt (shipped)
 │   ├── project.md              # project-specific overlay (gitignored)
 │   └── project.md.example      # template for project.md
 ├── skills/                     # agent skills (playbooks, shipped)
@@ -1011,7 +1011,7 @@ pyclaudir/
 │       ├── SKILL.md            #     tokens + 3 HTML skeletons
 │       └── README.md
 ├── data/                       # gitignored
-│   ├── pyclaudir.db            # SQLite (messages, users, tool_calls, ...)
+│   ├── hamroh.db            # SQLite (messages, users, tool_calls, ...)
 │   ├── session_id              # CC session id for --resume
 │   ├── memories/               # the agent's working memory
 │   ├── attachments/            # inbound photos/docs the dispatcher saves
@@ -1021,7 +1021,7 @@ pyclaudir/
 ├── scripts/
 │   ├── sync-memories.sh        # rsync helper for server ↔ local sync
 │   └── prune-backups.sh        # archive stale prompt backups (keep newest 50)
-├── pyclaudir/
+├── hamroh/
 │   ├── __main__.py             # entrypoint: reminder loop + async main
 │   ├── startup.py              # boot wiring: stores, MCP, spec, callbacks, teardown
 │   ├── access.py               # hot-reloadable access.json gate

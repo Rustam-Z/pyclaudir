@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-import pyclaudir.scripts.trace as trace_mod
+import hamroh.scripts.trace as trace_mod
 
 
 def _write_jsonl(path: Path, events: list[dict]) -> None:
@@ -45,7 +45,7 @@ def patched_dirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path,
     data_dir.mkdir()
 
     monkeypatch.setattr(trace_mod, "PROJECT_DIR", project_dir)
-    monkeypatch.setenv("PYCLAUDIR_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("HAMROH_DATA_DIR", str(data_dir))
     return project_dir, data_dir
 
 
@@ -94,7 +94,7 @@ def test_returns_none_when_dir_missing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(trace_mod, "PROJECT_DIR", tmp_path / "does_not_exist")
-    monkeypatch.setenv("PYCLAUDIR_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("HAMROH_DATA_DIR", str(tmp_path / "data"))
     assert trace_mod.find_bot_session() is None
 
 

@@ -1,7 +1,7 @@
 # scripts/
 
 Operator helpers — shell scripts run by hand on the host (not by the
-bot). Python scripts the bot uses live in `pyclaudir/scripts/`.
+bot). Python scripts the bot uses live in `hamroh/scripts/`.
 
 | Script | What it does |
 |---|---|

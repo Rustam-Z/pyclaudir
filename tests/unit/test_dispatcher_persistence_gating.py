@@ -14,12 +14,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from pyclaudir.access import AccessConfig, save_access
-from pyclaudir.config import Config
-from pyclaudir.db.database import Database
-from pyclaudir.db.messages import insert_message
-from pyclaudir.models import ChatMessage
-from pyclaudir.telegram_io import DispatcherDeps, TelegramDispatcher
+from hamroh.access import AccessConfig, save_access
+from hamroh.config import Config
+from hamroh.db.database import Database
+from hamroh.db.messages import insert_message
+from hamroh.models import ChatMessage
+from hamroh.telegram_io import DispatcherDeps, TelegramDispatcher
 
 
 OWNER = 42
@@ -223,7 +223,7 @@ async def test_disallowed_edit_does_not_call_mark_edited(tmp_path: Path) -> None
     try:
         dispatcher = _dispatcher(_cfg(tmp_path), db)
         with patch(
-            "pyclaudir.telegram_io.dispatcher.mark_edited", new=AsyncMock()
+            "hamroh.telegram_io.dispatcher.mark_edited", new=AsyncMock()
         ) as patched:
             await dispatcher._on_edited(
                 _edit_update(
@@ -260,7 +260,7 @@ async def test_disallowed_reaction_does_not_mutate_db(tmp_path: Path) -> None:
         )
         dispatcher = _dispatcher(_cfg(tmp_path), db)
         with patch(
-            "pyclaudir.telegram_io.dispatcher.apply_user_reaction",
+            "hamroh.telegram_io.dispatcher.apply_user_reaction",
             new=AsyncMock(),
         ) as patched:
             await dispatcher._on_reaction(

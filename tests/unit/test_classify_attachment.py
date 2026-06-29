@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from pyclaudir.telegram_io.attachments import _classify_attachment
+from hamroh.telegram_io.attachments import _classify_attachment
 
 
 @pytest.mark.parametrize("ext", ["jpg", "jpeg", "png", "webp", "gif"])

@@ -7,7 +7,7 @@ shape → Claude Code accepts and connects → MCP server responds.
 
 Run as part of the regular suite. Requirements:
 
-* the ``claude`` CLI on ``$PATH`` (a hard prerequisite for pyclaudir
+* the ``claude`` CLI on ``$PATH`` (a hard prerequisite for hamroh
   itself, so any dev environment that runs this repo's tests already
   has it). If genuinely missing, the test skips with a clear message
   rather than failing.
@@ -16,7 +16,7 @@ Run as part of the regular suite. Requirements:
 
 If DeepWiki's backend 500s mid-test, the second test marks itself
 ``xfail`` rather than failing the suite — the goal is to validate
-pyclaudir's plumbing, not their uptime.
+hamroh's plumbing, not their uptime.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ from pathlib import Path
 
 import pytest
 
-from pyclaudir.plugins import load_plugins
+from hamroh.plugins import load_plugins
 
 pytestmark = pytest.mark.skipif(
     shutil.which("claude") is None,
@@ -58,7 +58,7 @@ def _build_mcp_config(plugin_name: str, plugins_path: Path) -> Path:
             entry["headers"] = dict(target.headers)
 
     cfg = {"mcpServers": {target.name: entry}}
-    out = Path(tempfile.mktemp(suffix=".json", prefix="pyclaudir-it-"))
+    out = Path(tempfile.mktemp(suffix=".json", prefix="hamroh-it-"))
     out.write_text(json.dumps(cfg, indent=2))
     return out
 
@@ -69,7 +69,7 @@ def _run_claude(
     """Invoke ``claude --print`` headlessly with the given MCP config.
 
     Returns stdout. Pins the test to Sonnet at low effort for speed
-    and cost; pyclaudir itself can still run Opus in production.
+    and cost; hamroh itself can still run Opus in production.
     """
     proc = subprocess.run(
         [
@@ -124,7 +124,7 @@ def deepwiki_config(tmp_path_factory) -> Path:
 
 
 def test_http_transport_lists_deepwiki_tools(deepwiki_config: Path) -> None:
-    """Claude Code accepts the HTTP-transport config pyclaudir produces,
+    """Claude Code accepts the HTTP-transport config hamroh produces,
     connects to DeepWiki, and the three known tools are reachable.
 
     This validates the entire wire format end-to-end. If DeepWiki ever
@@ -151,7 +151,7 @@ def test_http_transport_real_tool_call(deepwiki_config: Path) -> None:
 
     ``read_wiki_structure`` is the lightest DeepWiki tool — it just
     returns page titles, no LLM-side processing on their end. If
-    pyclaudir's config-dict shape is even slightly wrong, Claude
+    hamroh's config-dict shape is even slightly wrong, Claude
     Code will refuse to call the tool or the server will reject it.
     """
     output = _run_claude(
@@ -165,7 +165,7 @@ def test_http_transport_real_tool_call(deepwiki_config: Path) -> None:
     if "500" in output and (
         "Internal Server Error" in output or "transient" in output.lower()
     ):
-        pytest.xfail("DeepWiki backend returned 500 — server-side issue, not pyclaudir")
+        pytest.xfail("DeepWiki backend returned 500 — server-side issue, not hamroh")
     # The repo's wiki has known top-level pages like "Overview" or
     # "FastMCP Server Framework". We don't pin the exact string (their
     # wiki structure can drift); just assert we got *something* that

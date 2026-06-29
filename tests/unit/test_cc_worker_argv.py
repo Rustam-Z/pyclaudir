@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from pyclaudir.cc_schema import CONTROL_ACTION_SCHEMA, schema_json
-from pyclaudir.cc_worker import (
+from hamroh.cc_schema import CONTROL_ACTION_SCHEMA, schema_json
+from hamroh.cc_worker import (
     CcSpawnSpec,
     CcWorker,
     FORBIDDEN_FLAG,
@@ -22,7 +22,7 @@ from pyclaudir.cc_worker import (
     WorkerHooks,
     build_argv,
 )
-from pyclaudir.config import Config
+from hamroh.config import Config
 
 
 @pytest.fixture()
@@ -100,7 +100,7 @@ def test_control_schema_is_strict() -> None:
 
 
 def test_control_action_requires_reason_only_on_stop() -> None:
-    from pyclaudir.models import ControlAction
+    from hamroh.models import ControlAction
     import pytest
 
     # stop without reason → rejected
@@ -171,7 +171,7 @@ def test_event_parser_detects_dropped_text(spec: CcSpawnSpec, cfg: Config) -> No
 def test_event_parser_logs_tool_use(spec: CcSpawnSpec, cfg: Config, caplog) -> None:
     import logging
 
-    caplog.set_level(logging.INFO, logger="pyclaudir.cc")
+    caplog.set_level(logging.INFO, logger="hamroh.cc")
     worker = CcWorker(spec, cfg)
     worker._current_turn = TurnResult()
     worker._handle_event(
@@ -189,14 +189,14 @@ def test_event_parser_logs_tool_use(spec: CcSpawnSpec, cfg: Config, caplog) -> N
             },
         }
     )
-    msgs = [r.getMessage() for r in caplog.records if r.name == "pyclaudir.cc"]
+    msgs = [r.getMessage() for r in caplog.records if r.name == "hamroh.cc"]
     assert any("[CC.tool→]" in m and "telegram_send_message" in m for m in msgs)
 
 
 def test_event_parser_logs_tool_result(spec: CcSpawnSpec, cfg: Config, caplog) -> None:
     import logging
 
-    caplog.set_level(logging.INFO, logger="pyclaudir.cc")
+    caplog.set_level(logging.INFO, logger="hamroh.cc")
     worker = CcWorker(spec, cfg)
     worker._current_turn = TurnResult()
     worker._handle_event(
@@ -214,7 +214,7 @@ def test_event_parser_logs_tool_result(spec: CcSpawnSpec, cfg: Config, caplog) -
             },
         }
     )
-    msgs = [r.getMessage() for r in caplog.records if r.name == "pyclaudir.cc"]
+    msgs = [r.getMessage() for r in caplog.records if r.name == "hamroh.cc"]
     assert any("[CC.tool✓]" in m and "sent message_id=99" in m for m in msgs)
 
 
@@ -223,7 +223,7 @@ def test_event_parser_logs_done_with_action(
 ) -> None:
     import logging
 
-    caplog.set_level(logging.INFO, logger="pyclaudir.cc")
+    caplog.set_level(logging.INFO, logger="hamroh.cc")
     worker = CcWorker(spec, cfg)
     worker._current_turn = TurnResult()
     worker._handle_event(
@@ -232,7 +232,7 @@ def test_event_parser_logs_done_with_action(
             "result": {"action": "stop", "reason": "replied to user"},
         }
     )
-    msgs = [r.getMessage() for r in caplog.records if r.name == "pyclaudir.cc"]
+    msgs = [r.getMessage() for r in caplog.records if r.name == "hamroh.cc"]
     assert any("[CC.done]" in m and "action=stop" in m for m in msgs)
 
 
@@ -339,7 +339,7 @@ def test_on_giveup_fires_before_crashloop_raises(
     import asyncio
     import time
 
-    from pyclaudir.cc_worker import CrashLoop
+    from hamroh.cc_worker import CrashLoop
 
     calls: list[int] = []
 
@@ -424,7 +424,7 @@ def test_text_with_delivery_tool_is_not_dropped(spec: CcSpawnSpec, cfg: Config) 
                 "content": [
                     {
                         "type": "tool_use",
-                        "name": "mcp__pyclaudir__telegram_send_message",
+                        "name": "mcp__hamroh__telegram_send_message",
                         "id": "toolu_send",
                         "input": {"chat_id": 587272213, "text": "Yep, here I am."},
                     }
@@ -463,7 +463,7 @@ def test_text_with_reaction_is_not_dropped(spec: CcSpawnSpec, cfg: Config) -> No
                 "content": [
                     {
                         "type": "tool_use",
-                        "name": "mcp__pyclaudir__telegram_add_reaction",
+                        "name": "mcp__hamroh__telegram_add_reaction",
                         "id": "toolu_react",
                         "input": {
                             "chat_id": 587272213,

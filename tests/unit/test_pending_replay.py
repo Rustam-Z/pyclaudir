@@ -13,17 +13,17 @@ from pathlib import Path
 
 import pytest
 
-from pyclaudir.cc_worker import TurnResult
-from pyclaudir.config import Config
-from pyclaudir.db.database import Database
-from pyclaudir.db.messages import (
+from hamroh.cc_worker import TurnResult
+from hamroh.config import Config
+from hamroh.db.database import Database
+from hamroh.db.messages import (
     fetch_unconsumed_inbound,
     insert_message,
     mark_messages_consumed,
 )
-from pyclaudir.engine import Engine, EngineOptions
-from pyclaudir.models import ChatMessage
-from pyclaudir.startup import _replay_unconsumed
+from hamroh.engine import Engine, EngineOptions
+from hamroh.models import ChatMessage
+from hamroh.startup import _replay_unconsumed
 
 _CFG = Config.for_test(Path("/tmp"))
 

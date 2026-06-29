@@ -8,10 +8,10 @@ from pathlib import Path
 
 import pytest
 
-from pyclaudir.config import Config
-from pyclaudir.db.database import Database
-from pyclaudir.rate_limiter import RateLimitConfig, RateLimitExceeded, RateLimiter
-from pyclaudir.tools.base import Heartbeat
+from hamroh.config import Config
+from hamroh.db.database import Database
+from hamroh.rate_limiter import RateLimitConfig, RateLimitExceeded, RateLimiter
+from hamroh.tools.base import Heartbeat
 
 
 async def _open(tmp_path: Path) -> Database:

@@ -10,11 +10,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from pyclaudir.storage.render import RenderPathError, RenderStore
-from pyclaudir.tools import render_html as render_html_mod
-from pyclaudir.tools.base import ToolContext
-from pyclaudir.tools.render_html import RenderHtmlArgs, RenderHtmlTool
-from pyclaudir.tools.telegram.telegram_send_photo import (
+from hamroh.storage.render import RenderPathError, RenderStore
+from hamroh.tools import render_html as render_html_mod
+from hamroh.tools.base import ToolContext
+from hamroh.tools.render_html import RenderHtmlArgs, RenderHtmlTool
+from hamroh.tools.telegram.telegram_send_photo import (
     SendPhotoArgs,
     TelegramSendPhotoTool,
 )
@@ -246,7 +246,7 @@ async def test_render_to_png_wall_clock_enforces_budget(
     """If the browser launch hangs, _render_to_png raises TimeoutError on the
     wall-clock budget — proving the inner task is cancelled, not leaked."""
     pytest.importorskip("playwright.async_api")
-    import pyclaudir.tools.render_html as m
+    import hamroh.tools.render_html as m
     import playwright.async_api as pw
 
     # Fake async_playwright().start() whose chromium.launch hangs forever.

@@ -9,7 +9,7 @@ Tool time vs turn time is the speed-attribution signal: a turn that takes
 seconds but whose tools take milliseconds is dominated by Claude inference plus
 Telegram round-trips, not by tool I/O (e.g. memory read/write or rendering).
 
-The caller supplies an already-running bot (the session ``pyclaudir_sut``) and a
+The caller supplies an already-running bot (the session ``hamroh_sut``) and a
 connected client, so the eval reuses the one e2e bot instead of launching its
 own — two bots can't share a Telegram token.
 """

@@ -1,13 +1,13 @@
 # Deployment Guide
 
-This guide covers deploying pyclaudir to a VPS (Contabo, Hetzner,
+This guide covers deploying hamroh to a VPS (Contabo, Hetzner,
 DigitalOcean, etc.) using Docker, and setting up a continuous deployment
 workflow.
 
 ## Prerequisites
 
 - A VPS with SSH access
-- A GitHub repo with your pyclaudir code
+- A GitHub repo with your hamroh code
 - A Telegram bot token (from @BotFather)
 - A Claude Code account (for API authentication)
 
@@ -29,12 +29,12 @@ claude   # interactive login — creates ~/.claude/
 # Clone your private repo (SSH auth — add server's public key to GitHub first)
 #   On server: ssh-keygen -t ed25519 (if no key exists)
 #   Copy ~/.ssh/id_ed25519.pub → GitHub Settings → SSH keys
-git clone git@github.com:your-user/pyclaudir.git ~/pyclaudir
-cd ~/pyclaudir
+git clone git@github.com:your-user/hamroh.git ~/hamroh
+cd ~/hamroh
 
 # Configure
 cp .env.example .env
-vim .env   # set TELEGRAM_BOT_TOKEN, PYCLAUDIR_OWNER_ID, etc.
+vim .env   # set TELEGRAM_BOT_TOKEN, HAMROH_OWNER_ID, etc.
 cp prompts/project.md.example prompts/project.md
 vim prompts/project.md   # customize identity, integrations, team info
 
@@ -43,7 +43,7 @@ docker compose up -d --build
 
 # Verify it's running
 docker compose ps
-docker compose logs -f   # should see "pyclaudir is live"
+docker compose logs -f   # should see "hamroh is live"
 ```
 
 DM your bot on Telegram to confirm it replies.
@@ -94,14 +94,14 @@ container after editing either file: `docker compose up -d
 Every time you push changes to GitHub:
 
 ```bash
-ssh root@your-server-ip 'cd ~/pyclaudir && git pull && docker compose up -d --build'
+ssh root@your-server-ip 'cd ~/hamroh && git pull && docker compose up -d --build'
 ```
 
 Or step by step:
 
 ```bash
 ssh root@your-server-ip
-cd ~/pyclaudir
+cd ~/hamroh
 git pull
 docker compose up -d --build
 docker compose logs -f   # verify it started correctly
@@ -128,7 +128,7 @@ jobs:
           username: root
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            cd ~/pyclaudir
+            cd ~/hamroh
             git pull
             docker compose up -d --build
 ```
@@ -158,7 +158,7 @@ The `data/` directory is created automatically on first run. It contains:
 
 - `data/memories/` — bot's persistent memory files (the only part worth
   migrating between deployments)
-- `data/pyclaudir.db` — SQLite database (messages, users, reminders,
+- `data/hamroh.db` — SQLite database (messages, users, reminders,
   tool call logs) — starts fresh on new servers
 - `data/session_id` — Claude Code session ID for conversation continuity
 - `data/attachments/` — inbound photos/docs the dispatcher saved
@@ -174,10 +174,10 @@ provisioning step needed.
 **Migrating from another server:** only copy memories:
 
 ```bash
-scp -r old-server:~/pyclaudir/data root@new-server:~/pyclaudir/data
+scp -r old-server:~/hamroh/data root@new-server:~/hamroh/data
 ```
 
-Don't copy `session_id` or `pyclaudir.db` to a new server — stale
+Don't copy `session_id` or `hamroh.db` to a new server — stale
 session IDs cause CC subprocess crashes, and the database will rebuild
 naturally from new messages.
 
@@ -200,26 +200,26 @@ in sync between your local machine and the server:
 After pushing `project.md`, restart for changes to take effect:
 
 ```bash
-ssh root@your-server-ip 'cd ~/pyclaudir && docker compose restart'
+ssh root@your-server-ip 'cd ~/hamroh && docker compose restart'
 ```
 
 ## Common operations
 
 ```bash
 # View live logs
-ssh root@your-server-ip 'cd ~/pyclaudir && docker compose logs -f'
+ssh root@your-server-ip 'cd ~/hamroh && docker compose logs -f'
 
 # Shell into the container
-ssh root@your-server-ip 'cd ~/pyclaudir && docker compose exec pyclaudir bash'
+ssh root@your-server-ip 'cd ~/hamroh && docker compose exec hamroh bash'
 
 # Restart without rebuilding
-ssh root@your-server-ip 'cd ~/pyclaudir && docker compose restart'
+ssh root@your-server-ip 'cd ~/hamroh && docker compose restart'
 
 # Stop the bot
-ssh root@your-server-ip 'cd ~/pyclaudir && docker compose down'
+ssh root@your-server-ip 'cd ~/hamroh && docker compose down'
 
 # Check status
-ssh root@your-server-ip 'cd ~/pyclaudir && docker compose ps'
+ssh root@your-server-ip 'cd ~/hamroh && docker compose ps'
 ```
 
 ## Troubleshooting
@@ -231,7 +231,7 @@ Conflict: terminated by other getUpdates request
 ```
 
 Another instance is polling the same bot token. Make sure only one is
-running — check both local (`pkill -f 'python -m pyclaudir'`) and
+running — check both local (`pkill -f 'python -m hamroh'`) and
 Docker (`docker compose down`).
 
 ### CC subprocess crashes (rc=1, empty stderr)
@@ -251,12 +251,12 @@ SSH into the server and re-authenticate:
 ```bash
 ssh root@your-server-ip
 claude   # follow the login flow
-cd ~/pyclaudir && docker compose restart
+cd ~/hamroh && docker compose restart
 ```
 
 ### macOS Docker credentials
 
-If you run pyclaudir in Docker on macOS and see `Not logged in · Please
+If you run hamroh in Docker on macOS and see `Not logged in · Please
 run /login` even though `claude login` succeeded on the host, that's
 because macOS stores the OAuth token in the Keychain — the container's
 bind mount of `~/.claude` doesn't carry it. (Linux hosts write
@@ -267,7 +267,7 @@ subprocess inherits your shell's Keychain access:
 
 ```bash
 uv sync --extra dev
-uv run python -m pyclaudir
+uv run python -m hamroh
 ```
 
 **If you really need Docker on macOS:** export the Keychain entry to a

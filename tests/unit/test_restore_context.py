@@ -1,6 +1,6 @@
 """Restored-context digest — carry conversation into a fresh CC session.
 
-When pyclaudir resets the CC session (API-error auto-reset, stale-session
+When hamroh resets the CC session (API-error auto-reset, stale-session
 recovery, owner /reset_session) the model loses its context. The engine
 stashes a small sanitized digest built from our own SQLite history and
 prepends it to the fresh session's first turn. The digest must be safe to
@@ -16,10 +16,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from pyclaudir.cc_worker import TurnResult
-from pyclaudir.config import Config
-from pyclaudir.db.database import Database
-from pyclaudir.db.messages import (
+from hamroh.cc_worker import TurnResult
+from hamroh.config import Config
+from hamroh.db.database import Database
+from hamroh.db.messages import (
     RecentMessagesQuery,
     fetch_recent_messages,
     insert_message,
@@ -28,10 +28,10 @@ from pyclaudir.db.messages import (
     mark_messages_consumed,
     mark_messages_processed,
 )
-from pyclaudir.engine import Engine, EngineOptions
-from pyclaudir.engine.restore import build_restored_context, sanitize_for_cc
-from pyclaudir.models import ChatMessage
-from pyclaudir.startup import _App, _make_on_cc_stale_session
+from hamroh.engine import Engine, EngineOptions
+from hamroh.engine.restore import build_restored_context, sanitize_for_cc
+from hamroh.models import ChatMessage
+from hamroh.startup import _App, _make_on_cc_stale_session
 
 CHAT = -1001234567890
 
