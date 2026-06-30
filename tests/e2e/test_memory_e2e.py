@@ -105,6 +105,7 @@ async def _assert_search_finds_seeded_fact(
     assert_reply_within(reply, MAX_MEMORY_REPLY_S, "memory search")
 
 
+@pytest.mark.smoke
 async def test_memory_write_and_read_dm(
     hamroh_sut: Sut, tester_client: TelegramClient, dm: Conversation
 ) -> None:

@@ -49,7 +49,6 @@ async def test_kill_command_dm(
     await _assert_kill_exits(tester_client, dm, killable_sut)
 
 
-@pytest.mark.smoke
 async def test_kill_command_group(
     tester_client: TelegramClient, group: Conversation, killable_sut: Sut
 ) -> None:

@@ -2,8 +2,9 @@
 
 scheduled (DM and group, separate tests): "remind me in 30 minutes: TOKEN"
     -> a pending reminders row lands with a ~30-minute trigger_at.
-fires (DM, @slow): "remind me in 70 seconds: TOKEN" -> the bot delivers an
-    unsolicited message with TOKEN within ~2.5 min, and the row flips to sent.
+fires (DM and group, separate tests, @slow): "remind me in 70 seconds: TOKEN"
+    -> the bot delivers an unsolicited message with TOKEN within ~2.5 min, and
+    the row flips to sent.
 """
 
 from __future__ import annotations
@@ -74,6 +75,29 @@ async def test_reminder_is_scheduled_group(
     await _assert_scheduled(hamroh_sut, tester_client, group)
 
 
+async def _assert_fires(sut: Sut, client: TelegramClient, convo: Conversation) -> None:
+    token = new_sentinel("FIRE")
+
+    reply = await send_and_wait(
+        client,
+        convo,
+        f"Set a reminder for 70 seconds from now with this exact text: {token}.",
+    )
+    assert_reply_within(reply, MAX_REMINDER_REPLY_S, "reminder")
+
+    seen, elapsed = await measured(
+        wait_for_message(client, convo, token, timeout=MAX_REMINDER_FIRE_S)
+    )
+    assert token in seen, f"reminder {token!r} never fired; saw {seen!r}"
+    assert_within(elapsed, MAX_REMINDER_FIRE_S, "reminder fire")
+
+    # the delivered reminder's row must flip from pending to sent
+    sent = await wait_until(
+        lambda: [r for r in reminder_rows(sut.db_path, token) if r["status"] == "sent"]
+    )
+    assert sent, f"reminder {token!r} row was not marked sent"
+
+
 @pytest.mark.slow
 @pytest.mark.smoke
 async def test_reminder_fires_dm(
@@ -85,25 +109,18 @@ async def test_reminder_fires_dm(
     when   they ask for a reminder ~70 seconds out in a DM
     then   the bot delivers it within MAX_REMINDER_FIRE_S and the row flips to sent.
     """
-    token = new_sentinel("FIRE")
+    await _assert_fires(hamroh_sut, tester_client, dm)
 
-    reply = await send_and_wait(
-        tester_client,
-        dm,
-        f"Set a reminder for 70 seconds from now with this exact text: {token}.",
-    )
-    assert_reply_within(reply, MAX_REMINDER_REPLY_S, "reminder")
 
-    seen, elapsed = await measured(
-        wait_for_message(tester_client, dm, token, timeout=MAX_REMINDER_FIRE_S)
-    )
-    assert token in seen, f"reminder {token!r} never fired; saw {seen!r}"
-    assert_within(elapsed, MAX_REMINDER_FIRE_S, "reminder fire")
+@pytest.mark.slow
+@pytest.mark.smoke
+async def test_reminder_fires_group(
+    hamroh_sut: Sut, tester_client: TelegramClient, group: Conversation
+) -> None:
+    """A scheduled reminder fires and is marked sent in a group.
 
-    # the delivered reminder's row must flip from pending to sent
-    sent = await wait_until(
-        lambda: [
-            r for r in reminder_rows(hamroh_sut.db_path, token) if r["status"] == "sent"
-        ]
-    )
-    assert sent, f"reminder {token!r} row was not marked sent"
+    given  the owner
+    when   they ask for a reminder ~70 seconds out in a group
+    then   the bot delivers it within MAX_REMINDER_FIRE_S and the row flips to sent.
+    """
+    await _assert_fires(hamroh_sut, tester_client, group)
