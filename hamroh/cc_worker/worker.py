@@ -77,12 +77,6 @@ class WorkerHooks:
 # matching after the module split.
 log = logging.getLogger("hamroh.cc_worker")
 
-#: The first status ping fires after this delay (or ``status_interval`` if
-#: that is shorter) so a long turn surfaces quickly instead of staying
-#: silent for the full interval. Subsequent pings settle into
-#: ``status_interval``.
-FIRST_STATUS_DELAY_SECONDS = 45.0
-
 #: Substrings that, when seen in CC's stderr, indicate the resumed
 #: ``session_id`` is unusable — either pruned/expired (first pattern)
 #: or malformed / not a known session title (second pattern). Both
@@ -692,18 +686,14 @@ class CcWorker(CcEventHandlerMixin):
         or ``_current_turn`` goes None). Other guards still apply: the liveness
         monitor catches silence, the tool-error breaker catches error loops.
 
-        The first ping fires after :data:`FIRST_STATUS_DELAY_SECONDS` (or the
-        interval, whichever is shorter) so a slow turn surfaces quickly;
-        later pings settle into ``status_interval`` to avoid spam.
+        Pings fire every ``status_interval`` (``HAMROH_STATUS_INTERVAL_SECONDS``).
         """
-        delay = min(FIRST_STATUS_DELAY_SECONDS, self._status_interval)
         while True:
-            await asyncio.sleep(delay)
+            await asyncio.sleep(self._status_interval)
             if self._current_turn is None:
                 return
             started = self._turn_started_at or time.monotonic()
             await self._fire_status(time.monotonic() - started)
-            delay = self._status_interval
 
     async def _fire_status(self, elapsed: float) -> None:
         """Invoke the status callback; never let a notify failure kill the loop."""

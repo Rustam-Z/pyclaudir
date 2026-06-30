@@ -82,27 +82,6 @@ async def test_heartbeat_reports_progress_without_stopping(worker: CcWorker) -> 
 
 
 @pytest.mark.asyncio
-async def test_first_ping_fires_early(
-    worker: CcWorker, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The first status ping must beat the recurring interval so a slow turn
-    surfaces quickly instead of staying silent for the full interval."""
-    monkeypatch.setattr("hamroh.cc_worker.worker.FIRST_STATUS_DELAY_SECONDS", 0.05)
-    worker._status_interval = 10.0  # would never fire within the test window
-    calls: list[int] = []
-
-    async def on_status(elapsed: float, last_action: str | None) -> None:
-        calls.append(1)
-
-    worker._on_status = on_status
-    worker._arm_status_heartbeat()
-    await asyncio.sleep(0.12)
-    worker._cancel_status_heartbeat()
-
-    assert calls, "the first ping must fire on the short first delay, not the interval"
-
-
-@pytest.mark.asyncio
 async def test_heartbeat_recurs(worker: CcWorker) -> None:
     """It keeps pinging every interval, not just once."""
     calls: list[int] = []
