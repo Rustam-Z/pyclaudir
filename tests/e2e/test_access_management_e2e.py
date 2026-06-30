@@ -15,7 +15,7 @@ from telethon import TelegramClient  # type: ignore[import-untyped]
 from hamroh.access import AccessConfig, load_access
 from tests.e2e.support.assertions import assert_reply_within
 from tests.e2e.support.client import expect_silence, send_and_wait
-from tests.e2e.support.config import MAX_COMMAND_REPLY_S, MAX_TEXT_REPLY_S, E2EConfig
+from tests.e2e.support.config import MAX_TEXT_REPLY_S, E2EConfig
 from tests.e2e.support.data import new_sentinel
 from tests.e2e.support.harness import Sut, set_access
 from tests.e2e.support.models import Conversation
@@ -38,7 +38,7 @@ async def _assert_allow_adds(
 ) -> None:
     try:
         reply = await send_and_wait(client, convo, f"/allow user {dummy}")
-        assert_reply_within(reply, MAX_COMMAND_REPLY_S, "/allow")
+        assert_reply_within(reply, MAX_TEXT_REPLY_S, "/allow")
         assert "added" in reply.text.lower(), f"no add ack: {reply.text!r}"
         users = load_access(sut.access_path).allowed_users
         assert dummy in users, f"{dummy} not persisted to allowlist: {users}"
@@ -55,7 +55,7 @@ async def test_allow_command_dm(
 
     given  the owner
     when   they allow a dummy user in a DM
-    then   the bot acks within MAX_COMMAND_REPLY_S and the id is persisted to access.json (state restored after).
+    then   the bot acks within MAX_TEXT_REPLY_S and the id is persisted to access.json (state restored after).
     """
     await _assert_allow_adds(tester_client, dm, hamroh_sut, _DUMMY_ALLOW_DM)
 
@@ -67,7 +67,7 @@ async def test_allow_command_group(
 
     given  the owner
     when   they allow a dummy user in a group
-    then   the bot acks within MAX_COMMAND_REPLY_S and the id is persisted to access.json (state restored after).
+    then   the bot acks within MAX_TEXT_REPLY_S and the id is persisted to access.json (state restored after).
     """
     await _assert_allow_adds(tester_client, group, hamroh_sut, _DUMMY_ALLOW_GROUP)
 
@@ -139,7 +139,7 @@ async def _assert_deny_removes(
     await send_and_wait(client, convo, f"/allow user {dummy}")
     try:
         reply = await send_and_wait(client, convo, f"/deny user {dummy}")
-        assert_reply_within(reply, MAX_COMMAND_REPLY_S, "/deny")
+        assert_reply_within(reply, MAX_TEXT_REPLY_S, "/deny")
         assert "removed" in reply.text.lower(), f"no remove ack: {reply.text!r}"
         users = load_access(sut.access_path).allowed_users
         assert dummy not in users, f"{dummy} still in allowlist: {users}"
@@ -156,7 +156,7 @@ async def test_deny_command_dm(
 
     given  the owner and a dummy user on the allowlist
     when   they deny the dummy user in a DM
-    then   the bot acks within MAX_COMMAND_REPLY_S and the id is gone from access.json (state restored after).
+    then   the bot acks within MAX_TEXT_REPLY_S and the id is gone from access.json (state restored after).
     """
     await _assert_deny_removes(tester_client, dm, hamroh_sut, _DUMMY_DENY_DM)
 
@@ -168,7 +168,7 @@ async def test_deny_command_group(
 
     given  the owner and a dummy user on the allowlist
     when   they deny the dummy user in a group
-    then   the bot acks within MAX_COMMAND_REPLY_S and the id is gone from access.json (state restored after).
+    then   the bot acks within MAX_TEXT_REPLY_S and the id is gone from access.json (state restored after).
     """
     await _assert_deny_removes(tester_client, group, hamroh_sut, _DUMMY_DENY_GROUP)
 
@@ -183,7 +183,7 @@ async def _assert_policy_sets(
     original = load_access(sut.access_path).policy
     try:
         reply = await send_and_wait(client, convo, "/policy open")
-        assert_reply_within(reply, MAX_COMMAND_REPLY_S, "/policy")
+        assert_reply_within(reply, MAX_TEXT_REPLY_S, "/policy")
         assert "open" in reply.text.lower(), f"no policy ack: {reply.text!r}"
         assert load_access(sut.access_path).policy == "open", "policy not persisted"
     finally:
@@ -199,7 +199,7 @@ async def test_policy_command_dm(
 
     given  the owner
     when   they switch the policy to open in a DM
-    then   the bot acks within MAX_COMMAND_REPLY_S and the new policy is persisted to access.json (original restored after).
+    then   the bot acks within MAX_TEXT_REPLY_S and the new policy is persisted to access.json (original restored after).
     """
     await _assert_policy_sets(tester_client, dm, hamroh_sut)
 
@@ -211,7 +211,7 @@ async def test_policy_command_group(
 
     given  the owner
     when   they switch the policy to open in a group
-    then   the bot acks within MAX_COMMAND_REPLY_S and the new policy is persisted to access.json (original restored after).
+    then   the bot acks within MAX_TEXT_REPLY_S and the new policy is persisted to access.json (original restored after).
     """
     await _assert_policy_sets(tester_client, group, hamroh_sut)
 
@@ -229,7 +229,7 @@ async def _assert_usage_on_missing_args(
     reply = await send_and_wait(client, convo, command)
 
     # assert: usage hint, fast, and the access state is untouched
-    assert_reply_within(reply, MAX_COMMAND_REPLY_S, command)
+    assert_reply_within(reply, MAX_TEXT_REPLY_S, command)
     assert "usage" in reply.text.lower(), f"no usage hint for {command}: {reply.text!r}"
     after = load_access(sut.access_path)
     assert after.policy == before.policy, f"{command} changed policy: {after.policy}"
@@ -244,7 +244,7 @@ async def test_allow_without_args_dm(
 
     given  the owner
     when   they send a bare /allow in a DM
-    then   the bot replies with a usage hint within MAX_COMMAND_REPLY_S and access.json is unchanged.
+    then   the bot replies with a usage hint within MAX_TEXT_REPLY_S and access.json is unchanged.
     """
     await _assert_usage_on_missing_args(tester_client, dm, hamroh_sut, "/allow")
 
@@ -256,7 +256,7 @@ async def test_allow_without_args_group(
 
     given  the owner
     when   they send a bare /allow in a group
-    then   the bot replies with a usage hint within MAX_COMMAND_REPLY_S and access.json is unchanged.
+    then   the bot replies with a usage hint within MAX_TEXT_REPLY_S and access.json is unchanged.
     """
     await _assert_usage_on_missing_args(tester_client, group, hamroh_sut, "/allow")
 
@@ -268,7 +268,7 @@ async def test_deny_without_args_dm(
 
     given  the owner
     when   they send a bare /deny in a DM
-    then   the bot replies with a usage hint within MAX_COMMAND_REPLY_S and access.json is unchanged.
+    then   the bot replies with a usage hint within MAX_TEXT_REPLY_S and access.json is unchanged.
     """
     await _assert_usage_on_missing_args(tester_client, dm, hamroh_sut, "/deny")
 
@@ -280,7 +280,7 @@ async def test_deny_without_args_group(
 
     given  the owner
     when   they send a bare /deny in a group
-    then   the bot replies with a usage hint within MAX_COMMAND_REPLY_S and access.json is unchanged.
+    then   the bot replies with a usage hint within MAX_TEXT_REPLY_S and access.json is unchanged.
     """
     await _assert_usage_on_missing_args(tester_client, group, hamroh_sut, "/deny")
 
@@ -292,7 +292,7 @@ async def test_policy_without_args_dm(
 
     given  the owner
     when   they send a bare /policy in a DM
-    then   the bot replies with a usage hint within MAX_COMMAND_REPLY_S and access.json is unchanged.
+    then   the bot replies with a usage hint within MAX_TEXT_REPLY_S and access.json is unchanged.
     """
     await _assert_usage_on_missing_args(tester_client, dm, hamroh_sut, "/policy")
 
@@ -304,6 +304,6 @@ async def test_policy_without_args_group(
 
     given  the owner
     when   they send a bare /policy in a group
-    then   the bot replies with a usage hint within MAX_COMMAND_REPLY_S and access.json is unchanged.
+    then   the bot replies with a usage hint within MAX_TEXT_REPLY_S and access.json is unchanged.
     """
     await _assert_usage_on_missing_args(tester_client, group, hamroh_sut, "/policy")

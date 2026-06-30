@@ -15,7 +15,7 @@ from telethon import TelegramClient  # type: ignore[import-untyped]
 from tests.e2e.support.assertions import assert_reply_within
 from tests.e2e.support.client import send_and_wait
 from tests.e2e.support.models import Conversation
-from tests.e2e.support.config import MAX_USAGE_REPLY_S
+from tests.e2e.support.config import MAX_TEXT_REPLY_S
 
 log = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ async def _assert_usage_report(client: TelegramClient, convo: Conversation) -> N
     assert "usage" in text or "used" in text, (
         f"reply does not look like a usage report; was {reply.text!r}"
     )
-    assert_reply_within(reply, MAX_USAGE_REPLY_S, "/usage")
+    assert_reply_within(reply, MAX_TEXT_REPLY_S, "/usage")
 
 
 @pytest.mark.smoke
@@ -38,7 +38,7 @@ async def test_usage_command_dm(
 
     given  the owner
     when   they send /usage in a DM
-    then   the bot replies with Claude Code's usage text within MAX_USAGE_REPLY_S.
+    then   the bot replies with Claude Code's usage text within MAX_TEXT_REPLY_S.
     """
     await _assert_usage_report(tester_client, dm)
 
@@ -50,6 +50,6 @@ async def test_usage_command_group(
 
     given  the owner
     when   they send /usage in a group
-    then   the bot replies with Claude Code's usage text within MAX_USAGE_REPLY_S.
+    then   the bot replies with Claude Code's usage text within MAX_TEXT_REPLY_S.
     """
     await _assert_usage_report(tester_client, group)

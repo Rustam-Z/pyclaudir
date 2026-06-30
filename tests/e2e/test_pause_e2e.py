@@ -25,7 +25,7 @@ from tests.e2e.support.data import new_sentinel, recall_prompt
 from tests.e2e.support.harness import Sut
 from tests.e2e.support.models import Conversation
 from tests.e2e.support.state import message_rows
-from tests.e2e.support.config import MAX_COMMAND_REPLY_S, MAX_TEXT_REPLY_S
+from tests.e2e.support.config import MAX_TEXT_REPLY_S
 
 
 async def _assert_paused_drops(
@@ -33,7 +33,7 @@ async def _assert_paused_drops(
 ) -> None:
     try:
         paused = await send_and_wait(client, dm, "/pause")
-        assert_reply_within(paused, MAX_COMMAND_REPLY_S, "pause ack")
+        assert_reply_within(paused, MAX_TEXT_REPLY_S, "pause ack")
         assert "paus" in paused.text.lower(), f"no pause ack; got {paused.text!r}"
 
         token = new_sentinel("DROPPED")
@@ -47,7 +47,7 @@ async def _assert_paused_drops(
         assert not rows, f"paused message leaked into DB: {[dict(r) for r in rows]!r}"
         # the bot is still alive: /health answers and reports paused
         health = await send_and_wait(client, dm, "/health")
-        assert_reply_within(health, MAX_COMMAND_REPLY_S, "health while paused")
+        assert_reply_within(health, MAX_TEXT_REPLY_S, "health while paused")
         assert "paused" in health.text.lower(), f"/health not paused; {health.text!r}"
     finally:
         # always resume so the shared SUT is left usable for other tests
@@ -60,7 +60,7 @@ async def _assert_resumed_processes(
     try:
         await send_and_wait(client, dm, "/pause")
         resumed = await send_and_wait(client, dm, "/resume")
-        assert_reply_within(resumed, MAX_COMMAND_REPLY_S, "resume ack")
+        assert_reply_within(resumed, MAX_TEXT_REPLY_S, "resume ack")
         assert "resum" in resumed.text.lower(), f"no resume ack; got {resumed.text!r}"
 
         question, token = recall_prompt()
@@ -83,7 +83,7 @@ async def test_paused_drops_dm(
     given  a bot paused via /pause in the owner DM
     when   a message arrives in the DM while paused
     then   it gets no reply, never reaches the DB, and /health answers paused
-           within MAX_COMMAND_REPLY_S.
+           within MAX_TEXT_REPLY_S.
     """
     await _assert_paused_drops(tester_client, hamroh_sut, dm, dm)
 
@@ -100,7 +100,7 @@ async def test_paused_drops_group(
     given  a bot paused via /pause in the owner DM
     when   a message arrives in the group while paused
     then   it gets no reply, never reaches the DB, and /health answers paused
-           within MAX_COMMAND_REPLY_S.
+           within MAX_TEXT_REPLY_S.
     """
     await _assert_paused_drops(tester_client, hamroh_sut, dm, group)
 
@@ -149,7 +149,7 @@ async def test_pause_resume_lifecycle_group(
     """
     try:
         paused = await send_and_wait(tester_client, dm, "/pause")
-        assert_reply_within(paused, MAX_COMMAND_REPLY_S, "pause ack")
+        assert_reply_within(paused, MAX_TEXT_REPLY_S, "pause ack")
         assert "paus" in paused.text.lower(), f"no pause ack; got {paused.text!r}"
 
         token = new_sentinel("DROPPED")
@@ -161,7 +161,7 @@ async def test_pause_resume_lifecycle_group(
         assert not rows, f"paused message leaked into DB: {[dict(r) for r in rows]!r}"
 
         resumed = await send_and_wait(tester_client, dm, "/resume")
-        assert_reply_within(resumed, MAX_COMMAND_REPLY_S, "resume ack")
+        assert_reply_within(resumed, MAX_TEXT_REPLY_S, "resume ack")
         assert "resum" in resumed.text.lower(), f"no resume ack; got {resumed.text!r}"
 
         question, recall_token = recall_prompt()

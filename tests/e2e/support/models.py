@@ -38,6 +38,10 @@ class Reply:
     media_kind: str | None  # "photo" | "document" | None
     t_first_s: float  # send -> first reply chunk (seconds)
     t_complete_s: float  # send -> last chunk (seconds)
+    # Telegram entity class names ("MessageEntityBold", …) across all chunks.
+    # ``raw_text`` drops formatting, so this is how a test sees that the bot's
+    # HTML actually rendered as bold/italic/code/link/quote in Telegram.
+    entity_types: frozenset[str] = frozenset()
 
     @property
     def text(self) -> str:

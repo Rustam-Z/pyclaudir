@@ -21,7 +21,7 @@ from tests.e2e.support.config import (
     _BURST_TIMEOUT_S,
     _MULTI_MSG_TIMEOUT_S,
     _QUIET_WINDOW_S,
-    MAX_REACTION_S,
+    MAX_TEXT_REPLY_S,
 )
 from tests.e2e.support.models import Conversation, Reply, StatusObservation
 
@@ -55,6 +55,18 @@ def _media_kind(msg: Message) -> str | None:
     if msg.document is not None:
         return "document"
     return None
+
+
+def _entity_types(chunks: list[Message]) -> frozenset[str]:
+    """The Telegram formatting-entity class names across the reply's messages.
+
+    Telegram parses the bot's HTML back into entities (``MessageEntityBold``,
+    ``MessageEntityTextUrl``, …); ``raw_text`` drops them, so this is the only
+    place a test can see that bold/italic/code/link/quote actually rendered.
+    """
+    return frozenset(
+        type(ent).__name__ for msg in chunks for ent in (msg.entities or ())
+    )
 
 
 async def send(
@@ -102,6 +114,7 @@ async def send_and_wait(
         media_kind=next((k for m in chunks if (k := _media_kind(m))), None),
         t_first_s=t_first,
         t_complete_s=last_at - sent_at,
+        entity_types=_entity_types(chunks),
     )
 
 
@@ -363,11 +376,11 @@ async def wait_for_reaction(
 ) -> bool:
     """Poll a message until the bot's ``emoji`` reaction appears (or timeout).
 
-    Waits slightly past ``MAX_REACTION_S`` with a fine interval so the caller
+    Waits slightly past ``MAX_TEXT_REPLY_S`` with a fine interval so the caller
     can time the true arrival and let ``assert_within`` be the 5s gate, instead
     of the poll cutoff silently masking a reaction that beat the limit.
     """
-    deadline = time.monotonic() + MAX_REACTION_S
+    deadline = time.monotonic() + MAX_TEXT_REPLY_S
     while time.monotonic() < deadline:
         msg = await client.get_messages(chat, ids=message_id)
         if msg is not None and _has_reaction(msg, emoji):
