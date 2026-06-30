@@ -74,6 +74,11 @@ class ToolContext:
     #: navigated page survives across separate tool calls. None in tests.
     browser_session: "BrowserSession | None" = None
     heartbeat: Heartbeat = field(default_factory=Heartbeat)
+    #: Enabled tool instances registered with the MCP server, set by
+    #: build_fastmcp() once discovery + the disabled filter have run. The
+    #: tool_list tool reads this to enumerate what's available. Empty until
+    #: the server is built (and in tests that construct a tool directly).
+    enabled_tools: "list[BaseTool]" = field(default_factory=list)
     #: chat_id → display name. Populated by the dispatcher on every inbound
     #: message so outbound transcript lines can show the chat's title.
     chat_titles: dict[int, str] = field(default_factory=dict)

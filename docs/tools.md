@@ -144,6 +144,7 @@ The mode is determined by what the skill's body instructs, not by frontmatter.
 | `database_query` | Read-only SELECT over `messages`, `users`, `reminders`, `tool_calls`, `reactions`. Max 100 rows (user `LIMIT` is respected and clamped). Note: `messages` uses `timestamp`, not `created_at`. Reactions are JSON on `messages.reactions` — query with `json_extract(reactions, '$."👍"')`. |
 | `database_get_recent_messages` | Return the most recent messages (both directions), oldest-first, as TSV — no SQL needed. Includes the current turn's own inbound messages. `limit` defaults to 20, capped at 100; text truncated to 2000 chars. Optional `chat_id` scopes to one chat; `before_message_id` pages back through older history (per-chat, use with `chat_id`). |
 | `time_now` | Return the current UTC timestamp. |
+| `tool_list` | List the tools currently available to the bot, each with its full `mcp__hamroh__<name>` (the exact callable name) and description. In-conversation introspection (like `skill_list`/`memory_list`); reflects the `disabled` filter, so opted-out tools don't show. |
 
 ---
 

@@ -186,6 +186,7 @@ def build_fastmcp(
         wrapper = _make_wrapper(instance, db_logger)
         mcp.add_tool(wrapper, name=instance.name, description=instance.description)
         log.info("registered MCP tool %s", instance.name)
+    ctx.enabled_tools = instances
     return mcp, instances
 
 
