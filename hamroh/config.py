@@ -207,6 +207,10 @@ class Config:
     # Derived paths
     db_path: Path = field(init=False)
     memories_dir: Path = field(init=False)
+    #: Git-tracked, committable memories folder at the repo root. Read-only
+    #: overlay on top of the runtime ``memories_dir``: the bot reads it as
+    #: memory but never writes there — the operator curates and commits it.
+    committed_memories_dir: Path = field(init=False)
     session_id_path: Path = field(init=False)
     cc_logs_dir: Path = field(init=False)
     access_path: Path = field(init=False)
@@ -224,6 +228,9 @@ class Config:
         # don't belong in data/. Tests override this via for_test().
         project_root = Path(__file__).resolve().parent.parent
         object.__setattr__(self, "access_path", project_root / "access.json")
+        # Committed memories live at the repo root (tracked in git), separate
+        # from the gitignored runtime data/. Tests override this via for_test().
+        object.__setattr__(self, "committed_memories_dir", project_root / "memories")
         object.__setattr__(self, "attachments_dir", self.data_dir / "attachments")
         object.__setattr__(self, "renders_dir", self.data_dir / "renders")
         object.__setattr__(self, "log_dir", self.data_dir / "logs")
@@ -297,9 +304,13 @@ class Config:
             browser_headless=True,
             log_level="INFO",
         )
-        # Tests use isolated tmp dirs — keep access.json inside data_dir
-        # so each test gets its own copy and never touches the repo root.
+        # Tests use isolated tmp dirs — keep access.json and the committed
+        # memories folder inside data_dir so each test gets its own copy and
+        # never touches the repo root.
         object.__setattr__(cfg, "access_path", data_dir.resolve() / "access.json")
+        object.__setattr__(
+            cfg, "committed_memories_dir", data_dir.resolve() / "committed_memories"
+        )
         return cfg
 
     def ensure_dirs(self) -> None:

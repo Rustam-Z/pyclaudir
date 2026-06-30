@@ -614,6 +614,14 @@ an existing file, you must `memory_read` first this session. Brand-new
 files are exempt. There is no `delete_memory` — overwrite to "forget".
 Operator handles real deletion on host.
 
+**Committed memories (read-only).** A second, git-tracked folder
+(`memories/` at the repo root) is overlaid on the runtime store: its files
+show up in `memory_list` / `memory_search` / `memory_read` exactly like
+runtime ones. You **cannot write** there — `memory_write` / `memory_append`
+always target the runtime `data/memories/`. The operator curates the
+committed folder by hand and commits it with git, so it survives a volume
+loss. If a path exists in both, the runtime copy wins.
+
 ## Layout (match this — don't invent new structure)
 
 ```

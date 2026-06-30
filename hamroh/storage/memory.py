@@ -1,5 +1,13 @@
 """File-backed memory under ``data/memories/``.
 
+A store can also overlay a second, **read-only** root: the committed
+memories folder tracked in the repo (``memories/`` at the repo root). The
+runtime ``data/memories/`` root stays writable; the committed root is only
+ever read. Reads, listings and searches span both roots, with the runtime
+copy shadowing a committed file at the same relative path (the live copy
+wins). Writes and appends only ever touch the runtime root — the bot never
+mutates committed files; the operator curates and commits those by hand.
+
 Path resolution is **path-traversal hardened** — any of the following must
 raise :class:`MemoryPathError`:
 
@@ -21,7 +29,7 @@ The "read paths" set lives in this instance and resets on process restart.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -110,10 +118,13 @@ def _read_description(path: Path) -> str | None:
 
 
 class MemoryStore:
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, *, committed_root: Path | None = None) -> None:
         # ``resolve(strict=False)`` is fine: the root may not exist yet at
         # construction time. ``ensure_root`` creates it.
         self._root = root.resolve()
+        #: Read-only overlay: the git-tracked committed memories folder, or
+        #: ``None`` when no committed store is configured. Never written to.
+        self._committed_root = committed_root.resolve() if committed_root else None
         #: Set of relative paths read in this process. The read-before-write
         #: rule rejects mutating writes to any path not in this set. New
         #: files (which don't yet exist) are exempt — there's nothing to
@@ -125,7 +136,21 @@ class MemoryStore:
         return self._root
 
     def ensure_root(self) -> None:
+        # Only the runtime root is created — the committed root is tracked in
+        # the repo and managed by the operator, so it already exists (or not).
         self._root.mkdir(parents=True, exist_ok=True)
+
+    def _read_roots(self) -> list[Path]:
+        """Roots searched for reads, runtime first so it shadows committed."""
+        if self._committed_root is None:
+            return [self._root]
+        return [self._root, self._committed_root]
+
+    def _merge_roots(self) -> list[Path]:
+        """Roots in listing-merge order: committed first, runtime last (wins)."""
+        if self._committed_root is None:
+            return [self._root]
+        return [self._committed_root, self._root]
 
     @property
     def read_paths_snapshot(self) -> frozenset[str]:
@@ -140,42 +165,76 @@ class MemoryStore:
         """Resolve ``relative`` inside the memories root, hardened.
 
         See :func:`hamroh.storage.path_safety.resolve_under_root` for
-        the rules; any failure raises :class:`MemoryPathError`.
+        the rules; any failure raises :class:`MemoryPathError`. This targets
+        the **writable runtime root only** — it's the path used by writes.
         """
         return resolve_under_root(self._root, relative, MemoryPathError, "memory")
+
+    def resolve_readable(self, relative: str) -> Path:
+        """Resolve an existing memory file for reading, across all roots.
+
+        Tries the writable runtime root first, then the read-only committed
+        root, returning the first that holds the file. Each root is
+        traversal-hardened independently. Raises :class:`MemoryPathError`
+        when the path is unsafe or no root holds the file.
+        """
+        last_error: MemoryPathError | None = None
+        for root in self._read_roots():
+            try:
+                candidate = resolve_under_root(
+                    root, relative, MemoryPathError, "memory"
+                )
+            except MemoryPathError as exc:
+                last_error = exc
+                continue
+            if candidate.is_file():
+                return candidate
+        if last_error is not None:
+            raise last_error
+        raise MemoryPathError(f"memory file not found: {relative}")
 
     # ------------------------------------------------------------------
     # Read API (read-only in v1 — no write/delete/edit methods exist)
     # ------------------------------------------------------------------
 
     def list(self) -> list[MemoryFile]:
-        """List every file under the memories root, recursively.
+        """List every file across the memory roots, recursively.
 
-        Hidden files (``.gitkeep``, dotfiles) are skipped. Symlinked entries
-        are skipped silently — they cannot be read by ``read`` either. Each
-        file's frontmatter ``description`` is surfaced when present (skills
-        protocol); legacy files without it get ``description=None``.
+        Spans the runtime root and the committed read-only root. Hidden files
+        (``.gitkeep``, dotfiles) are skipped. Symlinked entries are skipped
+        silently — they cannot be read by ``read`` either. Each file's
+        frontmatter ``description`` is surfaced when present (skills protocol);
+        legacy files without it get ``description=None``. A runtime file
+        shadows a committed file at the same relative path (the live copy wins).
         """
-        if not self._root.exists():
-            return []
-        out: list[MemoryFile] = []
-        for path in sorted(self._root.rglob("*")):
+        by_path: dict[str, MemoryFile] = {}
+        for root in self._merge_roots():
+            for rel, path in self._iter_files(root):
+                by_path[rel] = MemoryFile(
+                    relative_path=rel,
+                    size_bytes=path.stat().st_size,
+                    description=_read_description(path),
+                )
+        return [by_path[key] for key in sorted(by_path)]
+
+    @staticmethod
+    def _iter_files(root: Path) -> Iterator[tuple[str, Path]]:
+        """Yield ``(relative_path, path)`` for each readable file under ``root``.
+
+        Skips directories, symlinks and dotfiles. A missing root yields nothing.
+        """
+        if not root.exists():
+            return
+        for path in sorted(root.rglob("*")):
             if path.is_dir() or path.is_symlink() or path.name.startswith("."):
                 continue
             if not path.is_file():
                 continue
             try:
-                rel = path.relative_to(self._root)
+                rel = path.relative_to(root)
             except ValueError:  # pragma: no cover - rglob shouldn't escape
                 continue
-            out.append(
-                MemoryFile(
-                    relative_path=str(rel),
-                    size_bytes=path.stat().st_size,
-                    description=_read_description(path),
-                )
-            )
-        return out
+            yield str(rel), path
 
     def read(self, relative: str, max_bytes: int = MAX_MEMORY_BYTES) -> str:
         """Read a memory file as UTF-8.
@@ -183,11 +242,12 @@ class MemoryStore:
         Files larger than ``max_bytes`` are truncated and the truncation is
         marked in the returned string so the model knows what happened.
         Records the path in :attr:`_read_paths` so the read-before-write
-        gate will allow subsequent writes to the same path.
+        gate will allow subsequent writes to the same path — but only when
+        the file came from the writable runtime root. Reading a committed
+        (read-only) file must not unlock overwriting a runtime file that
+        happens to share its relative path.
         """
-        path = self.resolve_path(relative)
-        if not path.exists() or not path.is_file():
-            raise MemoryPathError(f"memory file not found: {relative}")
+        path = self.resolve_readable(relative)
         raw = path.read_bytes()
         truncated = False
         if len(raw) > max_bytes:
@@ -197,9 +257,18 @@ class MemoryStore:
         if truncated:
             text += f"\n\n[truncated to {max_bytes} bytes]"
         # Record the read AFTER we successfully decoded — so a path that
-        # raised never gets credited.
-        self._read_paths.add(relative)
+        # raised never gets credited. Only runtime reads unlock writes.
+        if self._is_under_runtime(path):
+            self._read_paths.add(relative)
         return text
+
+    def _is_under_runtime(self, path: Path) -> bool:
+        """True when ``path`` resolves inside the writable runtime root."""
+        try:
+            path.relative_to(self._root)
+        except ValueError:
+            return False
+        return True
 
     def search(self, query: str, *, max_results: int = 50) -> _HitList:
         """Find lines matching ``query`` across every memory file.
@@ -226,10 +295,16 @@ class MemoryStore:
         return hits[:max_results]
 
     def _scan_file(self, relative: str, terms: Sequence[str]) -> _HitList:
-        """Return every line in one file that matches at least one term."""
+        """Return every line in one file that matches at least one term.
+
+        Resolves the file across both roots (runtime shadows committed), so a
+        committed-only memory is searched just like a runtime one.
+        """
         try:
-            text = (self._root / relative).read_text(encoding="utf-8", errors="replace")
-        except OSError:
+            text = self.resolve_readable(relative).read_text(
+                encoding="utf-8", errors="replace"
+            )
+        except (OSError, MemoryPathError):
             return []
         out: _HitList = []
         for line_number, line in enumerate(text.splitlines(), start=1):

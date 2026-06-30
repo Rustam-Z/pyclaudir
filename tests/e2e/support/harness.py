@@ -69,6 +69,13 @@ class Sut:
         return self.data_dir / "memories"
 
     @property
+    def committed_memories_dir(self) -> Path:
+        # The git-tracked committed memories folder. The SUT derives it from its
+        # cwd (REPO_ROOT), NOT from the isolated HAMROH_DATA_DIR — so this is the
+        # real ``memories/`` at the repo root. A test seeding here must clean up.
+        return REPO_ROOT / "memories"
+
+    @property
     def renders_dir(self) -> Path:
         return self.data_dir / "renders"
 

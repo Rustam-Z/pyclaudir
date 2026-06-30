@@ -5,6 +5,9 @@ write+read (DM and group, separate tests): remember a codeword, confirm it
 search (DM and group, separate tests): seed a fact under an unhelpful filename,
     ask a content question, and confirm the bot answers it AND actually called
     ``memory_search`` to find it (not list + read-everything).
+both roots (DM only): seed one doc in the git-tracked committed ``memories/``
+    folder and one in the runtime ``data/memories/`` store, then confirm the bot
+    reads the fact out of EACH — proving ``memory_read`` spans both roots.
 reset (DM only): the codeword survives ``/reset_session`` — proving
     cross-session persistence, not just in-context recall. The reset is an
     owner command, kept in a DM to avoid group command-addressing quirks.
@@ -12,7 +15,9 @@ reset (DM only): the codeword survives ``/reset_session`` — proving
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 from telethon import TelegramClient  # type: ignore[import-untyped]
@@ -38,6 +43,25 @@ _SEARCH = (
     "Search your memory for {cw} and tell me the launch date saved for it. "
     "Reply with ONLY the date."
 )
+_READ_DOC = (
+    "Read the memory file at {path} and tell me the launch date saved in it. "
+    "Reply with ONLY the date."
+)
+
+
+def _seed_memory_doc(memories_dir: Path, codeword: str, launch_date: str) -> str:
+    """Write a templated doc holding ``launch_date`` under ``memories_dir``.
+
+    Returns the relative path (``notes/{codeword}.md``) the bot reads by.
+    """
+    relative = f"notes/{codeword}.md"
+    path = memories_dir / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f"---\nname: {codeword}\ndescription: e2e read probe for {codeword}\n---\n\n"
+        f"Project {codeword} launch date: {launch_date}\n"
+    )
+    return relative
 
 
 async def _assert_write_and_read(
@@ -129,6 +153,78 @@ async def test_memory_search_group(
     then   the bot calls memory_search, answers correctly, within MAX_MEMORY_REPLY_S.
     """
     await _assert_search_finds_seeded_fact(hamroh_sut, tester_client, group)
+
+
+@pytest.fixture()
+def committed_doc(hamroh_sut: Sut) -> Iterator[tuple[str, str]]:
+    """Seed a doc in the git-tracked committed ``memories/`` folder; clean up.
+
+    The committed folder is the real ``memories/`` at the repo root (the SUT
+    derives it from its cwd, not the isolated data dir), so the file is removed
+    afterwards — even on failure — to leave the working tree clean.
+
+    Yields ``(relative_path, launch_date)``.
+    """
+    codeword = new_sentinel("COMMITTED")
+    launch_date = "2027-03-14"
+    relative = _seed_memory_doc(
+        hamroh_sut.committed_memories_dir, codeword, launch_date
+    )
+    try:
+        yield relative, launch_date
+    finally:
+        (hamroh_sut.committed_memories_dir / relative).unlink(missing_ok=True)
+
+
+async def test_memory_read_from_committed_and_runtime_dm(
+    hamroh_sut: Sut,
+    tester_client: TelegramClient,
+    dm: Conversation,
+    committed_doc: tuple[str, str],
+) -> None:
+    """The bot reads a doc from the committed folder AND from data/memories.
+
+    given  one doc in the git-tracked committed ``memories/`` folder and one in
+           the runtime ``data/memories/`` store, each with a distinct launch date
+    when   the owner asks the bot to read each file by path in a DM
+    then   the bot returns both dates and used memory_read — proving reads span
+           both roots, within MAX_MEMORY_REPLY_S each.
+    """
+    # given — the committed doc (fixture) plus a runtime doc with its own date
+    committed_rel, committed_date = committed_doc
+    runtime_date = "2028-09-22"
+    runtime_rel = _seed_memory_doc(
+        hamroh_sut.memories_dir, new_sentinel("RUNTIME"), runtime_date
+    )
+    since = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+    # when — ask the bot to read the committed doc
+    committed_reply = await send_and_wait(
+        tester_client, dm, _READ_DOC.format(path=committed_rel)
+    )
+    # then — it reports the committed date
+    assert committed_date in committed_reply.text, (
+        f"bot did not read committed doc {committed_rel!r}; "
+        f"reply was {committed_reply.text!r}"
+    )
+    assert_reply_within(committed_reply, MAX_MEMORY_REPLY_S, "committed memory read")
+
+    # when — ask the bot to read the runtime doc
+    runtime_reply = await send_and_wait(
+        tester_client, dm, _READ_DOC.format(path=runtime_rel)
+    )
+    # then — it reports the runtime date
+    assert runtime_date in runtime_reply.text, (
+        f"bot did not read runtime doc {runtime_rel!r}; "
+        f"reply was {runtime_reply.text!r}"
+    )
+    assert_reply_within(runtime_reply, MAX_MEMORY_REPLY_S, "runtime memory read")
+
+    # then — it actually called memory_read (not guessed from context)
+    tools = {row["tool_name"] for row in tool_calls_since(hamroh_sut.db_path, since)}
+    assert "memory_read" in tools, (
+        f"bot answered without calling memory_read; tools used: {sorted(tools)}"
+    )
 
 
 @pytest.mark.smoke

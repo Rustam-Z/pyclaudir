@@ -157,7 +157,9 @@ class _Stores:
 def _build_stores(config: Config, db: Database, plugins: Plugins) -> _Stores:
     """Construct + warm every disk-backed store."""
     project_root = Path(__file__).resolve().parent.parent
-    memory = MemoryStore(config.memories_dir)
+    memory = MemoryStore(
+        config.memories_dir, committed_root=config.committed_memories_dir
+    )
     memory.ensure_root()
     instructions = InstructionsStore(
         project_md_path=project_root / "prompts" / "project.md",

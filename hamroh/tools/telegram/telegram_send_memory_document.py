@@ -119,18 +119,15 @@ def _build_result(
 
 
 async def _resolve_memory(store: MemoryStore, path: str) -> Path | ToolResult:
-    """Resolve ``path`` under the memories root.
+    """Resolve ``path`` across the memory roots (runtime + committed).
 
     Returns the resolved path on success, or an error ``ToolResult`` when the
     path is rejected by the store's safety checks or points at a missing file.
     """
     try:
-        resolved = await asyncio.to_thread(store.resolve_path, path)
+        return await asyncio.to_thread(store.resolve_readable, path)
     except Exception as exc:
         return ToolResult(content=f"{type(exc).__name__}: {exc}", is_error=True)
-    if not resolved.exists() or not resolved.is_file():
-        return ToolResult(content=f"memory file not found: {path}", is_error=True)
-    return resolved
 
 
 def _transcript_text(path: str, caption: str | None) -> str:

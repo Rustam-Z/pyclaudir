@@ -159,7 +159,7 @@ Details: [docs/documentation.md](docs/documentation.md).
 
 **media:** render HTML to PNG (tables, charts, diffs — Chart.js / D3 inline) and LaTeX to PNG (math via KaTeX), send back as inline photos. Read inbound photos (vision), text-like docs (md / txt / log / csv / json / yaml / code …), and PDFs (extracted text with `--- page N ---` markers).
 
-**memory:** persistent markdown files under `data/memories/` (list / search / read / write / append / send-as-document), 64 KiB per file, read-before-write rail, survives restarts. Per-user / per-group / journal layout. Search looks inside the files by keyword — best matches first — so the bot finds the right note without reading every file.
+**memory:** persistent markdown files under `data/memories/` (list / search / read / write / append / send-as-document), 64 KiB per file, read-before-write rail, survives restarts. Per-user / per-group / journal layout. Search looks inside the files by keyword — best matches first — so the bot finds the right note without reading every file. A second, **git-tracked** folder (`memories/` at the repo root) is read as memory too but is read-only to the bot — you curate and commit those by hand, so they survive a volume loss. See [`memories/README.md`](memories/README.md).
 
 **search & history:** web search and web fetch (no internal / RFC1918 URLs). Read-only SQL SELECTs on the chat database (`messages`, `users`, `reminders`, ≤100 rows). Multi-hop reply-chain expansion.
 
