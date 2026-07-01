@@ -9,7 +9,18 @@
     {
       "name": "weekly-review",
       "cron": "0 18 * * 5",
+      "enabled": false,
       "text": "Summarize the week."
+    },
+    {
+      "name": "morning-brief",
+      "cron": "0 6 * * *",
+      "text": [
+        "Good morning. Put together today's brief:",
+        "",
+        "1. Top 3 AI stories.",
+        "2. Calendar conflicts this week."
+      ]
     }
   ]
 }

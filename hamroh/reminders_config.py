@@ -14,6 +14,8 @@ File format (all times UTC)::
           "name": "morning-trends",   // unique; used in the seed key
           "cron": "0 6 * * *",        // required, 5-field cron, UTC
           "chat": "owner",            // optional: "owner" (default) or chat id
+          "enabled": true,            // optional: true (default) or false to
+                                      //           turn the reminder off in place
           "text": "Post today's trends digest."
           // "text" may also be a list of strings, joined with newlines,
           // for readable multi-paragraph prompts.
@@ -58,6 +60,7 @@ class DeclaredReminder:
     cron_expr: str
     text: str
     chat: str | int
+    enabled: bool = True
 
 
 def load_declared_reminders(path: Path) -> list[DeclaredReminder]:
@@ -123,7 +126,15 @@ def _parse_entry(raw: Any, index: int) -> DeclaredReminder:
         raise ReminderConfigError(
             f"{where}: 'chat' must be \"owner\" or a numeric chat id, got {chat!r}"
         )
-    return DeclaredReminder(name=name, cron_expr=cron_expr, text=text, chat=chat)
+
+    enabled = raw.get("enabled", True)
+    if not isinstance(enabled, bool):
+        raise ReminderConfigError(
+            f"{where}: 'enabled' must be true or false, got {enabled!r}"
+        )
+    return DeclaredReminder(
+        name=name, cron_expr=cron_expr, text=text, chat=chat, enabled=enabled
+    )
 
 
 def _require_str(raw: dict, key: str, where: str) -> str:

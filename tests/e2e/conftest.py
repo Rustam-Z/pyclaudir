@@ -228,17 +228,19 @@ def default_reminders_sut(
     hamroh_sut: Sut,
     e2e_config: E2EConfig,
     tmp_path_factory: pytest.TempPathFactory,
-) -> Iterator[tuple[Sut, str]]:
+) -> Iterator[tuple[Sut, str, str]]:
     """A bot booted with a committed ``default-reminders.json`` seeded at startup.
 
-    Writes one recurring reminder (every minute, to the owner) whose text carries
-    a unique token, then launches a dedicated SUT pointed at that file via
+    Writes two recurring reminders (every minute, to the owner): one enabled
+    whose text carries ``token``, and one ``"enabled": false`` whose text carries
+    ``disabled_token``. Then launches a dedicated SUT pointed at that file via
     ``HAMROH_REMINDERS_PATH`` — so the test never touches the repo-root copy. Same
     stop-launch-revive swap as ``status_sut`` (only one process may poll the bot
     token). The every-minute cron lets the @slow fire test see it deliver within
-    one poll cycle. Yields ``(sut, token)``.
+    one poll cycle. Yields ``(sut, token, disabled_token)``.
     """
     token = new_sentinel("DEFAULTREMIND")
+    disabled_token = new_sentinel("DISABLEDREMIND")
     reminders_file = (
         tmp_path_factory.mktemp("committed-reminders") / "default-reminders.json"
     )
@@ -251,7 +253,14 @@ def default_reminders_sut(
                         "cron": "* * * * *",
                         "chat": "owner",
                         "text": token,
-                    }
+                    },
+                    {
+                        "name": "e2e-disabled",
+                        "cron": "* * * * *",
+                        "chat": "owner",
+                        "enabled": False,
+                        "text": disabled_token,
+                    },
                 ]
             }
         ),
@@ -264,7 +273,7 @@ def default_reminders_sut(
         extra_env={"HAMROH_REMINDERS_PATH": str(reminders_file)},
     )
     try:
-        yield sut, token
+        yield sut, token, disabled_token
     finally:
         stop_sut(sut)
         revived = launch_sut(e2e_config, hamroh_sut.data_dir)

@@ -561,8 +561,9 @@ bind-mount it — see [Run your own agent](#run-your-own-agent)).
 
 Each object: `name` (required, unique — identifies the reminder across edits),
 `cron` (required, 5-field, UTC), `text` (required), `chat` (optional: `"owner"`
-default, or a numeric chat id). JSON has no comments, so keep notes out of the
-file itself.
+default, or a numeric chat id), `enabled` (optional: `true` default, or `false`
+to turn the reminder off without deleting its entry). JSON has no comments, so
+keep notes out of the file itself.
 
 `text` may be a plain string or a **list of strings joined with newlines** —
 handy for long, multi-paragraph prompts, since JSON has no multi-line literals.
@@ -594,7 +595,8 @@ How it behaves:
 - **Edits apply on restart.** The seed key is content-addressed
   (`committed:<name>:<hash of cron+text+chat>`), so editing any field
   cancels the stale row and seeds a fresh one. Removing an entry cancels
-  it.
+  it, and so does setting `"enabled": false` — the entry stays in the file
+  as an off switch, and flipping it back to `true` seeds the reminder again.
 - **Source of truth is the file.** Because each row carries an
   `auto_seed_key`, the agent cannot cancel these from chat (same gate as
   the self-reflection loop) — change the file and restart instead.

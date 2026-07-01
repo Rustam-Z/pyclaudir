@@ -130,6 +130,27 @@ def test_text_string_and_list_yield_the_same_key(tmp_path: Path) -> None:
     )
 
 
+def test_enabled_defaults_to_true(tmp_path: Path) -> None:
+    """When 'enabled' is omitted, the reminder is on — existing files keep working."""
+    path = _write(tmp_path, _doc({"name": "x", "cron": "0 6 * * *", "text": "hi"}))
+
+    reminder = load_declared_reminders(path)[0]
+
+    assert reminder.enabled is True, "a missing 'enabled' must default to on"
+
+
+def test_enabled_false_is_preserved(tmp_path: Path) -> None:
+    """An explicit 'enabled': false turns the reminder off without removing it."""
+    path = _write(
+        tmp_path,
+        _doc({"name": "x", "cron": "0 6 * * *", "text": "hi", "enabled": False}),
+    )
+
+    reminder = load_declared_reminders(path)[0]
+
+    assert reminder.enabled is False, "'enabled': false must be preserved as off"
+
+
 def test_missing_file_is_empty(tmp_path: Path) -> None:
     """An absent file is valid — an instance may ship no reminders."""
     assert load_declared_reminders(tmp_path / "nope.json") == [], (
@@ -151,6 +172,7 @@ def test_missing_file_is_empty(tmp_path: Path) -> None:
         ({"name": "a", "cron": "not a cron", "text": "x"}, "cron"),
         ({"name": "a", "cron": "0 6 * * *", "text": "x", "chat": "nope"}, "chat"),
         ({"name": "a", "cron": "0 6 * * *", "text": "x", "chat": True}, "chat"),
+        ({"name": "a", "cron": "0 6 * * *", "text": "x", "enabled": "yes"}, "enabled"),
         ({"name": "a", "cron": "0 6 * * *", "text": []}, "text"),
         ({"name": "a", "cron": "0 6 * * *", "text": ["ok", 5]}, "text"),
         ({"name": "a", "cron": "0 6 * * *", "text": 123}, "text"),

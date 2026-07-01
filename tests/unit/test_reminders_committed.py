@@ -30,6 +30,8 @@ _REVIEW = {"name": "weekly-review", "cron": "0 18 * * 5", "text": "Summarize the
 _ONE = json.dumps({"reminders": [_TRENDS]})
 _TWO = json.dumps({"reminders": [_TRENDS, _REVIEW]})
 _EMPTY = json.dumps({"reminders": []})
+_REVIEW_OFF = {**_REVIEW, "enabled": False}
+_TWO_REVIEW_OFF = json.dumps({"reminders": [_TRENDS, _REVIEW_OFF]})
 
 
 async def _open(tmp_path: Path) -> tuple[Database, Config]:
@@ -165,6 +167,47 @@ async def test_removing_an_entry_cancels_it(tmp_path: Path) -> None:
         pending = await _pending(db)
         assert [r["text"] for r in pending] == ["Post today's trends digest."], (
             "only the still-declared reminder may remain pending"
+        )
+    finally:
+        await db.close()
+
+
+# ---------------------------------------------------------------------------
+# enabled toggle
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_disabled_reminder_is_not_seeded(tmp_path: Path) -> None:
+    """A reminder with 'enabled': false is never seeded, unlike its enabled sibling."""
+    db, cfg = await _open(tmp_path)
+    try:
+        _write_reminders(cfg, _TWO_REVIEW_OFF)
+
+        await _reconcile_committed_reminders(db, cfg)
+
+        rows = await _pending(db)
+        assert [r["text"] for r in rows] == ["Post today's trends digest."], (
+            "only the enabled reminder may be seeded; the disabled one is skipped"
+        )
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_disabling_a_reminder_cancels_it(tmp_path: Path) -> None:
+    """Flipping 'enabled' to false cancels the pending row, like removing the entry."""
+    db, cfg = await _open(tmp_path)
+    try:
+        _write_reminders(cfg, _TWO)
+        await _reconcile_committed_reminders(db, cfg)
+
+        _write_reminders(cfg, _TWO_REVIEW_OFF)  # weekly-review turned off in place
+        await _reconcile_committed_reminders(db, cfg)
+
+        pending = await _pending(db)
+        assert [r["text"] for r in pending] == ["Post today's trends digest."], (
+            "the disabled reminder must be cancelled, leaving only the enabled one"
         )
     finally:
         await db.close()

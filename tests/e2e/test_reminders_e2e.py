@@ -136,7 +136,7 @@ async def test_reminder_fires_group(
 
 @pytest.mark.smoke
 async def test_default_reminder_is_seeded(
-    default_reminders_sut: tuple[Sut, str],
+    default_reminders_sut: tuple[Sut, str, str],
 ) -> None:
     """A reminder declared in default-reminders.json is seeded at startup.
 
@@ -145,7 +145,7 @@ async def test_default_reminder_is_seeded(
     then   a pending reminders row lands, tagged with a committed: auto_seed_key
            and carrying the declared cron.
     """
-    sut, token = default_reminders_sut
+    sut, token, _ = default_reminders_sut
 
     rows = await wait_until(lambda: reminder_rows(sut.db_path, token))
 
@@ -161,10 +161,32 @@ async def test_default_reminder_is_seeded(
     )
 
 
+@pytest.mark.smoke
+async def test_disabled_default_reminder_is_not_seeded(
+    default_reminders_sut: tuple[Sut, str, str],
+) -> None:
+    """A reminder with "enabled": false is skipped at startup.
+
+    given  a default-reminders.json holding one enabled and one disabled reminder
+    when   the bot boots and reconciles them in a single pass
+    then   once the enabled reminder's row exists, the disabled one has no row —
+           it was never seeded.
+    """
+    sut, token, disabled_token = default_reminders_sut
+
+    # Wait on the enabled reminder: its row proves the reconcile pass ran, so the
+    # disabled reminder's absence below is a settled fact, not a race.
+    await wait_until(lambda: reminder_rows(sut.db_path, token))
+
+    assert reminder_rows(sut.db_path, disabled_token) == [], (
+        "a reminder with 'enabled': false must never be seeded"
+    )
+
+
 @pytest.mark.slow
 @pytest.mark.smoke
 async def test_default_reminder_fires(
-    default_reminders_sut: tuple[Sut, str],
+    default_reminders_sut: tuple[Sut, str, str],
     tester_client: TelegramClient,
     dm: Conversation,
 ) -> None:
@@ -175,7 +197,7 @@ async def test_default_reminder_fires(
     then   the bot delivers the reminder text to the owner within
            MAX_REMINDER_FIRE_S, and no row is marked sent (recurring, not one-shot).
     """
-    sut, token = default_reminders_sut
+    sut, token, _ = default_reminders_sut
 
     seen, elapsed = await measured(
         wait_for_message(tester_client, dm, token, timeout=MAX_REMINDER_FIRE_S)

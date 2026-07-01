@@ -139,13 +139,17 @@ async def _reconcile_committed_reminders(db, config) -> None:
     """Make the reminders table match the git-tracked ``default-reminders.json``.
 
     Seeds a pending row for every declared reminder lacking one, and cancels
-    committed rows whose key is no longer declared (entry edited or removed).
-    A content edit shifts the key, so it reads as cancel-old + seed-new. Rows
-    from other sources — self-reflection, user-created — are never touched.
+    committed rows whose key is no longer declared (entry edited, removed, or
+    turned off with ``"enabled": false``). A content edit shifts the key, so it
+    reads as cancel-old + seed-new. A disabled reminder is simply left out of
+    the desired set, so it cancels like a removed one. Rows from other sources —
+    self-reflection, user-created — are never touched.
     """
     declared = load_declared_reminders(config.committed_reminders_path)
     desired: dict[str, NewReminder] = {}
     for reminder in declared:
+        if not reminder.enabled:
+            continue
         key = committed_key(reminder, config.owner_id)
         desired[key] = NewReminder(
             chat_id=resolve_chat(reminder, config.owner_id),
