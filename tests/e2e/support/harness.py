@@ -45,12 +45,29 @@ _READY_TIMEOUT_S = 90.0
 #: text — a short "reply pong" nudge keeps the turn cheap and to the point.
 _WARMUP_TEXT = "Ping... Reply with exactly one word: pong"
 _WARMUP_TIMEOUT_S = 120.0
-_LOG_RING = 400  # keep the last N output lines for failure dumps
+_LOG_RING = 400  # safety cap on a single test's captured lines
 #: The bot runs as a subprocess; forward its output through this logger so
 #: pytest's live log (``log_cli``) streams the RX/TX/timing lines as they
 #: happen, not just on failure.
 _SUT_LOG = logging.getLogger("hamroh.sut")
 log = logging.getLogger(__name__)
+
+#: Every SUT's output ring, registered at launch. Cleared before each test so a
+#: failure dump carries only that test's lines — the bot is session-scoped and
+#: shared, so an un-cleared ring would bleed prior tests' output into the dump.
+_LIVE_RINGS: list[deque[str]] = []
+
+
+def reset_sut_logs() -> None:
+    """Clear every SUT output ring — called just before each test body runs."""
+    for ring in _LIVE_RINGS:
+        ring.clear()
+
+
+def dump_sut_logs() -> str:
+    """The current test's SUT output. Only the bot polling the token logs during
+    a test, so in practice exactly one ring has content; join whatever does."""
+    return "\n".join(tail for ring in _LIVE_RINGS if (tail := "".join(ring)).strip())
 
 
 @dataclass
@@ -208,6 +225,7 @@ def launch_sut(
         bufsize=1,
     )
     log: deque[str] = deque(maxlen=_LOG_RING)
+    _LIVE_RINGS.append(log)
     ready = threading.Event()
     threading.Thread(target=_drain, args=(proc, log, ready), daemon=True).start()
 

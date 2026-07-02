@@ -151,7 +151,11 @@ async def test_default_reminder_is_seeded(
 
     assert rows, f"no committed reminder row was seeded for {token!r}"
     row = rows[0]
-    assert row["status"] == "pending", f"unexpected status {row['status']!r}"
+    # An every-minute committed reminder can be claimed (pending -> processing)
+    # by the poll loop the instant it comes due, so a mid-flight read is valid.
+    assert row["status"] in ("pending", "processing"), (
+        f"unexpected status {row['status']!r}"
+    )
     assert row["auto_seed_key"] and row["auto_seed_key"].startswith("committed:"), (
         f"a committed reminder must carry a committed: seed key, "
         f"got {row['auto_seed_key']!r}"

@@ -33,8 +33,10 @@ from tests.e2e.support.data import new_sentinel
 from tests.e2e.support.harness import (
     REPO_ROOT,
     Sut,
+    dump_sut_logs,
     kill_stray_suts,
     launch_sut,
+    reset_sut_logs,
     stop_sut,
 )
 from tests.e2e.support.models import Conversation
@@ -350,12 +352,20 @@ def pytest_runtest_makereport(
     return report
 
 
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_call(item: pytest.Item) -> Generator[None, None, None]:
+    """Clear the SUT output rings right before the test body so a failure dump
+    carries only this test's lines — never the shared bot's earlier output."""
+    reset_sut_logs()
+    return (yield)
+
+
 @pytest.fixture(autouse=True)
 def _dump_sut_log_on_failure(
     request: pytest.FixtureRequest, hamroh_sut: Sut
 ) -> Iterator[None]:
-    """On test failure, print the bot's recent output for debugging."""
+    """On test failure, print the recent output of whichever SUT ran the test."""
     yield
     report = getattr(request.node, "rep_call", None)
     if report is not None and report.failed:
-        log.error("hamroh SUT log tail:\n%s", hamroh_sut.log_tail())
+        log.error("hamroh SUT log tail:\n%s", dump_sut_logs())

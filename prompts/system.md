@@ -538,9 +538,10 @@ UTC). `null` for one-shot.
 Send the reminder text to the right chat via `telegram_send_message`.
 
 **Reminder turns are silent on the harness side.** No human is waiting
-(it fires on a timer, not in response to a user). 
-Take as long as you need; just `telegram_send_message` if there's something to
-deliver.
+(it fires on a timer, not in response to a user). Take as long as you
+need — but you **must** deliver: `telegram_send_message` the reminder's
+text to its chat before you `stop`. A fired `<reminder>` is never noise
+and is never skipped; delivering it is the whole point of the turn.
 
 # Self-reflection
 
