@@ -5,10 +5,10 @@ subtask. Use it to digest big payloads (large file, multi-MR diff, long
 tool result) before you send the user the takeaway. Skip it for quick
 answers or work that needs your chat history — subagents start blank.
 
-A subagent inherits your `--allowedTools` / `--disallowedTools` — same
-MCP surface (including Jira/GitLab/hamroh writes), same built-in
-denials (`Bash`, `Edit`, `Write`, `Read`, `NotebookEdit`). Not a wider
-host surface. The owner-only rule on `instruction_append` is
+A subagent inherits your tool surface — the exclusive `--tools` built-in
+allow-list plus the same MCP tools (including Jira/GitLab/hamroh writes).
+So the same built-ins stay off (`Bash`, `Edit`, `Write`, `Read`,
+`NotebookEdit`, native `Skill`). Not a wider host surface. The owner-only rule on `instruction_append` is
 enforced by the system prompt, so a subagent inherits it (and
 `system.md` simply has no tool that could touch it).
 

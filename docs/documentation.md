@@ -55,13 +55,25 @@ The parts of hamroh:
 
 hamroh runs Claude inside a long-lived
 `claude --print --input-format stream-json` process and limits what Claude
-can do with the `--allowedTools` and `--disallowedTools` flags. By
-default the bot has only its own MCP tools (in `hamroh/tools/`,
-served by a local MCP server) plus `WebFetch` and `WebSearch`. The
-local server is registered with `alwaysLoad: true` so its tools are
-always in the model's context — never deferred behind Claude Code's
-ToolSearch (which made the bot "forget" `telegram_send_message` existed).
-Requires Claude Code ≥ 2.1.121.
+can do with three flags. `--tools` is an **exclusive** allow-list over
+Claude Code's built-in tools — anything not on it is unreachable by
+construction (not merely un-auto-approved), which is what keeps native
+`Skill`, stray built-ins, and other dead-ends off. `--allowedTools` /
+`--disallowedTools` then handle permission auto-approval and a
+belt-and-braces deny list. By default the bot has its own MCP tools (in
+`hamroh/tools/`, served by a local MCP server) plus a fixed built-in set:
+`WebFetch`, `WebSearch`, `StructuredOutput` (the turn-end tool), the
+MCP-discovery tools (`ToolSearch`, `List`/`ReadMcpResourceTool`,
+`WaitForMcpServers`), and the task-checklist tools (`TaskCreate`,
+`TaskGet`, `TaskList`, `TaskUpdate`). The local server is registered with
+`alwaysLoad: true` so its tools are always in the model's context — never
+deferred behind Claude Code's ToolSearch (which made the bot "forget"
+`telegram_send_message` existed). Requires Claude Code ≥ 2.1.121.
+
+The exact callable name of every reachable tool is also rendered into the
+system prompt as a `# Your tools` block (see `render_tools_index()` in
+`hamroh/cc_worker/spec.py`), so the model copies names instead of guessing
+them — hamroh tools `mcp__hamroh__`-prefixed, built-ins bare.
 
 The toggle source of truth is [`plugins.json`](../plugins.json) at
 the repo root:
@@ -949,18 +961,22 @@ is enforced by code, not by hope, and tested in
 `tests/test_security_invariants.py`.
 
 - **No shell, no edits, no writes outside `memories/`, no general reads
-  outside `memories/`, no subagents — by default.** The CC subprocess
-  is spawned with `--allowedTools mcp__hamroh,WebFetch,WebSearch`
-  (the always-on base) and a deny list covering every gated tool:
+  outside `memories/`, no subagents — by default.** The CC subprocess is
+  spawned with an **exclusive** `--tools` built-in allow-list (`WebFetch`,
+  `WebSearch`, `StructuredOutput`, the MCP-discovery tools, and the
+  task-checklist tools) so every un-listed built-in — `Bash`, `Edit`,
+  `Agent`, native `Skill`, … — is unreachable by construction, not just
+  un-auto-approved. `--allowedTools mcp__hamroh,WebFetch,WebSearch`
+  auto-approves the surface and a belt-and-braces
   `--disallowedTools Bash,PowerShell,Monitor,Edit,Write,Read,
-  NotebookEdit,Glob,Grep,LSP,Agent --strict-mcp-config`. Each gated
-  group flips on via `plugins.json` `tool_groups`; external-MCP tool
-  advertisement follows from `plugins.json` `mcps[]` entries whose
-  `${VAR}` references resolve. The forbidden flag
-  `--dangerously-skip-permissions` is *never* passed; both the argv
-  builder and the spawn-time assertion refuse it. See
-  [tools.md](tools.md) for the full per-tool list and the
-  `plugins.json` schema.
+  NotebookEdit,Glob,Grep,LSP,Agent --strict-mcp-config` backs it up. Each
+  gated group flips on via `plugins.json` `tool_groups` (which extends the
+  `--tools` list); external-MCP tool advertisement follows from
+  `plugins.json` `mcps[]` entries whose `${VAR}` references resolve. The
+  forbidden flag `--dangerously-skip-permissions` is *never* passed; both
+  the argv builder and the spawn-time assertion refuse it. See
+  [tools.md](tools.md) for the full per-tool list and the `plugins.json`
+  schema.
 - **Web access (read-only).** `WebFetch` and `WebSearch` are
   deliberately enabled so the agent can answer questions that need
   fresh information. This is a real trade-off — see the next bullet.

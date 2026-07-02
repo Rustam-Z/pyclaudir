@@ -62,6 +62,52 @@ BASE_ALLOWED_TOOLS: tuple[str, ...] = (
     "WebSearch",
 )
 
+#: The hamroh MCP namespace prefix. Claude Code registers every hamroh tool
+#: as ``mcp__hamroh__<name>``; that prefixed form is the exact callable string.
+#: Mirrors ``_MCP_PREFIX`` in ``event_handlers.py`` and ``tools/tools.py``.
+_MCP_PREFIX = "mcp__hamroh__"
+
+#: Built-in CC tools that are always reachable, regardless of any ``enable_*``
+#: flag. ``StructuredOutput`` is the turn-end tool the worker keys on (see
+#: ``event_handlers.py``); ``WebFetch``/``WebSearch`` give the bot fresh info;
+#: the MCP-discovery/resource tools (``ToolSearch`` finds deferred tools,
+#: ``List/ReadMcpResourceTool`` reach MCP *resources*, ``WaitForMcpServers``
+#: blocks on a still-connecting server) let the bot reach external MCP servers
+#: — harmless when none are configured (nothing to find), read-only otherwise.
+#: These seed ``--tools`` — an *exclusive* allowlist over the built-in set — so
+#: anything omitted (native ``Skill``, stray built-ins) is unreachable by
+#: construction, not merely un-auto-approved. See :func:`_builtin_tools`.
+#:
+#: Full-catalog audit (code.claude.com/docs/en/tools-reference) — everything
+#: else stays OFF on purpose; do NOT re-add a duplicate or dead-end tool:
+#:   - ``Skill``                     → hamroh uses ``mcp__hamroh__skill_read``
+#:   - ``Cron{Create,Delete,List}``  → hamroh has ``mcp__hamroh__reminder_*``
+#:   - ``PushNotification``/``SendUserFile`` → hamroh delivers over Telegram
+#:   - ``AskUserQuestion``           → interactive UI, dead in ``--print`` mode
+#:   - ``Artifact``/``RemoteTrigger``/``ScheduleWakeup``/``ShareOnboardingGuide``
+#:                                    → claude.ai / Team-plan / Remote-Control
+#:   - ``Enter/ExitPlanMode``, ``Enter/ExitWorktree``, ``Workflow``,
+#:     ``TodoWrite``, ``ReportFindings`` → dev-loop / deprecated / N/A here.
+BASE_BUILTIN_TOOLS: tuple[str, ...] = (
+    "WebFetch",
+    "WebSearch",
+    "StructuredOutput",
+    "ToolSearch",
+    "ListMcpResourcesTool",
+    "ReadMcpResourceTool",
+    "WaitForMcpServers",
+)
+
+#: Session task-checklist tools (no permission) — let the bot track multi-step
+#: turns (e.g. a research digest fanning out over many sources). Always on.
+#: ``TaskStop``/``TaskOutput`` are omitted: background-task control the
+#: fire-and-forget bot doesn't need (``TaskOutput`` is deprecated upstream).
+TASK_TOOLS: tuple[str, ...] = ("TaskCreate", "TaskGet", "TaskList", "TaskUpdate")
+
+#: Tools unlocked when ``enable_subagents`` is True. ``Agent`` spawns the
+#: subagent; ``SendMessage`` lets the parent resume/steer a background one.
+SUBAGENT_TOOLS: tuple[str, ...] = ("Agent", "SendMessage")
+
 #: Tools unlocked when ``enable_bash`` is True.
 BASH_TOOLS: tuple[str, ...] = ("Bash", "PowerShell", "Monitor")
 
@@ -131,12 +177,87 @@ class CcSpawnSpec:
     #: :func:`hamroh.skills_store.render_skills_index`; empty string means
     #: nothing is appended (no skills, or feature off).
     skills_index: str = ""
+    #: Exact names of the enabled hamroh MCP tools (bare, without the
+    #: ``mcp__hamroh__`` prefix), used to render the "# Your tools" inventory
+    #: baked into the system prompt. Populated at startup from the live tool
+    #: instances; empty means the inventory block is skipped.
+    hamroh_tool_names: tuple[str, ...] = ()
+
+
+def _builtin_tools(spec: CcSpawnSpec) -> tuple[str, ...]:
+    """The exclusive built-in allowlist handed to ``--tools``.
+
+    Always-on base (web + turn-end + MCP-discovery) + task tools, plus
+    whatever the ``enable_*`` flags unlock. Single source of truth reused by
+    the ``--tools`` argv flag and the prompt inventory
+    (:func:`render_tools_index`) so the two can never disagree."""
+    tools: list[str] = list(BASE_BUILTIN_TOOLS) + list(TASK_TOOLS)
+    if spec.enable_bash:
+        tools.extend(BASH_TOOLS)
+    if spec.enable_code:
+        tools.extend(CODE_TOOLS)
+    if spec.enable_subagents:
+        tools.extend(SUBAGENT_TOOLS)
+    return tuple(tools)
+
+
+def _external_server_prefixes(entries: tuple[str, ...]) -> tuple[str, ...]:
+    """Distinct ``mcp__<server>`` prefixes from external MCP allow entries.
+
+    Each entry is either a server-prefix shorthand (``mcp__github``) or an
+    exact tool name (``mcp__github__search``); both reduce to the same
+    ``mcp__<server>`` prefix for the inventory. hamroh's own namespace is
+    excluded — it has its own dedicated section."""
+    prefixes: list[str] = []
+    for entry in entries:
+        parts = entry.split("__")
+        if len(parts) < 2 or parts[0] != "mcp" or parts[1] == "hamroh":
+            continue
+        prefix = f"mcp__{parts[1]}"
+        if prefix not in prefixes:
+            prefixes.append(prefix)
+    return tuple(prefixes)
+
+
+def render_tools_index(spec: CcSpawnSpec) -> str:
+    """Render the authoritative "# Your tools" block for the system prompt.
+
+    Lists every reachable tool by its EXACT callable name across the three
+    namespaces (hamroh-prefixed, bare built-in, external-prefixed) so the
+    model copies names instead of reconstructing them — the root fix for
+    wrong-name tool calls. Built-ins come from :func:`_builtin_tools`, the
+    same source as ``--tools``, so the prompt never advertises a tool the
+    model cannot call. Returns "" when there are no hamroh tools to anchor."""
+    if not spec.hamroh_tool_names:
+        return ""
+    hamroh = "\n".join(f"- `{_MCP_PREFIX}{n}`" for n in sorted(spec.hamroh_tool_names))
+    builtins = "\n".join(f"- `{n}`" for n in _builtin_tools(spec))
+    block = (
+        "# Your tools\n\n"
+        "Call every tool by its EXACT name below — copy it, never rebuild it "
+        "from memory or from the short names used elsewhere in this prompt. "
+        "The `mcp__` prefix belongs ONLY to MCP tools; built-ins are bare.\n\n"
+        "## hamroh tools — call with the `mcp__hamroh__` prefix\n"
+        f"{hamroh}\n\n"
+        "## Built-in tools — bare name, NEVER prefix\n"
+        "(e.g. `WebFetch`, never `mcp__hamroh__WebFetch`)\n"
+        f"{builtins}\n"
+    )
+    external = _external_server_prefixes(spec.mcp_allowed_tools)
+    if external:
+        ext = "\n".join(f"- `{p}__<tool>`" for p in external)
+        block += (
+            "\n## External MCP tools — call with the `mcp__<server>__` prefix\n"
+            "Discover exact names via ToolSearch, then call them verbatim:\n"
+            f"{ext}\n"
+        )
+    return block
 
 
 def _compose_system_prompt(spec: CcSpawnSpec) -> str:
     """Assemble the system prompt: shipped base + project overlay +
-    runtime block + (optionally) the skills index + (optionally) the
-    subagent docs."""
+    runtime block + (optionally) the skills index + (optionally) the tools
+    inventory + (optionally) the subagent docs."""
     runtime_block = (
         "# Runtime\n\n"
         "You are running with:\n"
@@ -153,6 +274,9 @@ def _compose_system_prompt(spec: CcSpawnSpec) -> str:
     system_prompt += "\n\n" + runtime_block
     if spec.skills_index:
         system_prompt += "\n\n" + spec.skills_index
+    tools_index = render_tools_index(spec)
+    if tools_index:
+        system_prompt += "\n\n" + tools_index
     if spec.enable_subagents:
         if (
             spec.subagents_prompt_path is None
@@ -234,6 +358,8 @@ def _assemble_argv(spec: CcSpawnSpec, parts: _ArgvParts) -> list[str]:
         "--mcp-config",
         str(spec.mcp_config_path),
         "--strict-mcp-config",
+        "--tools",
+        ",".join(_builtin_tools(spec)),
         "--allowedTools",
         ",".join(parts.allowed_tools),
         "--disallowedTools",

@@ -70,6 +70,98 @@ def test_skills_index_absent_when_empty(spec: CcSpawnSpec) -> None:
     assert "# Available skills" not in composed
 
 
+def _tools_value(argv: list[str]) -> str:
+    """The comma-joined value passed to the exclusive ``--tools`` flag."""
+    return argv[argv.index("--tools") + 1]
+
+
+def test_tools_flag_is_exclusive_builtin_allowlist(spec: CcSpawnSpec) -> None:
+    """Default argv restricts built-ins to web + turn-end + MCP-discovery +
+    task-checklist — and nothing else. Native Skill / Agent / Cron are
+    unreachable by construction (not on the list), which is the root fix for
+    wrong-name calls like ``mcp__hamroh__WebFetch`` and dead-end ``Skill``."""
+    tools = _tools_value(build_argv(spec)).split(",")
+
+    for present in (
+        "WebFetch",
+        "WebSearch",
+        "StructuredOutput",
+        "ToolSearch",
+        "ListMcpResourcesTool",
+        "ReadMcpResourceTool",
+        "WaitForMcpServers",
+        "TaskCreate",
+        "TaskGet",
+        "TaskList",
+        "TaskUpdate",
+    ):
+        assert present in tools, f"{present} must be reachable by default"
+    for absent in (
+        "Skill",
+        "Agent",
+        "SendMessage",
+        "Bash",
+        "Read",
+        "Edit",
+        "CronCreate",
+        "AskUserQuestion",
+    ):
+        assert absent not in tools, f"{absent} must not be reachable by default"
+
+
+def test_tools_flag_unlocks_with_enable_flags(spec: CcSpawnSpec) -> None:
+    """enable_* flags widen the exclusive built-in list accordingly."""
+    from hamroh.cc_worker.spec import BASH_TOOLS, CODE_TOOLS, _builtin_tools
+
+    subagents = _builtin_tools(dataclasses.replace(spec, enable_subagents=True))
+    assert "Agent" in subagents
+    assert "SendMessage" in subagents  # companion for resuming background subagents
+
+    bash = _builtin_tools(dataclasses.replace(spec, enable_bash=True))
+    assert all(t in bash for t in BASH_TOOLS)
+
+    code = _builtin_tools(dataclasses.replace(spec, enable_code=True))
+    assert all(t in code for t in CODE_TOOLS)
+
+
+def test_tools_index_injected_with_all_three_namespaces(spec: CcSpawnSpec) -> None:
+    """The '# Your tools' block lists hamroh (prefixed), built-ins (bare),
+    and external server prefixes, and reaches the composed system prompt."""
+    from hamroh.cc_worker.spec import _compose_system_prompt
+
+    spec_full = dataclasses.replace(
+        spec,
+        hamroh_tool_names=("telegram_send_message", "skill_read"),
+        mcp_allowed_tools=("mcp__github__search",),
+    )
+    composed = _compose_system_prompt(spec_full)
+
+    assert "# Your tools" in composed
+    assert "`mcp__hamroh__telegram_send_message`" in composed
+    assert "`WebFetch`" in composed  # bare built-in
+    assert "never `mcp__hamroh__WebFetch`" in composed  # the inverse rule
+    assert "`mcp__github__<tool>`" in composed  # external prefix
+    assert any("# Your tools" in tok for tok in build_argv(spec_full))
+
+
+def test_tools_index_absent_without_hamroh_tools(spec: CcSpawnSpec) -> None:
+    """No hamroh tool names → no inventory block (back-compat)."""
+    from hamroh.cc_worker.spec import _compose_system_prompt
+
+    assert "# Your tools" not in _compose_system_prompt(spec)
+
+
+def test_tools_index_matches_tools_flag(spec: CcSpawnSpec) -> None:
+    """Single source of truth: every built-in the inventory advertises is
+    exactly what the --tools flag makes reachable — no drift possible."""
+    from hamroh.cc_worker.spec import _builtin_tools, render_tools_index
+
+    spec_full = dataclasses.replace(spec, hamroh_tool_names=("time_now",))
+    index = render_tools_index(spec_full)
+    for builtin in _builtin_tools(spec_full):
+        assert f"- `{builtin}`" in index
+
+
 def test_build_argv_includes_required_flags(spec: CcSpawnSpec) -> None:
     argv = build_argv(spec)
     assert "--print" in argv
@@ -81,6 +173,7 @@ def test_build_argv_includes_required_flags(spec: CcSpawnSpec) -> None:
     assert "--system-prompt" in argv
     assert "--mcp-config" in argv
     assert "--strict-mcp-config" in argv
+    assert "--tools" in argv
     assert "--allowedTools" in argv
     assert "--disallowedTools" in argv
     assert "--json-schema" in argv

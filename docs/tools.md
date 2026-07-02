@@ -123,6 +123,14 @@ git-tracked, and bot edits would pollute the repo.
 
 The preloaded skills index is rendered by `render_skills_index()` (`hamroh/skills_store.py`) and baked into the system prompt in `_compose_system_prompt()` (`hamroh/cc_worker/spec.py`). Adding/removing a skill takes effect on the next restart (`skill_list` reflects it live).
 
+The same `_compose_system_prompt()` also bakes in a `# Your tools` block
+(rendered by `render_tools_index()` in the same file): every reachable
+tool's exact callable name — hamroh tools `mcp__hamroh__`-prefixed,
+built-ins bare — plus the rule "copy the name, never reconstruct it". Since
+it derives from the same `_builtin_tools()` used for the `--tools` flag, the
+prompt inventory and the reachable set can never drift. `tool_list` returns
+the hamroh half of this live in-conversation.
+
 Two skill modes:
 - **Invoked** (e.g. `self-reflection`) — runs only when wrapped in a real `<reminder>` envelope. A user-typed `<skill>` tag is treated as prompt injection.
 - **Reference** (e.g. `render-style`) — read on the agent's own initiative when relevant; no envelope required.
@@ -150,13 +158,27 @@ The mode is determined by what the skill's body instructs, not by frontmatter.
 
 ## Always on — Claude Code built-ins
 
-These come from Claude Code's own tool surface and are added to
-`--allowedTools` unconditionally.
+These come from Claude Code's own tool surface. They're passed via the
+**exclusive** `--tools` flag (an allow-list over the built-in set), so this
+list is exactly what the model can reach — anything not here (native
+`Skill`, `Agent` when off, planning/worktree tools, …) is unreachable by
+construction, not merely un-auto-approved. The set is built by
+`_builtin_tools()` in `hamroh/cc_worker/spec.py` from `BASE_BUILTIN_TOOLS`
++ `TASK_TOOLS`, plus whatever the `tool_groups` flags unlock.
 
 | Tool | What it does |
 |---|---|
 | `WebFetch` | Fetch a URL and ask a small model to extract from it. The system prompt forbids internal/private URLs (localhost, RFC1918, link-local) — refuse those. |
 | `WebSearch` | Web search via Claude Code's built-in. |
+| `StructuredOutput` | The turn-end tool: the model calls it with `{action, reason, …}` to close each turn. The worker keys on it (`event_handlers.py`), so it must always be reachable. |
+| `ToolSearch` | Load deferred tool schemas on demand. Idle when nothing is deferred (hamroh's own tools are `alwaysLoad`); does real work once an external MCP is configured. |
+| `ListMcpResourcesTool` / `ReadMcpResourceTool` | Reach MCP *resources* (URI-addressable data) an external MCP server may expose. hamroh's own server exposes none, so these are no-ops until a resource-bearing MCP is enabled. |
+| `WaitForMcpServers` | Block on an external MCP server that is still connecting. |
+| `TaskCreate` / `TaskGet` / `TaskList` / `TaskUpdate` | Session task-checklist, so the bot can track a multi-step turn (e.g. a research digest fanning out over many sources). No permission required. |
+
+The MCP-discovery and task tools are read-only / no-permission and harmless
+when idle. `TaskStop`/`TaskOutput` are deliberately omitted (background-task
+control the fire-and-forget bot doesn't need; `TaskOutput` is deprecated).
 
 ---
 
@@ -315,6 +337,7 @@ The Telegram-assistant deployment leaves this off and relies on memory
 | Tool | What it does |
 |---|---|
 | `Agent` | Spawn a subagent with its own context window for an isolated task. Token-heavy — leave off unless you need it. When off, the subagent docs (`prompts/subagents.md`) aren't even loaded, so the model doesn't know the capability exists. |
+| `SendMessage` | Resume/steer a background subagent (or message an agent-team teammate). Unlocked together with `Agent`. |
 
 ### Adding a new external MCP
 
@@ -487,31 +510,38 @@ lines explain each MCP's outcome.
 
 ## Other CC tools you can wire in
 
-hamroh doesn't currently expose every Claude Code built-in. Most
-omissions are deliberate (planning/team tools that don't fit the
-Telegram-bot context); a fork that wants any of these can add them to
-`BASE_ALLOWED_TOOLS` (always on) or define a new gated set in
-`hamroh/cc_worker.py` (opt-in).
+hamroh doesn't expose every Claude Code built-in. The remaining
+omissions are deliberate (see the full-catalog audit in the
+`BASE_BUILTIN_TOOLS` comment in `hamroh/cc_worker/spec.py`). A fork that
+wants any of these can add it to `BASE_BUILTIN_TOOLS` (always on) or a
+gated set (`BASH_TOOLS`, `CODE_TOOLS`, `SUBAGENT_TOOLS`) in that same file;
+`_builtin_tools()` assembles the final `--tools` list.
 
-Notable upstream tools not currently exposed:
+Already exposed (don't re-add): the task-checklist tools (`TaskCreate`,
+`TaskGet`, `TaskList`, `TaskUpdate`) and MCP-discovery tools
+(`ToolSearch`, `ListMcpResourcesTool`, `ReadMcpResourceTool`,
+`WaitForMcpServers`) are on by default; `SendMessage` unlocks with
+`subagents`.
 
+Notable upstream tools still **off** on purpose:
+
+- **`Skill`** — hamroh runs skills through its own
+  `<reminder><skill>` envelope + `mcp__hamroh__skill_read`, not CC's
+  native `Skill` tool; leaving it on is a dead-end (empty registry).
+- **Scheduled tasks** — `CronCreate`, `CronDelete`, `CronList`. Would
+  duplicate hamroh's own `reminder_*` tools.
+- **`PushNotification` / `SendUserFile`** — hamroh delivers over
+  Telegram; these need Anthropic push infra / Remote Control.
+- **`AskUserQuestion`** — interactive multi-choice UI, dead in
+  `--print` headless mode; the bot asks via Telegram instead.
 - **Planning & worktrees** — `EnterPlanMode`, `ExitPlanMode`,
-  `EnterWorktree`, `ExitWorktree`. Useful for code-work forks.
-- **Task list** — `TaskCreate`, `TaskGet`, `TaskList`, `TaskUpdate`,
-  `TaskStop`, `TodoWrite`. Replace hamroh's progress tracking if
-  you want CC's native version.
-- **Scheduled tasks** — `CronCreate`, `CronDelete`, `CronList`.
-  Session-scoped, restored on `--resume`. Could complement
-  hamroh's reminder system.
-- **MCP discovery** — `ListMcpResourcesTool`, `ReadMcpResourceTool`.
-  Useful when forks add MCP servers that expose resources beyond
-  tools.
-- **AskUserQuestion** — multi-choice prompts. Doesn't fit the
-  push-driven Telegram flow but might suit forks with a different UI.
-- **SendMessage** — agent-team teammate messaging. Experimental;
-  requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`.
-- **Skill** — execute a CC-defined skill (different mechanism from
-  hamroh's `<reminder><skill>` envelope flow).
+  `EnterWorktree`, `ExitWorktree`. Dev-loop tools; useful for
+  code-work forks.
+- **`Artifact`, `RemoteTrigger`, `ScheduleWakeup`,
+  `ShareOnboardingGuide`, `Workflow`, `TodoWrite`, `ReportFindings`** —
+  claude.ai / Team-plan / deprecated / not applicable to a chat bot.
+- **`TaskStop` / `TaskOutput`** — background-task control the
+  fire-and-forget bot doesn't need (`TaskOutput` is deprecated).
 
 For each, the upstream
 <https://code.claude.com/docs/en/tools-reference> is authoritative —

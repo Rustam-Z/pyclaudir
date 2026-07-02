@@ -479,6 +479,7 @@ def _build_cc_spec(
         enable_code=bool(plugins.tool_groups.get("code", False)),
         mcp_allowed_tools=tuple(mcp_allowed_tools),
         skills_index=render_skills_index(skills),
+        hamroh_tool_names=tuple(tool.name for tool in mcp.tools),
     )
 
 
